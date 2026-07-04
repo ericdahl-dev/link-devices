@@ -1,5 +1,5 @@
-# Task prefixes in use: ESP (emulator), LNK (X32Link), MCK (MidiClock), TSV (ToastSaver-HW),
-#                       FDR (X32FaderDisp), MUT (X32SafeMutes), ITT (MidiOscIttt)
+# Task prefixes in use: LNK (X32Link), MCK (MidiClock, legacy), ESP (emulator),
+#                       ARC (firmware architecture), P4 (ESP32-P4 hub tier)
 tasksDir: tasks
 idPrefix: ESP
 zeroPaddedIds: 3
