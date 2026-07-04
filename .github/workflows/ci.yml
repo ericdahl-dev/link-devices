@@ -1,0 +1,57 @@
+name: CI
+
+# Host-side Unity tests (pure logic, no hardware) + an arduino-cli compile of the
+# X32Link firmware (headless + Waveshare touch variants) so a change that passes
+# host tests but breaks the real Arduino build — missing include, Arduino-only
+# API, flash overflow — is caught before merge.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  host-tests:
+    name: Host logic tests (Unity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run host tests
+        run: make -C test          # Unity is vendored in lib/unity — no submodule step
+
+  firmware-compile:
+    name: Firmware compile (X32Link)
+    runs-on: ubuntu-latest
+    env:
+      FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache arduino-cli data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino
+          key: arduino-esp32-${{ runner.os }}-v1
+
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      - name: Install ESP32 core + LovyanGFX
+        run: |
+          # --overwrite: idempotent when a cached ~/.arduino15 already has a config
+          arduino-cli config init --overwrite --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install LovyanGFX
+
+      - name: Compile X32Link (headless)
+        run: arduino-cli compile --fqbn "$FQBN" X32Link
+
+      - name: Compile X32Link (Waveshare touch board)
+        run: |
+          echo '-DBOARD_WAVESHARE_S3_TOUCH_LCD_147' > X32Link/build_opt.h
+          arduino-cli compile --fqbn "$FQBN" X32Link
+          git checkout -- X32Link/build_opt.h
