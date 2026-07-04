@@ -1,7 +1,6 @@
 CC      = gcc
 CFLAGS  = -Wall -Wextra -g \
            -I../X32Link \
-           -I../X32FaderDisp \
            -I../lib/unity/src
 
 UNITY   = ../lib/unity/src/unity.c
@@ -16,7 +15,6 @@ OSC     = ../X32Link/osc_out.c
 MIDICALC = ../X32MidiClock/midi_bpm_calc.c
 PUB     = ../X32Link/bpm_publisher.c
 OSCIN   = ../X32Link/osc_in.c
-FADERDB = ../X32FaderDisp/fader_db.c
 STATUSJSON = ../X32Link/web_status_json.c
 AXS     = ../X32Link/axs5106l.c
 TOUCHUI = ../X32Link/touch_ui.c
@@ -29,7 +27,7 @@ SESSION = ../X32Link/link_measurement_session.c
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_fader_db test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -41,7 +39,6 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_midi_bpm_calc
 	./test_bpm_publisher
 	./test_osc_in
-	./test_fader_db
 	./test_web_status_json
 	./test_touch_ui
 	./test_tempo_snapshot
@@ -85,9 +82,6 @@ test_bpm_publisher: test_bpm_publisher.c $(PUB) $(BAR) $(UNITY)
 test_osc_in: test_osc_in.c $(OSCIN) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@
 
-test_fader_db: test_fader_db.c $(FADERDB) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
-
 test_web_status_json: test_web_status_json.c $(STATUSJSON) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@
 
@@ -116,4 +110,4 @@ test_link_measurement_session: test_link_measurement_session.c $(SESSION) $(PHAS
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 clean:
-	rm -f test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_fader_db test_web_status_json test_axs5106l test_touch_ui test_tempo_snapshot test_bar
+	rm -f test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_axs5106l test_touch_ui test_tempo_snapshot test_bar
