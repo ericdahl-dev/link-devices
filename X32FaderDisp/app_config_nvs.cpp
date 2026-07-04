@@ -1,1 +1,0 @@
-../X32Link/app_config_nvs.cpp
