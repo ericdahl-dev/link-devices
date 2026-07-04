@@ -1,5 +1,0 @@
-# compiled host-test binaries (no extension)
-test_*
-!test_*.c
-!*.sh
-!Makefile
