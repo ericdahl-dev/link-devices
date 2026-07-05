@@ -39,10 +39,10 @@
 #include "link_measurement.h"   /* GhostXForm + host->ghost map (P4-009) */
 #include "link_phase.h"         /* link_phase_beats_now (session phase) */
 #include "link_measure_io.h"    /* unicast ping/pong measurement client */
+#include "clock_output.h"       /* per-output division + phase-nudge (P4-010) */
 
 static const char *TAG = "p4hub";
 
-#define MIDI_PPQN       24
 #define MAX_BURST       96   /* re-prime instead of flooding past this backlog */
 #define METRO_QUANTUM   4.0  /* beats/bar for the bar-1 accent — Link timeline
                               * carries no meter, so assume 4/4 (P4-006) */
@@ -53,7 +53,8 @@ static P4HubConfig g_cfg;   /* loaded from NVS in app_main; edited via the web U
 static void clock_out_task(void *arg)
 {
     BeatClock   bc;   beat_clock_reset(&bc);
-    ClockTicker ct;   clock_ticker_reset(&ct);
+    ClockTicker cts[P4HUB_CLOCK_OUTPUTS];   /* one grid per output (P4-010) */
+    for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
     Metronome   mt;   metronome_reset(&mt);
     Transport   tr;   transport_reset(&tr);
     bool        running = false;
@@ -93,31 +94,40 @@ static void clock_out_task(void *arg)
              * dumping a catch-up burst. On dropping back to free-run, restart
              * beat_clock too. */
             if (locked != phase_locked) {
-                clock_ticker_reset(&ct);
+                for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
                 metronome_reset(&mt);
                 if (!locked) beat_clock_reset(&bc);
                 phase_locked = locked;
             }
 
             if (usb_midi_host_ready() && g_cfg.clock_out_enable) {
-                int due = clock_ticker_ticks_due(&ct, beats, MIDI_PPQN, MAX_BURST);
-                for (int i = 0; i < due; i++) {
-                    uint8_t pkt[4];
-                    usb_midi_pack_single(g_cfg.midi_cable, 0xF8, pkt);   /* timing clock */
-                    usb_midi_host_send(pkt, 4);
-                    pulses++;
+                /* Fan the shared beat out to each enabled output at its own
+                 * division (ppqn) + phase nudge, onto its own cable (P4-010). */
+                for (int o = 0; o < P4HUB_CLOCK_OUTPUTS; o++) {
+                    const ClockOutputCfg* oc = &g_cfg.clock[o];
+                    if (!oc->enable) continue;
+                    int due = clock_output_due(&cts[o], beats, oc->ppqn, oc->phase_mbeats, MAX_BURST);
+                    for (int i = 0; i < due; i++) {
+                        uint8_t pkt[4];
+                        usb_midi_pack_single(oc->cable, 0xF8, pkt);   /* timing clock */
+                        usb_midi_host_send(pkt, 4);
+                        pulses++;
+                    }
                 }
 
-                /* Transport: MIDI Start/Stop on the Link play-state edge (P4-008).
-                 * Primes on the first real StartStopState, so joining mid-play does
-                 * not fire a spurious Start. */
+                /* Transport: MIDI Start/Stop on the Link play-state edge (P4-008),
+                 * fanned to every enabled output's cable. Primes on the first real
+                 * StartStopState, so joining mid-play does not fire a spurious Start. */
                 TransportAction ta = transport_update(&tr, link_proto_start_stop_seen(),
                                                       link_proto_playing());
                 if (ta != TRANSPORT_NONE) {
                     uint8_t status = (ta == TRANSPORT_START) ? 0xFA : 0xFC;
-                    uint8_t pkt[4];
-                    usb_midi_pack_single(g_cfg.midi_cable, status, pkt);
-                    usb_midi_host_send(pkt, 4);
+                    for (int o = 0; o < P4HUB_CLOCK_OUTPUTS; o++) {
+                        if (!g_cfg.clock[o].enable) continue;
+                        uint8_t pkt[4];
+                        usb_midi_pack_single(g_cfg.clock[o].cable, status, pkt);
+                        usb_midi_host_send(pkt, 4);
+                    }
                     ESP_LOGI(TAG, "transport %s", ta == TRANSPORT_START ? "START" : "STOP");
                 }
             }
@@ -136,7 +146,7 @@ static void clock_out_task(void *arg)
         } else if (running) {
             /* Session went away — reset so we re-prime cleanly. */
             beat_clock_reset(&bc);
-            clock_ticker_reset(&ct);
+            for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
             metronome_reset(&mt);
             transport_reset(&tr);
             running = false;
