@@ -18,6 +18,7 @@
 
 #include "wifi_link.h"
 #include "usb_midi_host.h"
+#include "p4hub_web.h"
 #include "beat_clock.h"
 #include "clock_ticker.h"
 #include "usb_midi_pack.h"
@@ -83,5 +84,6 @@ void app_main(void)
     ESP_LOGI(TAG, "P4Hub — Link tempo -> USB-MIDI host clock out (P4-005)");
     usb_midi_host_start();
     wifi_link_start();
+    p4hub_web_start();
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
 }
