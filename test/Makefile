@@ -24,10 +24,12 @@ MIDIOUT = ../X32Link/midi_clock_out.c
 CLOCKTICK = ../X32Link/clock_ticker.c
 BEATSYNTH = ../X32Link/beat_synth.c
 SESSION = ../X32Link/link_measurement_session.c
+USBMIDIPACK = ../X32Link/usb_midi_pack.c
+BEATCLOCK = ../X32Link/beat_clock.c
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_usb_midi_pack test_beat_clock
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -47,6 +49,8 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_clock_ticker
 	./test_beat_synth
 	./test_link_measurement_session
+	./test_usb_midi_pack
+	./test_beat_clock
 	./check_docs.sh
 
 test_bpm_tracker: test_bpm_tracker.c $(TRACKER) $(UNITY)
@@ -107,6 +111,12 @@ test_beat_synth: test_beat_synth.c $(BEATSYNTH) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 test_link_measurement_session: test_link_measurement_session.c $(SESSION) $(PHASE) $(PROTO) $(UNITY)
+	$(CC) $(CFLAGS) $^ -o $@ -lm
+
+test_usb_midi_pack: test_usb_midi_pack.c $(USBMIDIPACK) $(UNITY)
+	$(CC) $(CFLAGS) $^ -o $@
+
+test_beat_clock: test_beat_clock.c $(BEATCLOCK) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 clean:

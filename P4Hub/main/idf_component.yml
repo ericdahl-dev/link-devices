@@ -1,0 +1,5 @@
+dependencies:
+  # WiFi on the P4 is provided by the onboard ESP32-C6 over the ESP-Hosted stack.
+  espressif/esp_hosted: "~2"
+  espressif/esp_wifi_remote:
+    version: ">=0.10,<2.0"
