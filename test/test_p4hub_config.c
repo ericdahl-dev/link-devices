@@ -9,11 +9,20 @@ void tearDown(void) {}
 
 void test_defaults(void) {
     TEST_ASSERT_EQUAL_INT(1, c.clock_out_enable);
-    TEST_ASSERT_EQUAL_INT(0, c.midi_cable);
     TEST_ASSERT_EQUAL_INT(0, c.metronome_enable);   // audible feature: default off
     TEST_ASSERT_EQUAL_INT(1, c.metronome_accent);   // accent bar-1 when enabled
     TEST_ASSERT_EQUAL_STRING("", c.wifi_ssid);
     TEST_ASSERT_TRUE(p4hub_config_valid(&c));   // empty ssid is valid (AP mode)
+}
+
+// P4-010: output 0 is on by default (24-PPQN MIDI clock on cable 0), rest off.
+void test_output_defaults(void) {
+    TEST_ASSERT_EQUAL_INT(1,  c.clock[0].enable);
+    TEST_ASSERT_EQUAL_INT(0,  c.clock[0].cable);
+    TEST_ASSERT_EQUAL_INT(24, c.clock[0].ppqn);
+    TEST_ASSERT_EQUAL_INT(0,  c.clock[0].phase_mbeats);
+    TEST_ASSERT_EQUAL_INT(0,  c.clock[1].enable);
+    TEST_ASSERT_EQUAL_INT(0,  c.clock[3].enable);
 }
 
 void test_set_ssid_and_pass(void) {
@@ -30,11 +39,30 @@ void test_blank_pass_keeps_current(void) {
     TEST_ASSERT_EQUAL_STRING("keepme", c.wifi_pass);
 }
 
-void test_cable_range(void) {
-    TEST_ASSERT_TRUE(p4hub_config_set(&c, "midi_cable", "3"));
-    TEST_ASSERT_EQUAL_INT(3, c.midi_cable);
-    TEST_ASSERT_FALSE(p4hub_config_set(&c, "midi_cable", "4"));  // out of range
-    TEST_ASSERT_EQUAL_INT(3, c.midi_cable);                     // unchanged
+// Per-output indexed form fields: clk<N>_en / _cable / _ppqn / _phase.
+void test_output_set_and_ranges(void) {
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "clk1_en", "1"));
+    TEST_ASSERT_EQUAL_INT(1, c.clock[1].enable);
+
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "clk1_cable", "3"));
+    TEST_ASSERT_EQUAL_INT(3, c.clock[1].cable);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "clk1_cable", "4"));   // 0..3
+    TEST_ASSERT_EQUAL_INT(3, c.clock[1].cable);                   // unchanged
+
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "clk0_ppqn", "12"));    // 1/8 division
+    TEST_ASSERT_EQUAL_INT(12, c.clock[0].ppqn);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "clk0_ppqn", "0"));    // 1..48
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "clk0_ppqn", "49"));
+
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "clk2_phase", "-50"));  // nudge earlier
+    TEST_ASSERT_EQUAL_INT(-50, c.clock[2].phase_mbeats);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "clk2_phase", "300")); // ±250
+}
+
+// Out-of-range index and unknown per-output field are rejected.
+void test_output_bad_index_and_field(void) {
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "clk4_en", "1"));      // only 0..3
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "clk0_bogus", "1"));
 }
 
 void test_clock_out_toggle(void) {
@@ -66,9 +94,11 @@ void test_unknown_key(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_defaults);
+    RUN_TEST(test_output_defaults);
     RUN_TEST(test_set_ssid_and_pass);
     RUN_TEST(test_blank_pass_keeps_current);
-    RUN_TEST(test_cable_range);
+    RUN_TEST(test_output_set_and_ranges);
+    RUN_TEST(test_output_bad_index_and_field);
     RUN_TEST(test_clock_out_toggle);
     RUN_TEST(test_metronome_toggle);
     RUN_TEST(test_metronome_accent_toggle);
