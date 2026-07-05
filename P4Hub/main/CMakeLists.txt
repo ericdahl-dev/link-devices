@@ -9,6 +9,8 @@ idf_component_register(
          "usb_midi_host.c"
          "p4hub_web.cpp"
          "p4hub_status.c"
+         "p4hub_config.c"
+         "p4hub_config_nvs.c"
          "${X32LINK_DIR}/clock_ticker.c"
          "${X32LINK_DIR}/beat_clock.c"
          "${X32LINK_DIR}/usb_midi_pack.c"

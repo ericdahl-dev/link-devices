@@ -8,9 +8,14 @@
 extern "C" {
 #endif
 
-// Bring up WiFi station and, once connected, join the Link multicast group and
-// start feeding datagrams to the parser. Non-blocking beyond WiFi association.
-void wifi_link_start(void);
+// Bring up WiFi. With a non-empty ssid: join as a station and, once connected,
+// join the Link multicast group and feed the parser. With an empty ssid: start a
+// SoftAP ("P4Hub-Setup") so the web UI is reachable to enter credentials
+// (first-boot config mode, no Link). Non-blocking beyond association.
+void wifi_link_start(const char* ssid, const char* pass);
+
+// True when running in SoftAP config mode (no station credentials).
+bool wifi_link_ap_mode(void);
 
 // Current Link session timeline; false if no valid session yet. Wraps the pure
 // link_proto_timeline().
