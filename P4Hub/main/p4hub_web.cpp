@@ -112,6 +112,10 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="fld"><span class="pre">PASS</span><input name="wifi_pass" type="password" placeholder="keep current"></div></div>
 <div class="frow"><span class="cap">MIDI Clock Out</span>
 <label class="sw"><input type="checkbox" name="clock_out" value="1" %MCKCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
+<div class="frow"><span class="cap">Metronome (Speaker)</span>
+<label class="sw"><input type="checkbox" name="metronome" value="1" %MTOCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
+<div class="frow"><span class="cap">Accent Bar 1</span>
+<label class="sw"><input type="checkbox" name="metro_accent" value="1" %MTACHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="frow"><span class="cap">USB-MIDI Cable</span>
 <div class="fld"><span class="pre">PORT</span><select name="midi_cable" id="cable">
 <option value="0">USB A</option><option value="1">USB B</option><option value="2">USB C</option><option value="3">USB D</option></select></div></div>
@@ -146,6 +150,8 @@ static std::string build_page()
     std::string h(PAGE);
     subst(h, "%SSID%",   s_cfg ? std::string(s_cfg->wifi_ssid) : "");
     subst(h, "%MCKCHK%", (s_cfg && s_cfg->clock_out_enable) ? "checked" : "");
+    subst(h, "%MTOCHK%", (s_cfg && s_cfg->metronome_enable) ? "checked" : "");
+    subst(h, "%MTACHK%", (s_cfg && s_cfg->metronome_accent) ? "checked" : "");
     subst(h, "%CABLE%",  std::to_string(s_cfg ? s_cfg->midi_cable : 0));
     return h;
 }
@@ -212,7 +218,7 @@ static esp_err_t save_handler(httpd_req_t *req)
     // clock_out checkbox was present: an unchecked box is simply absent from the
     // POST body, so its absence means "off". (Can't strstr(body) after this loop —
     // strtok_r has already split body at the '&' separators.)
-    bool saw_clock_out = false;
+    bool saw_clock_out = false, saw_metronome = false, saw_metro_accent = false;
     char *save = nullptr;
     for (char *pair = strtok_r(body, "&", &save); pair; pair = strtok_r(nullptr, "&", &save)) {
         char *eq = strchr(pair, '=');
@@ -220,10 +226,15 @@ static esp_err_t save_handler(httpd_req_t *req)
         *eq = '\0';
         char *key = pair, *val = eq + 1;
         url_decode(key); url_decode(val);
-        if (strcmp(key, "clock_out") == 0) saw_clock_out = true;
+        if (strcmp(key, "clock_out") == 0)    saw_clock_out = true;
+        if (strcmp(key, "metronome") == 0)    saw_metronome = true;
+        if (strcmp(key, "metro_accent") == 0) saw_metro_accent = true;
         p4hub_config_set(&cfg, key, val);
     }
-    if (!saw_clock_out) cfg.clock_out_enable = 0;
+    // An unchecked checkbox is simply absent from the POST body -> "off".
+    if (!saw_clock_out)    cfg.clock_out_enable = 0;
+    if (!saw_metronome)    cfg.metronome_enable = 0;
+    if (!saw_metro_accent) cfg.metronome_accent = 0;
 
     if (!p4hub_config_valid(&cfg)) return send_result(req, "Invalid Config", "Check the values and go back.");
     *s_cfg = cfg;

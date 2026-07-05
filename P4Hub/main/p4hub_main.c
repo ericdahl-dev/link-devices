@@ -23,13 +23,18 @@
 #include "p4hub_config_nvs.h"
 #include "beat_clock.h"
 #include "clock_ticker.h"
+#include "metronome.h"
+#include "metronome_audio.h"
 #include "usb_midi_pack.h"
 #include "link_protocol.h"
 
 static const char *TAG = "p4hub";
 
-#define MIDI_PPQN   24
-#define MAX_BURST   96   /* re-prime instead of flooding past this backlog */
+#define MIDI_PPQN       24
+#define MAX_BURST       96   /* re-prime instead of flooding past this backlog */
+#define METRO_QUANTUM   4.0  /* beats/bar for the bar-1 accent — Link timeline
+                              * carries no meter, so assume 4/4 (P4-006) */
+#define METRO_BURST     8    /* re-prime the click grid past this beat backlog */
 
 static P4HubConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
 
@@ -37,28 +42,48 @@ static void clock_out_task(void *arg)
 {
     BeatClock   bc;   beat_clock_reset(&bc);
     ClockTicker ct;   clock_ticker_reset(&ct);
+    Metronome   mt;   metronome_reset(&mt);
     bool        running = false;
     uint32_t    pulses = 0;
+    uint32_t    clicks = 0;
     int64_t     last_log = 0;
 
     while (1) {
         LinkTimeline tl;
         bool have_session = wifi_link_timeline(&tl) && tl.micros_per_beat > 0;
 
-        if (have_session && usb_midi_host_ready() && g_cfg.clock_out_enable) {
+        if (have_session) {
+            /* One shared beat position drives both consumers. Advance it whenever
+             * there's a session — the metronome is self-contained and clicks even
+             * with no USB-MIDI device attached. */
             double beats = beat_clock_advance(&bc, esp_timer_get_time(), tl.micros_per_beat);
-            int due = clock_ticker_ticks_due(&ct, beats, MIDI_PPQN, MAX_BURST);
-            for (int i = 0; i < due; i++) {
-                uint8_t pkt[4];
-                usb_midi_pack_single(g_cfg.midi_cable, 0xF8, pkt);   /* timing clock */
-                usb_midi_host_send(pkt, 4);
-                pulses++;
+
+            if (usb_midi_host_ready() && g_cfg.clock_out_enable) {
+                int due = clock_ticker_ticks_due(&ct, beats, MIDI_PPQN, MAX_BURST);
+                for (int i = 0; i < due; i++) {
+                    uint8_t pkt[4];
+                    usb_midi_pack_single(g_cfg.midi_cable, 0xF8, pkt);   /* timing clock */
+                    usb_midi_host_send(pkt, 4);
+                    pulses++;
+                }
+            }
+
+            if (g_cfg.metronome_enable) {
+                MetroClick mc = metronome_update(&mt, beats, METRO_QUANTUM, METRO_BURST);
+                if (mc != METRO_NONE) {
+                    bool accent = (mc == METRO_ACCENT) && g_cfg.metronome_accent;
+                    metronome_audio_click(accent);
+                    clicks++;
+                    ESP_LOGI(TAG, "metronome %-6s beat %.2f  clicks %lu",
+                             accent ? "ACCENT" : "click", beats, (unsigned long)clicks);
+                }
             }
             running = true;
         } else if (running) {
-            /* Session or device went away — reset so we re-prime cleanly. */
+            /* Session went away — reset so we re-prime cleanly. */
             beat_clock_reset(&bc);
             clock_ticker_reset(&ct);
+            metronome_reset(&mt);
             running = false;
         }
 
@@ -88,5 +113,6 @@ void app_main(void)
     usb_midi_host_start();
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
     p4hub_web_start(&g_cfg);
+    if (g_cfg.metronome_enable) metronome_audio_start();   /* codec/I2S only when used */
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
 }
