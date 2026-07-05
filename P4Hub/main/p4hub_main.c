@@ -146,11 +146,11 @@ static void clock_out_task(void *arg)
         int64_t now = esp_timer_get_time();
         if (now - last_log >= 1000000) {
             last_log = now;
-            ESP_LOGI(TAG, "link peers %d  bpm %.2f  phase %s  usb %s  clock TX %lu  RX(loopback) %lu",
+            ESP_LOGI(TAG, "link peers %d  bpm %.2f  phase %s  usb %s  clock TX %lu  play %d",
                      wifi_link_peers(), link_proto_bpm(),
                      link_measurement_current_xform().valid ? "locked" : "free",
                      usb_midi_host_ready() ? "ready" : "-", pulses,
-                     usb_midi_host_rx_clocks());
+                     link_proto_playing());
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
