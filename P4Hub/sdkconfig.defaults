@@ -11,5 +11,11 @@ CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 # Larger USB control transfers for MIDI-class config descriptors (P4-003).
 CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE=1024
 
+# 1 kHz tick so the "1 ms" clock_out loop's vTaskDelay(pdMS_TO_TICKS(1)) is a real
+# 1-tick yield. At the ESP-IDF default 100 Hz, pdMS_TO_TICKS(1) truncates to 0 →
+# the priority-6 clock_out task busy-spins, starving IDLE0 (task-WDT) and adding
+# up to 10 ms of MIDI-clock jitter. 1 kHz gives ≤1 ms clock granularity (P4-006).
+CONFIG_FREERTOS_HZ=1000
+
 # WiFi credentials (CONFIG_P4HUB_WIFI_*) are intentionally NOT set here — set them
 # locally (menuconfig or a gitignored sdkconfig); never commit credentials.

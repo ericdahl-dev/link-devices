@@ -10,6 +10,8 @@ void tearDown(void) {}
 void test_defaults(void) {
     TEST_ASSERT_EQUAL_INT(1, c.clock_out_enable);
     TEST_ASSERT_EQUAL_INT(0, c.midi_cable);
+    TEST_ASSERT_EQUAL_INT(0, c.metronome_enable);   // audible feature: default off
+    TEST_ASSERT_EQUAL_INT(1, c.metronome_accent);   // accent bar-1 when enabled
     TEST_ASSERT_EQUAL_STRING("", c.wifi_ssid);
     TEST_ASSERT_TRUE(p4hub_config_valid(&c));   // empty ssid is valid (AP mode)
 }
@@ -41,6 +43,22 @@ void test_clock_out_toggle(void) {
     TEST_ASSERT_FALSE(p4hub_config_set(&c, "clock_out", "2"));   // only 0/1
 }
 
+void test_metronome_toggle(void) {
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "metronome", "1"));
+    TEST_ASSERT_EQUAL_INT(1, c.metronome_enable);
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "metronome", "0"));
+    TEST_ASSERT_EQUAL_INT(0, c.metronome_enable);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "metronome", "2"));   // only 0/1
+}
+
+void test_metronome_accent_toggle(void) {
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "metro_accent", "0"));
+    TEST_ASSERT_EQUAL_INT(0, c.metronome_accent);
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "metro_accent", "1"));
+    TEST_ASSERT_EQUAL_INT(1, c.metronome_accent);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "metro_accent", "9")); // only 0/1
+}
+
 void test_unknown_key(void) {
     TEST_ASSERT_FALSE(p4hub_config_set(&c, "bogus", "x"));
 }
@@ -52,6 +70,8 @@ int main(void) {
     RUN_TEST(test_blank_pass_keeps_current);
     RUN_TEST(test_cable_range);
     RUN_TEST(test_clock_out_toggle);
+    RUN_TEST(test_metronome_toggle);
+    RUN_TEST(test_metronome_accent_toggle);
     RUN_TEST(test_unknown_key);
     return UNITY_END();
 }

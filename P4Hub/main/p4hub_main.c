@@ -31,6 +31,8 @@
 #include "p4hub_config_nvs.h"
 #include "beat_clock.h"
 #include "clock_ticker.h"
+#include "metronome.h"
+#include "metronome_audio.h"
 #include "usb_midi_pack.h"
 #include "link_protocol.h"
 #include "link_measurement.h"   /* GhostXForm + host->ghost map (P4-009) */
@@ -39,8 +41,11 @@
 
 static const char *TAG = "p4hub";
 
-#define MIDI_PPQN   24
-#define MAX_BURST   96   /* re-prime instead of flooding past this backlog */
+#define MIDI_PPQN       24
+#define MAX_BURST       96   /* re-prime instead of flooding past this backlog */
+#define METRO_QUANTUM   4.0  /* beats/bar for the bar-1 accent — Link timeline
+                              * carries no meter, so assume 4/4 (P4-006) */
+#define METRO_BURST     8    /* re-prime the click grid past this beat backlog */
 
 static P4HubConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
 
@@ -48,9 +53,11 @@ static void clock_out_task(void *arg)
 {
     BeatClock   bc;   beat_clock_reset(&bc);
     ClockTicker ct;   clock_ticker_reset(&ct);
+    Metronome   mt;   metronome_reset(&mt);
     bool        running = false;
     bool        phase_locked = false;  /* did the last emitting tick use session phase? */
     uint32_t    pulses = 0;
+    uint32_t    clicks = 0;
     int64_t     last_log = 0;
 
     while (1) {
@@ -61,12 +68,14 @@ static void clock_out_task(void *arg)
         LinkTimeline tl;
         bool have_session = wifi_link_timeline(&tl) && tl.micros_per_beat > 0;
 
-        if (have_session && usb_midi_host_ready() && g_cfg.clock_out_enable) {
-            /* Phase-locked once a GhostXForm is committed (P4-009): map our local
-             * clock into the session's ghost-time domain and read the true session
-             * beat, so tick 0 lands on the session downbeat. Otherwise fall back to
-             * the free-running local-tempo accumulator (P4-005): correct rate,
-             * arbitrary phase. Same math as the S3's tempo_source.cpp. */
+        if (have_session) {
+            /* One shared beat position drives clock-out AND the metronome. Phase-
+             * locked once a GhostXForm is committed (P4-009): map our local clock
+             * into the session ghost-time domain and read the true session beat, so
+             * the emitted tick 0 / downbeat align to the session. Until then, fall
+             * back to the free-running local-tempo accumulator (P4-005): correct
+             * rate, arbitrary phase. The metronome is self-contained — it clicks
+             * even with no USB-MIDI device attached. */
             LinkGhostXForm xform = link_measurement_current_xform();
             bool   locked = xform.valid;
             double beats;
@@ -78,26 +87,42 @@ static void clock_out_task(void *arg)
             }
 
             /* Switching basis (free-run <-> session phase) shifts the beat origin;
-             * re-prime the ticker so the boundary realigns instead of dumping a
-             * catch-up burst. On dropping back to free-run, restart beat_clock too. */
+             * re-prime the tick + click grids so the boundary realigns instead of
+             * dumping a catch-up burst. On dropping back to free-run, restart
+             * beat_clock too. */
             if (locked != phase_locked) {
                 clock_ticker_reset(&ct);
+                metronome_reset(&mt);
                 if (!locked) beat_clock_reset(&bc);
                 phase_locked = locked;
             }
 
-            int due = clock_ticker_ticks_due(&ct, beats, MIDI_PPQN, MAX_BURST);
-            for (int i = 0; i < due; i++) {
-                uint8_t pkt[4];
-                usb_midi_pack_single(g_cfg.midi_cable, 0xF8, pkt);   /* timing clock */
-                usb_midi_host_send(pkt, 4);
-                pulses++;
+            if (usb_midi_host_ready() && g_cfg.clock_out_enable) {
+                int due = clock_ticker_ticks_due(&ct, beats, MIDI_PPQN, MAX_BURST);
+                for (int i = 0; i < due; i++) {
+                    uint8_t pkt[4];
+                    usb_midi_pack_single(g_cfg.midi_cable, 0xF8, pkt);   /* timing clock */
+                    usb_midi_host_send(pkt, 4);
+                    pulses++;
+                }
+            }
+
+            if (g_cfg.metronome_enable) {
+                MetroClick mc = metronome_update(&mt, beats, METRO_QUANTUM, METRO_BURST);
+                if (mc != METRO_NONE) {
+                    bool accent = (mc == METRO_ACCENT) && g_cfg.metronome_accent;
+                    metronome_audio_click(accent);
+                    clicks++;
+                    ESP_LOGI(TAG, "metronome %-6s beat %.2f  clicks %lu",
+                             accent ? "ACCENT" : "click", beats, (unsigned long)clicks);
+                }
             }
             running = true;
         } else if (running) {
-            /* Session or device went away — reset so we re-prime cleanly. */
+            /* Session went away — reset so we re-prime cleanly. */
             beat_clock_reset(&bc);
             clock_ticker_reset(&ct);
+            metronome_reset(&mt);
             running = false;
             phase_locked = false;
         }
@@ -129,5 +154,6 @@ void app_main(void)
     usb_midi_host_start();
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
     p4hub_web_start(&g_cfg);
+    if (g_cfg.metronome_enable) metronome_audio_start();   /* codec/I2S only when used */
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
 }

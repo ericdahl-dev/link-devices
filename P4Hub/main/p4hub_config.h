@@ -13,6 +13,8 @@ typedef struct {
     char wifi_pass[64];
     int  clock_out_enable;  // 0/1 — stream 24-PPQN clock to the USB-MIDI host
     int  midi_cable;        // 0..3 — USB-MIDI virtual cable (Midihub USB A..D)
+    int  metronome_enable;  // 0/1 — click the onboard speaker on each beat (P4-006)
+    int  metronome_accent;  // 0/1 — accent the bar-1 downbeat (louder/higher)
 } P4HubConfig;
 
 void p4hub_config_defaults(P4HubConfig* c);

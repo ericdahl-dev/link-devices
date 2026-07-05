@@ -12,12 +12,14 @@ idf_component_register(
          "p4hub_status.c"
          "p4hub_config.c"
          "p4hub_config_nvs.c"
+         "metronome_audio.c"
          "${X32LINK_DIR}/clock_ticker.c"
          "${X32LINK_DIR}/beat_clock.c"
+         "${X32LINK_DIR}/metronome.c"
          "${X32LINK_DIR}/usb_midi_pack.c"
          "${X32LINK_DIR}/link_protocol.c"
          "${X32LINK_DIR}/link_measurement.c"
          "${X32LINK_DIR}/link_measurement_session.c"
          "${X32LINK_DIR}/link_phase.c"
     INCLUDE_DIRS "." "${X32LINK_DIR}"
-    PRIV_REQUIRES esp_wifi nvs_flash esp_timer lwip esp_netif esp_event usb esp_http_server)
+    PRIV_REQUIRES esp_wifi nvs_flash esp_timer lwip esp_netif esp_event usb esp_http_server driver)
