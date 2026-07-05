@@ -91,6 +91,18 @@ void test_unknown_key(void) {
     TEST_ASSERT_FALSE(p4hub_config_set(&c, "bogus", "x"));
 }
 
+void test_metronome_volume_and_voice(void) {
+    TEST_ASSERT_EQUAL_INT(80, c.metronome_volume);   // default
+    TEST_ASSERT_EQUAL_INT(0,  c.metronome_voice);
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "metro_vol", "50"));
+    TEST_ASSERT_EQUAL_INT(50, c.metronome_volume);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "metro_vol", "101"));  // 0..100
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "metro_vol", "-1"));
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "metro_voice", "2"));   // Wood
+    TEST_ASSERT_EQUAL_INT(2, c.metronome_voice);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "metro_voice", "3"));  // 0..2
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_defaults);
@@ -102,6 +114,7 @@ int main(void) {
     RUN_TEST(test_clock_out_toggle);
     RUN_TEST(test_metronome_toggle);
     RUN_TEST(test_metronome_accent_toggle);
+    RUN_TEST(test_metronome_volume_and_voice);
     RUN_TEST(test_unknown_key);
     return UNITY_END();
 }
