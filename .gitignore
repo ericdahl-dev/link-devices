@@ -8,3 +8,9 @@ test/*.dSYM/
 
 # macOS / editor cruft
 .DS_Store
+
+# ESP-IDF (P4Hub)
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
