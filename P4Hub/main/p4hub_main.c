@@ -19,6 +19,8 @@
 #include "wifi_link.h"
 #include "usb_midi_host.h"
 #include "p4hub_web.h"
+#include "p4hub_config.h"
+#include "p4hub_config_nvs.h"
 #include "beat_clock.h"
 #include "clock_ticker.h"
 #include "usb_midi_pack.h"
@@ -28,8 +30,8 @@ static const char *TAG = "p4hub";
 
 #define MIDI_PPQN   24
 #define MAX_BURST   96   /* re-prime instead of flooding past this backlog */
-#define MIDI_CABLE  0    /* USB-MIDI virtual cable 0 (Midihub "USB A"); per-output
-                            cable/division/phase is a Multiclock-style follow-up */
+
+static P4HubConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
 
 static void clock_out_task(void *arg)
 {
@@ -43,12 +45,12 @@ static void clock_out_task(void *arg)
         LinkTimeline tl;
         bool have_session = wifi_link_timeline(&tl) && tl.micros_per_beat > 0;
 
-        if (have_session && usb_midi_host_ready()) {
+        if (have_session && usb_midi_host_ready() && g_cfg.clock_out_enable) {
             double beats = beat_clock_advance(&bc, esp_timer_get_time(), tl.micros_per_beat);
             int due = clock_ticker_ticks_due(&ct, beats, MIDI_PPQN, MAX_BURST);
             for (int i = 0; i < due; i++) {
                 uint8_t pkt[4];
-                usb_midi_pack_single(MIDI_CABLE, 0xF8, pkt);   /* timing clock */
+                usb_midi_pack_single(g_cfg.midi_cable, 0xF8, pkt);   /* timing clock */
                 usb_midi_host_send(pkt, 4);
                 pulses++;
             }
@@ -81,9 +83,10 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    ESP_LOGI(TAG, "P4Hub — Link tempo -> USB-MIDI host clock out (P4-005)");
+    p4hub_config_load(&g_cfg);
+    ESP_LOGI(TAG, "P4Hub — Link tempo -> USB-MIDI host clock out (P4-005/007)");
     usb_midi_host_start();
-    wifi_link_start();
-    p4hub_web_start();
+    wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
+    p4hub_web_start(&g_cfg);
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
 }

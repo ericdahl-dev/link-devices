@@ -27,10 +27,11 @@ SESSION = ../X32Link/link_measurement_session.c
 USBMIDIPACK = ../X32Link/usb_midi_pack.c
 BEATCLOCK = ../X32Link/beat_clock.c
 P4STATUS = ../P4Hub/main/p4hub_status.c
+P4CONFIG = ../P4Hub/main/p4hub_config.c
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_usb_midi_pack test_beat_clock test_p4hub_status
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_usb_midi_pack test_beat_clock test_p4hub_status test_p4hub_config
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -53,6 +54,7 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_usb_midi_pack
 	./test_beat_clock
 	./test_p4hub_status
+	./test_p4hub_config
 	./check_docs.sh
 
 test_bpm_tracker: test_bpm_tracker.c $(TRACKER) $(UNITY)
@@ -126,3 +128,6 @@ test_p4hub_status: test_p4hub_status.c $(P4STATUS) $(UNITY)
 
 clean:
 	rm -f test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_axs5106l test_touch_ui test_tempo_snapshot test_bar
+
+test_p4hub_config: test_p4hub_config.c $(P4CONFIG) $(UNITY)
+	$(CC) $(CFLAGS) -I../P4Hub/main $^ -o $@
