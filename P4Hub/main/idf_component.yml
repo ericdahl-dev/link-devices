@@ -3,3 +3,6 @@ dependencies:
   espressif/esp_hosted: "~2"
   espressif/esp_wifi_remote:
     version: ">=0.10,<2.0"
+  # ES8311 codec driver for the onboard-speaker metronome (P4-006). Target-
+  # agnostic I2C driver; the Waveshare P4-NANO uses ES8311 + NS4150B amp.
+  espressif/es8311: "^1.0.0"
