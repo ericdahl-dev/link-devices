@@ -116,6 +116,9 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <label class="sw"><input type="checkbox" name="metronome" value="1" %MTOCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="frow"><span class="cap">Accent Bar 1</span>
 <label class="sw"><input type="checkbox" name="metro_accent" value="1" %MTACHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
+<div class="frow"><span class="cap">Metronome Sound</span>
+<div class="fld"><span class="pre">VOL</span><input type="number" name="metro_vol" value="%MVOL%" min="0" max="100" step="5"></div>
+<div class="fld"><span class="pre">VOICE</span><select name="metro_voice" id="mvoice"><option value="0">Tone</option><option value="1">Click</option><option value="2">Wood</option></select></div></div>
 %OUTPUTS%
 <button class="write" type="submit">Write &amp; Reboot</button>
 </form>
@@ -183,6 +186,8 @@ static std::string build_page()
     subst(h, "%MCKCHK%",  (s_cfg && s_cfg->clock_out_enable) ? "checked" : "");
     subst(h, "%MTOCHK%",  (s_cfg && s_cfg->metronome_enable) ? "checked" : "");
     subst(h, "%MTACHK%",  (s_cfg && s_cfg->metronome_accent) ? "checked" : "");
+    subst(h, "%MVOL%",    std::to_string(s_cfg ? s_cfg->metronome_volume : 80));
+    subst(h, "%MVOICE%",  std::to_string(s_cfg ? s_cfg->metronome_voice : 0));
     subst(h, "%OUTPUTS%", build_outputs());
     return h;
 }

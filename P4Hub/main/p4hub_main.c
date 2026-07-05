@@ -180,6 +180,7 @@ void app_main(void)
     usb_midi_host_start();
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
     p4hub_web_start(&g_cfg);
-    if (g_cfg.metronome_enable) metronome_audio_start();   /* codec/I2S only when used */
+    if (g_cfg.metronome_enable)
+        metronome_audio_start(g_cfg.metronome_volume, g_cfg.metronome_voice);   /* codec/I2S only when used */
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
 }
