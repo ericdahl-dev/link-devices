@@ -93,25 +93,51 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     }
 }
 
-void wifi_link_start(void)
-{
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+static bool s_ap_mode = false;
 
+static void start_sta(const char* ssid, const char* pass)
+{
+    esp_netif_create_default_wifi_sta();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi_event, NULL));
 
     wifi_config_t wc = {0};
-    strncpy((char *)wc.sta.ssid,     CONFIG_P4HUB_WIFI_SSID,     sizeof(wc.sta.ssid));
-    strncpy((char *)wc.sta.password, CONFIG_P4HUB_WIFI_PASSWORD, sizeof(wc.sta.password));
+    strncpy((char *)wc.sta.ssid,     ssid, sizeof(wc.sta.ssid) - 1);
+    strncpy((char *)wc.sta.password, pass, sizeof(wc.sta.password) - 1);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "connecting to SSID:%s", CONFIG_P4HUB_WIFI_SSID);
+    ESP_LOGI(TAG, "connecting to SSID:%s", ssid);
 }
 
+static void start_ap(void)
+{
+    s_ap_mode = true;
+    esp_netif_create_default_wifi_ap();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    wifi_config_t wc = {0};
+    strcpy((char *)wc.ap.ssid, "P4Hub-Setup");
+    wc.ap.ssid_len       = 11;
+    wc.ap.max_connection = 4;
+    wc.ap.authmode       = WIFI_AUTH_OPEN;   // open network for first-boot setup
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wc));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_LOGW(TAG, "no WiFi credentials — SoftAP 'P4Hub-Setup' at 192.168.4.1 for config");
+}
+
+void wifi_link_start(const char* ssid, const char* pass)
+{
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    if (ssid && ssid[0] != '\0') start_sta(ssid, pass);
+    else                         start_ap();
+}
+
+bool wifi_link_ap_mode(void)               { return s_ap_mode; }
 bool wifi_link_timeline(LinkTimeline* out) { return link_proto_timeline(out); }
 int  wifi_link_peers(void)                 { return link_proto_peers(); }
