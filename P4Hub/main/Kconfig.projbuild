@@ -1,0 +1,17 @@
+menu "P4Hub Configuration"
+
+    config P4HUB_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+        help
+            SSID of the WiFi network to join (same network as the Ableton Link
+            session). Left empty in the repo — set it locally (menuconfig or a
+            gitignored sdkconfig); do not commit credentials.
+
+    config P4HUB_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        help
+            Password for the WiFi network. Set locally; do not commit.
+
+endmenu
