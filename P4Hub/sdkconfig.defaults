@@ -1,0 +1,6 @@
+# This P4-NANO is early silicon (chip rev v1.3). ESP-IDF v5.5 defaults its
+# minimum P4 revision to v3.01 and refuses to boot; drop it to v1.0. Arduino
+# tolerates v1.x natively, but the P4 hub features need ESP-IDF, so this gate is
+# required here. See tasks/P4-004.md + the P4-NANO board notes.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
