@@ -142,6 +142,8 @@ bool usb_midi_host_ready(void) { return s_ready; }
 
 uint32_t usb_midi_host_rx_clocks(void) { return s_rx_clocks; }
 
+uint32_t usb_midi_host_tx(void) { return s_tx; }
+
 void usb_midi_host_send(const uint8_t* data, int len)
 {
     if (!s_ready || len <= 0 || len > 64) return;

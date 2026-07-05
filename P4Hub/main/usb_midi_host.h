@@ -24,6 +24,9 @@ void usb_midi_host_send(const uint8_t* data, int len);
 // giving an end-to-end send+receive proof.
 uint32_t usb_midi_host_rx_clocks(void);
 
+// Count of clock packets sent out to the device.
+uint32_t usb_midi_host_tx(void);
+
 #ifdef __cplusplus
 }
 #endif
