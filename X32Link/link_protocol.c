@@ -17,6 +17,7 @@
 static const uint8_t  MAGIC[8]     = {'_','a','s','d','p','_','v', 1};
 static const uint32_t TMLN_KEY     = 0x746d6c6eu;
 static const uint32_t MEP4_KEY     = 0x6d657034u;
+static const uint32_t STST_KEY     = 0x73747374u;  // Link StartStopState ('stst')
 static const uint32_t PEER_TTL_MS  = 15000;
 
 static const uint8_t MSG_ALIVE    = 1;
@@ -36,6 +37,8 @@ static Peer         s_peers[8];
 static int          s_peer_count = 0;
 static LinkTimeline s_timeline;
 static bool         s_timeline_seen = false;
+static bool         s_playing       = false;  // Link StartStopState isPlaying
+static bool         s_stst_seen     = false;  // have we parsed a StartStopState yet
 
 // millis() shim — overridden in tests via weak symbol
 uint32_t __attribute__((weak)) link_proto_millis(void) { return 0; }
@@ -78,12 +81,15 @@ static void remove_peer(const uint8_t* id) {
     if (idx < 0) return;
     s_peers[idx] = s_peers[--s_peer_count];
     if (s_peer_count == 0) s_bpm = 0.0;  // no session → no tempo
+    if (s_peer_count == 0) { s_playing = false; s_stst_seen = false; }
 }
 
 void link_proto_reset(void) {
     s_bpm        = 0.0;
     s_peer_count = 0;
     s_timeline_seen = false;
+    s_playing    = false;
+    s_stst_seen  = false;
     memset(&s_timeline, 0, sizeof(s_timeline));
 }
 
@@ -98,6 +104,7 @@ void link_proto_tick(void) {
             i++;
     }
     if (s_peer_count == 0) s_bpm = 0.0;  // no session → no tempo
+    if (s_peer_count == 0) { s_playing = false; s_stst_seen = false; }
 }
 
 bool link_proto_parse(const uint8_t* buf, int len) {
@@ -136,12 +143,21 @@ bool link_proto_parse(const uint8_t* buf, int len) {
                 s_peers[idx].has_mep4  = true;
             }
         }
+        // StartStopState: isPlaying(1) + beats(int64 BE) + timestamp(int64 BE).
+        // Only isPlaying is needed to drive MIDI transport (P4-008).
+        if (key == STST_KEY && size >= 1) {
+            s_playing   = (p[0] != 0);
+            s_stst_seen = true;
+        }
         p += size;
     }
     return true;
 }
 
 double link_proto_bpm(void)   { return s_bpm; }
+
+bool link_proto_playing(void)         { return s_playing; }
+bool link_proto_start_stop_seen(void) { return s_stst_seen; }
 int    link_proto_peers(void) { return s_peer_count; }
 
 bool link_proto_timeline(LinkTimeline* out) {

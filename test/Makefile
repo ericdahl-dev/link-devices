@@ -29,6 +29,7 @@ USBMIDIPACK = ../X32Link/usb_midi_pack.c
 BEATCLOCK = ../X32Link/beat_clock.c
 P4STATUS = ../P4Hub/main/p4hub_status.c
 P4CONFIG = ../P4Hub/main/p4hub_config.c
+TRANSPORT = ../X32Link/transport.c
 
 .PHONY: all clean
 
@@ -56,6 +57,7 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_beat_clock
 	./test_p4hub_status
 	./test_p4hub_config
+	./test_transport
 	./test_metronome
 	./check_docs.sh
 
@@ -136,3 +138,6 @@ test_p4hub_config: test_p4hub_config.c $(P4CONFIG) $(UNITY)
 
 test_metronome: test_metronome.c $(METRO) $(CLOCKTICK) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
+
+test_transport: test_transport.c $(TRANSPORT) $(UNITY)
+	$(CC) $(CFLAGS) $^ -o $@
