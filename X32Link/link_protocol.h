@@ -20,6 +20,13 @@ int    link_proto_peers(void);
 bool   link_proto_timeline(LinkTimeline* out);
 bool   link_proto_peer_endpoint(int index, uint32_t* ip, uint16_t* port);
 
+// Link StartStopState (transport). link_proto_playing() is the session's
+// isPlaying flag; link_proto_start_stop_seen() is false until a StartStopState
+// has actually been parsed (and resets when the session empties), so a caller
+// can prime on the first real observation rather than on the default.
+bool   link_proto_playing(void);
+bool   link_proto_start_stop_seen(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -34,6 +34,7 @@
 #include "metronome.h"
 #include "metronome_audio.h"
 #include "usb_midi_pack.h"
+#include "transport.h"        /* Link play/stop -> MIDI Start/Stop (P4-008) */
 #include "link_protocol.h"
 #include "link_measurement.h"   /* GhostXForm + host->ghost map (P4-009) */
 #include "link_phase.h"         /* link_phase_beats_now (session phase) */
@@ -54,6 +55,7 @@ static void clock_out_task(void *arg)
     BeatClock   bc;   beat_clock_reset(&bc);
     ClockTicker ct;   clock_ticker_reset(&ct);
     Metronome   mt;   metronome_reset(&mt);
+    Transport   tr;   transport_reset(&tr);
     bool        running = false;
     bool        phase_locked = false;  /* did the last emitting tick use session phase? */
     uint32_t    pulses = 0;
@@ -105,6 +107,19 @@ static void clock_out_task(void *arg)
                     usb_midi_host_send(pkt, 4);
                     pulses++;
                 }
+
+                /* Transport: MIDI Start/Stop on the Link play-state edge (P4-008).
+                 * Primes on the first real StartStopState, so joining mid-play does
+                 * not fire a spurious Start. */
+                TransportAction ta = transport_update(&tr, link_proto_start_stop_seen(),
+                                                      link_proto_playing());
+                if (ta != TRANSPORT_NONE) {
+                    uint8_t status = (ta == TRANSPORT_START) ? 0xFA : 0xFC;
+                    uint8_t pkt[4];
+                    usb_midi_pack_single(g_cfg.midi_cable, status, pkt);
+                    usb_midi_host_send(pkt, 4);
+                    ESP_LOGI(TAG, "transport %s", ta == TRANSPORT_START ? "START" : "STOP");
+                }
             }
 
             if (g_cfg.metronome_enable) {
@@ -123,6 +138,7 @@ static void clock_out_task(void *arg)
             beat_clock_reset(&bc);
             clock_ticker_reset(&ct);
             metronome_reset(&mt);
+            transport_reset(&tr);
             running = false;
             phase_locked = false;
         }
