@@ -116,15 +116,12 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <label class="sw"><input type="checkbox" name="metronome" value="1" %MTOCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="frow"><span class="cap">Accent Bar 1</span>
 <label class="sw"><input type="checkbox" name="metro_accent" value="1" %MTACHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
-<div class="frow"><span class="cap">USB-MIDI Cable</span>
-<div class="fld"><span class="pre">PORT</span><select name="midi_cable" id="cable">
-<option value="0">USB A</option><option value="1">USB B</option><option value="2">USB C</option><option value="3">USB D</option></select></div></div>
+%OUTPUTS%
 <button class="write" type="submit">Write &amp; Reboot</button>
 </form>
 <div class="foot">ESP32-P4 &middot; Ableton Link &rarr; USB-MIDI</div>
 </div>
 <script>
-document.getElementById('cable').value='%CABLE%';
 var bpmEl=document.getElementById('bpm'),beatEl=document.getElementById('beat');
 var peersEl=document.getElementById('peers'),usbEl=document.getElementById('usb'),txEl=document.getElementById('tx');
 var beatTimer=null,shownBpm=-1;
@@ -145,14 +142,48 @@ static void subst(std::string &s, const char *key, const std::string &val)
     while ((p = s.find(key)) != std::string::npos) s.replace(p, strlen(key), val);
 }
 
+// Build the 4 per-output clock config rows (enable / cable / rate / phase nudge),
+// with the live config marked checked/selected (P4-010).
+static std::string build_outputs()
+{
+    if (!s_cfg) return "";
+    static const char* PORTS[4]   = { "USB A", "USB B", "USB C", "USB D" };
+    static const int   PPQN[]     = { 24, 48, 12, 6, 4, 2, 1 };
+    static const char* PPQN_LBL[] = { "MIDI clock (24)", "&times;2 (48)", "&divide;2 (12)",
+                                      "&divide;4 (6)", "1/16 (4)", "1/8 (2)", "1/4 (1)" };
+    std::string s;
+    for (int o = 0; o < P4HUB_CLOCK_OUTPUTS; o++) {
+        const ClockOutputCfg* c = &s_cfg->clock[o];
+        std::string N = std::to_string(o);
+        s += "<div class=\"frow\"><span class=\"cap\">Clock Out " + std::to_string(o + 1) + "</span>";
+        s += "<label class=\"sw\"><input type=\"checkbox\" name=\"clk" + N + "_en\" value=\"1\""
+             + (c->enable ? " checked" : "")
+             + "><span class=\"track\"><span class=\"knob\"></span></span><span class=\"swlbl\"></span></label>";
+        s += "<div class=\"fld\"><span class=\"pre\">CABLE</span><select name=\"clk" + N + "_cable\">";
+        for (int p = 0; p < 4; p++)
+            s += "<option value=\"" + std::to_string(p) + "\"" + (c->cable == p ? " selected" : "")
+                 + ">" + PORTS[p] + "</option>";
+        s += "</select></div>";
+        s += "<div class=\"fld\"><span class=\"pre\">RATE</span><select name=\"clk" + N + "_ppqn\">";
+        for (size_t k = 0; k < sizeof(PPQN) / sizeof(PPQN[0]); k++)
+            s += "<option value=\"" + std::to_string(PPQN[k]) + "\"" + (c->ppqn == PPQN[k] ? " selected" : "")
+                 + ">" + PPQN_LBL[k] + "</option>";
+        s += "</select></div>";
+        s += "<div class=\"fld\"><span class=\"pre\">NUDGE</span><input type=\"number\" name=\"clk" + N
+             + "_phase\" value=\"" + std::to_string(c->phase_mbeats) + "\" min=\"-250\" max=\"250\" step=\"5\"></div>";
+        s += "</div>";
+    }
+    return s;
+}
+
 static std::string build_page()
 {
     std::string h(PAGE);
-    subst(h, "%SSID%",   s_cfg ? std::string(s_cfg->wifi_ssid) : "");
-    subst(h, "%MCKCHK%", (s_cfg && s_cfg->clock_out_enable) ? "checked" : "");
-    subst(h, "%MTOCHK%", (s_cfg && s_cfg->metronome_enable) ? "checked" : "");
-    subst(h, "%MTACHK%", (s_cfg && s_cfg->metronome_accent) ? "checked" : "");
-    subst(h, "%CABLE%",  std::to_string(s_cfg ? s_cfg->midi_cable : 0));
+    subst(h, "%SSID%",    s_cfg ? std::string(s_cfg->wifi_ssid) : "");
+    subst(h, "%MCKCHK%",  (s_cfg && s_cfg->clock_out_enable) ? "checked" : "");
+    subst(h, "%MTOCHK%",  (s_cfg && s_cfg->metronome_enable) ? "checked" : "");
+    subst(h, "%MTACHK%",  (s_cfg && s_cfg->metronome_accent) ? "checked" : "");
+    subst(h, "%OUTPUTS%", build_outputs());
     return h;
 }
 
@@ -203,7 +234,7 @@ static void url_decode(char *s)
 
 static esp_err_t save_handler(httpd_req_t *req)
 {
-    char body[512];
+    char body[1024];   /* wifi + 4 outputs x 4 fields fits comfortably */
     int len = req->content_len < (int)sizeof(body) - 1 ? req->content_len : (int)sizeof(body) - 1;
     int got = 0;
     while (got < len) {
@@ -219,6 +250,7 @@ static esp_err_t save_handler(httpd_req_t *req)
     // POST body, so its absence means "off". (Can't strstr(body) after this loop —
     // strtok_r has already split body at the '&' separators.)
     bool saw_clock_out = false, saw_metronome = false, saw_metro_accent = false;
+    bool saw_out_en[P4HUB_CLOCK_OUTPUTS] = { false };
     char *save = nullptr;
     for (char *pair = strtok_r(body, "&", &save); pair; pair = strtok_r(nullptr, "&", &save)) {
         char *eq = strchr(pair, '=');
@@ -229,12 +261,18 @@ static esp_err_t save_handler(httpd_req_t *req)
         if (strcmp(key, "clock_out") == 0)    saw_clock_out = true;
         if (strcmp(key, "metronome") == 0)    saw_metronome = true;
         if (strcmp(key, "metro_accent") == 0) saw_metro_accent = true;
+        if (strncmp(key, "clk", 3) == 0 && key[3] >= '0' && key[3] <= '9' && strcmp(key + 4, "_en") == 0) {
+            int idx = key[3] - '0';
+            if (idx >= 0 && idx < P4HUB_CLOCK_OUTPUTS) saw_out_en[idx] = true;
+        }
         p4hub_config_set(&cfg, key, val);
     }
     // An unchecked checkbox is simply absent from the POST body -> "off".
     if (!saw_clock_out)    cfg.clock_out_enable = 0;
     if (!saw_metronome)    cfg.metronome_enable = 0;
     if (!saw_metro_accent) cfg.metronome_accent = 0;
+    for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++)
+        if (!saw_out_en[i]) cfg.clock[i].enable = 0;
 
     if (!p4hub_config_valid(&cfg)) return send_result(req, "Invalid Config", "Check the values and go back.");
     *s_cfg = cfg;
