@@ -67,6 +67,17 @@ static void append_mep4(uint8_t* buf, int* len, uint32_t ip, uint16_t port) {
     *len = i;
 }
 
+// Append a StartStopState TLV: isPlaying(1) + beats(int64 BE) + timestamp(int64 BE).
+static void append_stst(uint8_t* buf, int* len, bool playing) {
+    int i = *len;
+    buf[i++] = 0x73; buf[i++] = 0x74; buf[i++] = 0x73; buf[i++] = 0x74; // key 'stst'
+    buf[i++] = 0x00; buf[i++] = 0x00; buf[i++] = 0x00; buf[i++] = 0x11; // size=17
+    buf[i++] = playing ? 1 : 0;   // isPlaying
+    put_be64(buf, &i, 0);         // beats (unused here)
+    put_be64(buf, &i, 0);         // timestamp (unused here)
+    *len = i;
+}
+
 static uint8_t NODE_A[8] = {0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08};
 static uint8_t NODE_B[8] = {0xA1,0xA2,0xA3,0xA4,0xA5,0xA6,0xA7,0xA8};
 
@@ -295,9 +306,37 @@ void test_mep4_attached_to_matching_peer(void) {
     TEST_ASSERT_EQUAL_UINT16(20808, port);
 }
 
+void test_start_stop_not_seen_without_stst(void) {
+    uint8_t buf[512]; int len;
+    make_alive_packet(buf, &len, NODE_A, 500000LL);   // timeline only, no stst
+    link_proto_parse(buf, len);
+    TEST_ASSERT_FALSE(link_proto_start_stop_seen());
+}
+
+void test_start_stop_parses_playing_true(void) {
+    uint8_t buf[512]; int len;
+    make_alive_packet(buf, &len, NODE_A, 500000LL);
+    append_stst(buf, &len, true);
+    link_proto_parse(buf, len);
+    TEST_ASSERT_TRUE(link_proto_start_stop_seen());
+    TEST_ASSERT_TRUE(link_proto_playing());
+}
+
+void test_start_stop_parses_playing_false(void) {
+    uint8_t buf[512]; int len;
+    make_alive_packet(buf, &len, NODE_A, 500000LL);
+    append_stst(buf, &len, false);
+    link_proto_parse(buf, len);
+    TEST_ASSERT_TRUE(link_proto_start_stop_seen());
+    TEST_ASSERT_FALSE(link_proto_playing());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mep4_attached_to_matching_peer);
+    RUN_TEST(test_start_stop_not_seen_without_stst);
+    RUN_TEST(test_start_stop_parses_playing_true);
+    RUN_TEST(test_start_stop_parses_playing_false);
     RUN_TEST(test_tick_expiry_drops_mep4_for_expired_peer);
     RUN_TEST(test_byebye_drops_mep4_for_removed_peer);
     RUN_TEST(test_mep4_survives_subsequent_packet_without_mep4);
