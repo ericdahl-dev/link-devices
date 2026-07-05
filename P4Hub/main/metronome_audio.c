@@ -20,6 +20,7 @@
  * clock_out_task never blocks on the ~50 ms I2S write.
  */
 #include "metronome_audio.h"
+#include "metronome_voice.h"    /* click/accent tone presets (P4-012) */
 
 #include <math.h>
 #include <string.h>
@@ -48,20 +49,20 @@ static const char *TAG = "metro_audio";
 /* --- Audio format ------------------------------------------------------------ */
 #define SAMPLE_RATE     16000
 #define MCLK_MULTIPLE   384
-#define VOLUME          80            /* 0..100 */
 
-/* --- Tone bursts (compile-time sized; stereo int16) -------------------------- */
-#define CLICK_MS        45
-#define ACCENT_MS       55
-#define CLICK_HZ        1000.0f
-#define ACCENT_HZ       1760.0f       /* A6 — clearly above the plain click */
+/* --- Tone bursts: pitch + length are runtime (voice preset, P4-012); the amp is
+ * fixed per role. Buffers are sized for the longest voice; s_*_frames holds the
+ * live length. --------------------------------------------------------------- */
 #define CLICK_AMP       0.28f
 #define ACCENT_AMP      0.55f
-#define CLICK_FRAMES    (SAMPLE_RATE * CLICK_MS  / 1000)
-#define ACCENT_FRAMES   (SAMPLE_RATE * ACCENT_MS / 1000)
+#define MAX_MS          64
+#define MAX_FRAMES      (SAMPLE_RATE * MAX_MS / 1000)
 
-static int16_t s_click[CLICK_FRAMES * 2];
-static int16_t s_accent[ACCENT_FRAMES * 2];
+static int16_t s_click[MAX_FRAMES * 2];
+static int16_t s_accent[MAX_FRAMES * 2];
+static int     s_click_frames  = 0;
+static int     s_accent_frames = 0;
+static int     s_volume = 80;   /* 0..100, set at start from config (P4-012) */
 
 static i2s_chan_handle_t s_tx = NULL;
 static es8311_handle_t   s_codec = NULL;
@@ -91,7 +92,7 @@ static void player_task(void *arg)
     while (1) {
         if (xQueueReceive(s_queue, &accent, portMAX_DELAY) != pdTRUE) continue;
         int16_t *buf = accent ? s_accent : s_click;
-        size_t   nbytes = (size_t)(accent ? ACCENT_FRAMES : CLICK_FRAMES) * 2 * sizeof(int16_t);
+        size_t   nbytes = (size_t)(accent ? s_accent_frames : s_click_frames) * 2 * sizeof(int16_t);
         size_t   written = 0;
         esp_err_t e = i2s_channel_write(s_tx, buf, nbytes, &written, pdMS_TO_TICKS(200));
         if (e != ESP_OK) ESP_LOGW(TAG, "i2s write failed: %s", esp_err_to_name(e));
@@ -152,14 +153,26 @@ static esp_err_t codec_init(void)
     if (e != ESP_OK) return e;
     e = es8311_sample_frequency_config(s_codec, SAMPLE_RATE * MCLK_MULTIPLE, SAMPLE_RATE);
     if (e != ESP_OK) return e;
-    e = es8311_voice_volume_set(s_codec, VOLUME, NULL);
+    e = es8311_voice_volume_set(s_codec, s_volume, NULL);
     if (e != ESP_OK) return e;
     return es8311_microphone_config(s_codec, false);
 }
 
-void metronome_audio_start(void)
+void metronome_audio_start(int volume, int voice)
 {
-    ESP_LOGI(TAG, "metronome audio: ES8311 codec + I2S out the onboard speaker");
+    s_volume = volume < 0 ? 0 : (volume > 100 ? 100 : volume);
+
+    /* Voice preset -> click/accent pitch + length (P4-012). Lengths are clamped
+     * to the buffer; the amp stays fixed per role. */
+    float click_hz, accent_hz;
+    int   click_ms, accent_ms;
+    metronome_voice_params(voice, &click_hz, &click_ms, &accent_hz, &accent_ms);
+    s_click_frames  = SAMPLE_RATE * click_ms  / 1000;
+    s_accent_frames = SAMPLE_RATE * accent_ms / 1000;
+    if (s_click_frames  > MAX_FRAMES) s_click_frames  = MAX_FRAMES;
+    if (s_accent_frames > MAX_FRAMES) s_accent_frames = MAX_FRAMES;
+
+    ESP_LOGI(TAG, "metronome audio: ES8311 codec + I2S out the onboard speaker  vol=%d voice=%d", s_volume, voice);
     ESP_LOGI(TAG, "  I2C SCL=%d SDA=%d (ES8311 @ 0x%02x)  PA_EN=%d",
              PIN_I2C_SCL, PIN_I2C_SDA, ES8311_ADDRRES_0, PIN_PA_ENABLE);
     ESP_LOGI(TAG, "  I2S MCLK=%d BCLK=%d WS=%d DOUT=%d  %d Hz",
@@ -167,8 +180,8 @@ void metronome_audio_start(void)
     ESP_LOGW(TAG, "  ^ pin map from the Waveshare P4-NANO 12_I2SCodec example — "
                   "confirm against the board if the click is silent");
 
-    render_burst(s_click,  CLICK_FRAMES,  CLICK_HZ,  CLICK_AMP);
-    render_burst(s_accent, ACCENT_FRAMES, ACCENT_HZ, ACCENT_AMP);
+    render_burst(s_click,  s_click_frames,  click_hz,  CLICK_AMP);
+    render_burst(s_accent, s_accent_frames, accent_hz, ACCENT_AMP);
 
     /* NS4150B power amp enable (active-high). */
     gpio_config_t pa = {

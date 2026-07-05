@@ -12,7 +12,7 @@ extern "C" {
 // Bring up the ES8311 codec + I2S TX and spawn the click-player task. Call once
 // at boot (only when the metronome is enabled). On any codec/I2S failure it logs
 // and leaves the feature disabled — the rest of the firmware runs unaffected.
-void metronome_audio_start(void);
+void metronome_audio_start(int volume, int voice);
 
 // True once the codec + I2S came up successfully.
 bool metronome_audio_ready(void);
