@@ -107,6 +107,10 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="row"><label>Clock Out</label><span class="val" id="tx">0 pulses</span></div>
 </div>
 <form method="POST" action="/save">
+<div class="frow"><span class="cap">Tempo Source</span>
+<div class="fld"><span class="pre">SRC</span><select name="tempo_src">
+<option value="0" %TSRC0%>Link (follow)</option>
+<option value="1" %TSRC1%>MIDI-in (master)</option></select></div></div>
 <div class="frow"><span class="cap">WiFi Network</span>
 <div class="fld"><span class="pre">SSID</span><input name="wifi_ssid" value="%SSID%" autocomplete="off"></div>
 <div class="fld"><span class="pre">PASS</span><input name="wifi_pass" type="password" placeholder="keep current"></div></div>
@@ -179,6 +183,9 @@ static std::string build_outputs()
 static std::string build_page()
 {
     std::string h(PAGE);
+    bool midi_master = s_cfg && s_cfg->tempo_source == P4HUB_TEMPO_MIDI_MASTER;
+    subst(h, "%TSRC0%",   midi_master ? "" : "selected");
+    subst(h, "%TSRC1%",   midi_master ? "selected" : "");
     subst(h, "%SSID%",    s_cfg ? std::string(s_cfg->wifi_ssid) : "");
     subst(h, "%MCKCHK%",  (s_cfg && s_cfg->clock_out_enable) ? "checked" : "");
     subst(h, "%MTOCHK%",  (s_cfg && s_cfg->metronome_enable) ? "checked" : "");

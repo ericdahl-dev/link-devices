@@ -40,6 +40,8 @@
 #include "link_phase.h"         /* link_phase_beats_now (session phase) */
 #include "link_measure_io.h"    /* unicast ping/pong measurement client */
 #include "clock_output.h"       /* per-output division + phase-nudge (P4-010) */
+#include "midi_clock_in.h"      /* MIDI-clock IN -> BPM (P4-011) */
+#include "midi_link_master.h"   /* BPM -> Link timeline to publish (P4-011) */
 
 static const char *TAG = "p4hub";
 
@@ -80,7 +82,12 @@ static void clock_out_task(void *arg)
              * rate, arbitrary phase. The metronome is self-contained — it clicks
              * even with no USB-MIDI device attached. */
             LinkGhostXForm xform = link_measurement_current_xform();
-            bool   locked = xform.valid;
+            /* In MIDI-master mode the timeline is our own (local-clock) override,
+             * not a measured Link session — the ghost xform is in a peer's time
+             * domain and would garble beats, so never take the phase-locked branch.
+             * Free-run gives the correct MIDI tempo with best-effort phase (the
+             * documented P4-011 ghost-time caveat). */
+            bool   locked = xform.valid && g_cfg.tempo_source != P4HUB_TEMPO_MIDI_MASTER;
             double beats;
             if (locked) {
                 int64_t ghost_now = link_ghost_xform_host_to_ghost(xform, esp_timer_get_time());
@@ -166,6 +173,60 @@ static void clock_out_task(void *arg)
     }
 }
 
+/* P4-011: MIDI-in is the tempo master. Derive BPM from the incoming USB-MIDI
+ * clock (fed to midi_clock_in from usb_midi_host's IN callback), build a Link
+ * timeline that preserves beat continuity + outranks the session, install it as
+ * the clock-out/metronome source (via wifi_link override), and multicast it as
+ * ALIVE gossip so other Link peers adopt our tempo. Only started in master mode;
+ * default Link-follow never runs this. */
+static void midi_master_task(void *arg)
+{
+    int64_t last_send = 0;
+    int64_t last_log  = 0;
+    double  last_bpm  = 0.0;
+    uint32_t sent = 0;
+
+    while (1) {
+        int64_t now = esp_timer_get_time();
+        float   bpm = midi_clock_in_bpm(now);
+
+        if (bpm > 0.0f) {
+            /* Observed raw Link session (not our own override) to stay continuous
+             * with + outrank when taking over an already-running session. */
+            LinkTimeline obs;
+            bool have = wifi_link_peers() > 0 && link_proto_timeline(&obs)
+                        && obs.micros_per_beat > 0;
+
+            LinkTimeline mtl = midi_link_master_timeline(
+                bpm, midi_clock_in_pulse_count(), now, have ? &obs : NULL, have);
+
+            wifi_link_set_master_timeline(&mtl);   /* drive local clock-out/metronome */
+
+            /* Re-broadcast periodically (keep-alive) and promptly on tempo change. */
+            bool changed = last_bpm <= 0.0 || (double)bpm < last_bpm - 0.05
+                                           || (double)bpm > last_bpm + 0.05;
+            if (changed || now - last_send >= 200000) {
+                wifi_link_send_alive(&mtl);
+                last_send = now;
+                last_bpm  = bpm;
+                sent++;
+            }
+        } else {
+            wifi_link_set_master_timeline(NULL);   /* no clock in -> clock stops */
+            last_bpm = 0.0;
+        }
+
+        if (now - last_log >= 1000000) {
+            last_log = now;
+            ESP_LOGI(TAG, "MIDI-master: in-clk %s bpm %.2f  pulses %lu  alive-tx %lu  link-peers %d",
+                     bpm > 0.0f ? "RUN" : "idle", bpm,
+                     (unsigned long)midi_clock_in_pulse_count(),
+                     (unsigned long)sent, wifi_link_peers());
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
 void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -176,10 +237,22 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     p4hub_config_load(&g_cfg);
-    ESP_LOGI(TAG, "P4Hub — Link tempo -> USB-MIDI host clock out (P4-005/007)");
+    ESP_LOGI(TAG, "P4Hub — tempo source: %s (P4-005/007/011)",
+             g_cfg.tempo_source == P4HUB_TEMPO_MIDI_MASTER
+                 ? "MIDI-in MASTER -> Link" : "Link follow -> USB-MIDI clock out");
     usb_midi_host_start();
+
+    /* P4-011: in MIDI-master mode, route incoming 0xF8 timing into the pure BPM
+     * tracker and run the publisher task that pushes tempo into the Link session. */
+    if (g_cfg.tempo_source == P4HUB_TEMPO_MIDI_MASTER) {
+        midi_clock_in_reset();
+        usb_midi_host_set_clock_cb(midi_clock_in_pulse);
+    }
+
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
     p4hub_web_start(&g_cfg);
     if (g_cfg.metronome_enable) metronome_audio_start();   /* codec/I2S only when used */
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
+    if (g_cfg.tempo_source == P4HUB_TEMPO_MIDI_MASTER)
+        xTaskCreate(midi_master_task, "midi_master", 4096, NULL, 6, NULL);
 }

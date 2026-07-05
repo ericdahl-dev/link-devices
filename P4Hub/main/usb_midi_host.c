@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "usb/usb_host.h"
 #include "usb_midi_host.h"
 
@@ -28,6 +29,7 @@ static usb_transfer_t *s_out = NULL, *s_in = NULL;
 static volatile bool   s_out_busy = false;
 static volatile uint32_t s_tx = 0, s_out_err = 0, s_dropped = 0;
 static volatile uint32_t s_rx_clocks = 0;   /* 0xF8 seen on IN (loopback proof) */
+static usb_midi_clock_cb_t s_clock_cb = NULL;   /* P4-011 MIDI-in tempo hook */
 
 /* ---- transfer callbacks (client-event context) --------------------------- */
 static void out_cb(usb_transfer_t *t)
@@ -38,11 +40,19 @@ static void out_cb(usb_transfer_t *t)
 static void in_cb(usb_transfer_t *t)
 {
     if (t->status == USB_TRANSFER_STATUS_COMPLETED) {
+        /* One timestamp per IN transfer: a MIDI-clock stream is one 0xF8 per
+         * packet, so batching is rare, and midi_clock_in averages over a beat. */
+        int64_t now = esp_timer_get_time();
         for (int i = 0; i + 1 < t->actual_num_bytes; i += 4)
-            if (t->data_buffer[i + 1] == 0xF8) s_rx_clocks++;   /* loopback tick */
+            if (t->data_buffer[i + 1] == 0xF8) {   /* USB-MIDI: byte[1] = status */
+                s_rx_clocks++;                      /* loopback proof counter */
+                if (s_clock_cb) s_clock_cb(now);    /* P4-011: feed BPM tracker */
+            }
     }
     if (s_ready) { t->num_bytes = s_in_mps; usb_host_transfer_submit(t); }
 }
+
+void usb_midi_host_set_clock_cb(usb_midi_clock_cb_t cb) { s_clock_cb = cb; }
 
 static void client_cb(const usb_host_client_event_msg_t *msg, void *arg)
 {

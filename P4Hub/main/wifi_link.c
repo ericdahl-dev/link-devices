@@ -13,6 +13,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_random.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "wifi_link.h"
@@ -21,6 +22,12 @@ static const char *TAG = "wifi_link";
 
 #define LINK_MCAST_ADDR "224.76.78.75"   /* Ableton Link session multicast group */
 #define LINK_PORT       20808
+#define ALIVE_TTL       5                /* seconds a peer honors our ALIVE (we re-send well under this) */
+
+static int          s_link_sock = -1;    /* owned by link_task; reused for TX (P4-011) */
+static uint8_t      s_node_id[8];        /* our stable random NodeId for published gossip */
+static LinkTimeline s_master_tl;         /* P4-011 MIDI-master override */
+static bool         s_master_set = false;
 
 /* link_protocol.c calls this weak platform hook for a millisecond clock. */
 uint32_t link_proto_millis(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
@@ -62,6 +69,7 @@ static void link_task(void *arg)
     link_proto_reset();
     int sock = open_link_socket();
     if (sock < 0) { vTaskDelete(NULL); return; }
+    s_link_sock = sock;   /* publish for wifi_link_send_alive() TX (P4-011) */
 
     uint8_t buf[512];
     int64_t last_tick = 0;
@@ -132,12 +140,46 @@ static void start_ap(void)
 
 void wifi_link_start(const char* ssid, const char* pass)
 {
+    esp_fill_random(s_node_id, sizeof(s_node_id));   /* stable per-boot published NodeId */
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     if (ssid && ssid[0] != '\0') start_sta(ssid, pass);
     else                         start_ap();
 }
 
-bool wifi_link_ap_mode(void)               { return s_ap_mode; }
-bool wifi_link_timeline(LinkTimeline* out) { return link_proto_timeline(out); }
-int  wifi_link_peers(void)                 { return link_proto_peers(); }
+bool wifi_link_ap_mode(void) { return s_ap_mode; }
+
+bool wifi_link_timeline(LinkTimeline* out)
+{
+    if (s_master_set) { if (out) *out = s_master_tl; return true; }   /* P4-011 override */
+    return link_proto_timeline(out);
+}
+
+void wifi_link_set_master_timeline(const LinkTimeline* tl)
+{
+    if (tl) { s_master_tl = *tl; s_master_set = true; }
+    else      s_master_set = false;
+}
+
+void wifi_link_send_alive(const LinkTimeline* tl)
+{
+    if (s_link_sock < 0 || !tl) return;
+
+    /* Claim the observed session if we've heard one (so the timeline is eligible
+     * for adoption); otherwise advertise our own island session (== our NodeId). */
+    uint8_t session_id[8];
+    if (!link_proto_session_id(session_id)) memcpy(session_id, s_node_id, 8);
+
+    uint8_t pkt[128];
+    int n = link_proto_build_alive(pkt, sizeof(pkt), s_node_id, session_id, tl, ALIVE_TTL);
+    if (n <= 0) return;
+
+    struct sockaddr_in dst = {
+        .sin_family      = AF_INET,
+        .sin_port        = htons(LINK_PORT),
+        .sin_addr.s_addr = inet_addr(LINK_MCAST_ADDR),
+    };
+    sendto(s_link_sock, pkt, n, 0, (struct sockaddr *)&dst, sizeof(dst));
+}
+
+int wifi_link_peers(void) { return link_proto_peers(); }

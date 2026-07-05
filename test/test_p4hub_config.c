@@ -8,6 +8,7 @@ void setUp(void)    { p4hub_config_defaults(&c); }
 void tearDown(void) {}
 
 void test_defaults(void) {
+    TEST_ASSERT_EQUAL_INT(P4HUB_TEMPO_LINK, c.tempo_source);   // follow Link (unchanged)
     TEST_ASSERT_EQUAL_INT(1, c.clock_out_enable);
     TEST_ASSERT_EQUAL_INT(0, c.metronome_enable);   // audible feature: default off
     TEST_ASSERT_EQUAL_INT(1, c.metronome_accent);   // accent bar-1 when enabled
@@ -87,6 +88,22 @@ void test_metronome_accent_toggle(void) {
     TEST_ASSERT_FALSE(p4hub_config_set(&c, "metro_accent", "9")); // only 0/1
 }
 
+// P4-011: tempo source arbitration (Link-follow vs MIDI-in master).
+void test_tempo_source_toggle(void) {
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "tempo_src", "1"));
+    TEST_ASSERT_EQUAL_INT(P4HUB_TEMPO_MIDI_MASTER, c.tempo_source);
+    TEST_ASSERT_TRUE(p4hub_config_valid(&c));
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "tempo_src", "0"));
+    TEST_ASSERT_EQUAL_INT(P4HUB_TEMPO_LINK, c.tempo_source);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "tempo_src", "2"));   // only 0/1
+    TEST_ASSERT_EQUAL_INT(P4HUB_TEMPO_LINK, c.tempo_source);     // unchanged
+}
+
+void test_invalid_tempo_source_rejected(void) {
+    c.tempo_source = 7;
+    TEST_ASSERT_FALSE(p4hub_config_valid(&c));
+}
+
 void test_unknown_key(void) {
     TEST_ASSERT_FALSE(p4hub_config_set(&c, "bogus", "x"));
 }
@@ -94,6 +111,8 @@ void test_unknown_key(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_defaults);
+    RUN_TEST(test_tempo_source_toggle);
+    RUN_TEST(test_invalid_tempo_source_rejected);
     RUN_TEST(test_output_defaults);
     RUN_TEST(test_set_ssid_and_pass);
     RUN_TEST(test_blank_pass_keeps_current);

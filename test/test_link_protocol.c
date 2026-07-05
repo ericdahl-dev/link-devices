@@ -78,8 +78,18 @@ static void append_stst(uint8_t* buf, int* len, bool playing) {
     *len = i;
 }
 
+// Append a SessionMembership TLV: key 'sess' + size 8 + 8-byte sessionId.
+static void append_sess(uint8_t* buf, int* len, const uint8_t sid[8]) {
+    int i = *len;
+    buf[i++] = 0x73; buf[i++] = 0x65; buf[i++] = 0x73; buf[i++] = 0x73; // 'sess'
+    buf[i++] = 0x00; buf[i++] = 0x00; buf[i++] = 0x00; buf[i++] = 0x08; // size=8
+    memcpy(buf + i, sid, 8); i += 8;
+    *len = i;
+}
+
 static uint8_t NODE_A[8] = {0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08};
 static uint8_t NODE_B[8] = {0xA1,0xA2,0xA3,0xA4,0xA5,0xA6,0xA7,0xA8};
+static uint8_t SESS_1[8] = {0xDE,0xAD,0xBE,0xEF,0x00,0x11,0x22,0x33};
 
 void test_valid_packet_extracts_bpm(void) {
     uint8_t buf[512]; int len;
@@ -331,8 +341,70 @@ void test_start_stop_parses_playing_false(void) {
     TEST_ASSERT_FALSE(link_proto_playing());
 }
 
+// --- SessionMembership ('sess') parse (P4-011) -------------------------
+
+void test_session_id_false_before_any_sess(void) {
+    uint8_t buf[512]; int len;
+    make_alive_packet(buf, &len, NODE_A, 500000LL);   // timeline only, no sess
+    link_proto_parse(buf, len);
+    uint8_t sid[8];
+    TEST_ASSERT_FALSE(link_proto_session_id(sid));
+}
+
+void test_session_id_parsed_from_sess_tlv(void) {
+    uint8_t buf[512]; int len;
+    make_alive_packet(buf, &len, NODE_A, 500000LL);
+    append_sess(buf, &len, SESS_1);
+    TEST_ASSERT_TRUE(link_proto_parse(buf, len));
+    uint8_t sid[8];
+    TEST_ASSERT_TRUE(link_proto_session_id(sid));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(SESS_1, sid, 8);
+}
+
+// --- link_proto_build_alive (P4-011): round-trips through our own parser ---
+
+void test_build_alive_round_trips_timeline(void) {
+    LinkTimeline tl = { .micros_per_beat = 500000LL,        // 120 BPM
+                        .beat_origin_micro = 42500000LL,    // 42.5 beats
+                        .time_origin_us    = 987654321LL };
+    uint8_t pkt[128];
+    int n = link_proto_build_alive(pkt, sizeof(pkt), NODE_B, SESS_1, &tl, 5);
+    TEST_ASSERT_TRUE(n > 0);
+
+    // Byte layout: magic, then Alive msgType at [8].
+    const uint8_t magic[8] = {'_','a','s','d','p','_','v', 1};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(magic, pkt, 8);
+    TEST_ASSERT_EQUAL_UINT8(1, pkt[8]);   // Alive
+    TEST_ASSERT_EQUAL_UINT8(5, pkt[9]);   // ttl
+
+    // Feed it back through the parser: peer, session, and timeline all recovered.
+    TEST_ASSERT_TRUE(link_proto_parse(pkt, n));
+    TEST_ASSERT_EQUAL_INT(1, link_proto_peers());
+    TEST_ASSERT_FLOAT_WITHIN(0.01, 120.0, (float)link_proto_bpm());
+
+    LinkTimeline out;
+    TEST_ASSERT_TRUE(link_proto_timeline(&out));
+    TEST_ASSERT_EQUAL_INT64(tl.micros_per_beat,   out.micros_per_beat);
+    TEST_ASSERT_EQUAL_INT64(tl.beat_origin_micro, out.beat_origin_micro);
+    TEST_ASSERT_EQUAL_INT64(tl.time_origin_us,    out.time_origin_us);
+
+    uint8_t sid[8];
+    TEST_ASSERT_TRUE(link_proto_session_id(sid));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(SESS_1, sid, 8);
+}
+
+void test_build_alive_rejects_small_buffer(void) {
+    LinkTimeline tl = { .micros_per_beat = 500000LL };
+    uint8_t pkt[20];   // too small for header + sess + tmln
+    TEST_ASSERT_EQUAL_INT(0, link_proto_build_alive(pkt, sizeof(pkt), NODE_B, SESS_1, &tl, 5));
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_session_id_false_before_any_sess);
+    RUN_TEST(test_session_id_parsed_from_sess_tlv);
+    RUN_TEST(test_build_alive_round_trips_timeline);
+    RUN_TEST(test_build_alive_rejects_small_buffer);
     RUN_TEST(test_mep4_attached_to_matching_peer);
     RUN_TEST(test_start_stop_not_seen_without_stst);
     RUN_TEST(test_start_stop_parses_playing_true);

@@ -27,6 +27,14 @@ uint32_t usb_midi_host_rx_clocks(void);
 // Count of clock packets sent out to the device.
 uint32_t usb_midi_host_tx(void);
 
+// Callback invoked for every 0xF8 timing-clock byte received on the device's IN
+// endpoint, with the monotonic microsecond timestamp of reception. Runs in the
+// USB client-event context, so it MUST be minimal + non-blocking (e.g. push a
+// timestamp into midi_clock_in_pulse()). P4-011 uses this to derive tempo from an
+// incoming MIDI clock. Pass NULL to detach. Set before/independent of enumeration.
+typedef void (*usb_midi_clock_cb_t)(int64_t ts_us);
+void usb_midi_host_set_clock_cb(usb_midi_clock_cb_t cb);
+
 #ifdef __cplusplus
 }
 #endif

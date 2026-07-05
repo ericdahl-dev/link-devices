@@ -10,6 +10,12 @@ extern "C" {
 
 #define P4HUB_CLOCK_OUTPUTS 4   // Multiclock-style per-output clocks (P4-010)
 
+// Tempo source arbitration (P4-011). Default LINK: follow the Ableton Link
+// session (current behavior). MIDI_MASTER: derive tempo from incoming USB-MIDI
+// clock and publish it INTO the Link session (the P4 becomes the tempo master).
+#define P4HUB_TEMPO_LINK        0   // follow Link (default)
+#define P4HUB_TEMPO_MIDI_MASTER 1   // MIDI-in drives Link
+
 // One configurable clock output (routed to a USB-MIDI cable). Division and phase
 // are the E-RM-Multiclock-style controls; swing is a deferred follow-up.
 typedef struct {
@@ -26,6 +32,12 @@ typedef struct {
     int  metronome_enable;  // 0/1 — click the onboard speaker on each beat (P4-006)
     int  metronome_accent;  // 0/1 — accent the bar-1 downbeat (louder/higher)
     ClockOutputCfg clock[P4HUB_CLOCK_OUTPUTS];   // P4-010 per-output clocks
+    // NOTE: config persists as a raw NVS blob (p4hub_config_nvs.c). NEW fields MUST
+    // be appended at the END so an older, shorter blob still loads its existing
+    // fields at the same offsets and new fields keep their p4hub_config_defaults()
+    // value (a shorter stored blob leaves trailing bytes untouched). Never insert
+    // mid-struct — it shifts every following field on an in-place upgrade.
+    int  tempo_source;      // P4HUB_TEMPO_* — Link-follow (default) vs MIDI-in master (P4-011)
 } P4HubConfig;
 
 void p4hub_config_defaults(P4HubConfig* c);

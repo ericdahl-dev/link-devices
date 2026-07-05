@@ -4,6 +4,7 @@
 
 void p4hub_config_defaults(P4HubConfig* c) {
     memset(c, 0, sizeof(*c));
+    c->tempo_source     = P4HUB_TEMPO_LINK;   // default: follow Link (unchanged behavior)
     c->clock_out_enable = 1;
     c->metronome_enable = 0;   // audible: default off so a fresh board is silent
     c->metronome_accent = 1;   // when enabled, accent the bar-1 downbeat
@@ -17,6 +18,7 @@ void p4hub_config_defaults(P4HubConfig* c) {
 }
 
 bool p4hub_config_valid(const P4HubConfig* c) {
+    if (c->tempo_source != P4HUB_TEMPO_LINK && c->tempo_source != P4HUB_TEMPO_MIDI_MASTER) return false;
     if (c->clock_out_enable != 0 && c->clock_out_enable != 1) return false;
     if (c->metronome_enable != 0 && c->metronome_enable != 1) return false;
     if (c->metronome_accent != 0 && c->metronome_accent != 1) return false;
@@ -44,6 +46,12 @@ bool p4hub_config_set(P4HubConfig* c, const char* key, const char* value) {
     if (strcmp(key, "wifi_pass") == 0) {
         if (value[0] == '\0') return true;   // blank = keep current
         return copy_field(c->wifi_pass, sizeof(c->wifi_pass), value);
+    }
+    if (strcmp(key, "tempo_src") == 0) {
+        int v = atoi(value);
+        if (v != P4HUB_TEMPO_LINK && v != P4HUB_TEMPO_MIDI_MASTER) return false;
+        c->tempo_source = v;
+        return true;
     }
     if (strcmp(key, "clock_out") == 0) {
         int v = atoi(value);

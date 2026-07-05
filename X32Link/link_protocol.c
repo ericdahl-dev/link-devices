@@ -18,6 +18,7 @@ static const uint8_t  MAGIC[8]     = {'_','a','s','d','p','_','v', 1};
 static const uint32_t TMLN_KEY     = 0x746d6c6eu;
 static const uint32_t MEP4_KEY     = 0x6d657034u;
 static const uint32_t STST_KEY     = 0x73747374u;  // Link StartStopState ('stst')
+static const uint32_t SESS_KEY     = 0x73657373u;  // Link SessionMembership ('sess')
 static const uint32_t PEER_TTL_MS  = 15000;
 
 static const uint8_t MSG_ALIVE    = 1;
@@ -39,6 +40,8 @@ static LinkTimeline s_timeline;
 static bool         s_timeline_seen = false;
 static bool         s_playing       = false;  // Link StartStopState isPlaying
 static bool         s_stst_seen     = false;  // have we parsed a StartStopState yet
+static uint8_t      s_session_id[8];          // last 'sess' SessionMembership seen
+static bool         s_session_seen  = false;  // have we parsed a 'sess' TLV yet
 
 // millis() shim — overridden in tests via weak symbol
 uint32_t __attribute__((weak)) link_proto_millis(void) { return 0; }
@@ -90,6 +93,8 @@ void link_proto_reset(void) {
     s_timeline_seen = false;
     s_playing    = false;
     s_stst_seen  = false;
+    s_session_seen = false;
+    memset(s_session_id, 0, sizeof(s_session_id));
     memset(&s_timeline, 0, sizeof(s_timeline));
 }
 
@@ -149,6 +154,14 @@ bool link_proto_parse(const uint8_t* buf, int len) {
             s_playing   = (p[0] != 0);
             s_stst_seen = true;
         }
+        // SessionMembership: the 8-byte sessionId this peer belongs to. Captured so
+        // a publishing node (P4-011) can claim the observed session (matching
+        // Ableton's sessionId) instead of its own island — the precondition for
+        // another peer to adopt our proposed Timeline.
+        if (key == SESS_KEY && size >= 8) {
+            memcpy(s_session_id, p, 8);
+            s_session_seen = true;
+        }
         p += size;
     }
     return true;
@@ -172,4 +185,46 @@ bool link_proto_peer_endpoint(int index, uint32_t* ip, uint16_t* port) {
     if (ip)   *ip   = s_peers[index].mep4_ip;
     if (port) *port = s_peers[index].mep4_port;
     return true;
+}
+
+bool link_proto_session_id(uint8_t out[8]) {
+    if (!s_session_seen) return false;
+    if (out) memcpy(out, s_session_id, 8);
+    return true;
+}
+
+static void put_be32(uint8_t* p, uint32_t v) {
+    p[0] = (v >> 24) & 0xff; p[1] = (v >> 16) & 0xff;
+    p[2] = (v >> 8)  & 0xff; p[3] = v & 0xff;
+}
+
+static void put_be64(uint8_t* p, int64_t v) {
+    for (int i = 0; i < 8; i++) p[i] = (uint8_t)((v >> (56 - 8 * i)) & 0xff);
+}
+
+int link_proto_build_alive(uint8_t* buf, int cap,
+                           const uint8_t node_id[8], const uint8_t session_id[8],
+                           const LinkTimeline* tl, uint8_t ttl) {
+    // header(20) + sess TLV(8 hdr + 8 val) + tmln TLV(8 hdr + 24 val)
+    const int need = 20 + (8 + 8) + (8 + 24);
+    if (!buf || !node_id || !session_id || !tl || cap < need) return 0;
+
+    int i = 0;
+    memcpy(buf + i, MAGIC, 8); i += 8;
+    buf[i++] = MSG_ALIVE;
+    buf[i++] = ttl;
+    buf[i++] = 0; buf[i++] = 0;              // groupId = 0 (no session group)
+    memcpy(buf + i, node_id, 8); i += 8;
+
+    put_be32(buf + i, SESS_KEY); i += 4;
+    put_be32(buf + i, 8);        i += 4;
+    memcpy(buf + i, session_id, 8); i += 8;
+
+    put_be32(buf + i, TMLN_KEY); i += 4;
+    put_be32(buf + i, 24);       i += 4;
+    put_be64(buf + i, tl->micros_per_beat);   i += 8;
+    put_be64(buf + i, tl->beat_origin_micro); i += 8;
+    put_be64(buf + i, tl->time_origin_us);    i += 8;
+
+    return i;
 }
