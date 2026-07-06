@@ -29,15 +29,14 @@
 #include "p4hub_web.h"
 #include "p4hub_config.h"
 #include "p4hub_config_nvs.h"
-#include "beat_clock.h"
+#include "beat_source.h"      /* basis selector: session phase vs free-run (ARC-007) */
 #include "clock_ticker.h"
 #include "metronome.h"
 #include "metronome_audio.h"
 #include "usb_midi_pack.h"
 #include "transport.h"        /* Link play/stop -> MIDI Start/Stop (P4-008) */
 #include "link_protocol.h"
-#include "link_measurement.h"   /* GhostXForm + host->ghost map (P4-009) */
-#include "link_phase.h"         /* link_phase_beats_now (session phase) */
+#include "link_measurement.h"   /* GhostXForm accessor (link_measurement_current_xform) */
 #include "link_measure_io.h"    /* unicast ping/pong measurement client */
 #include "clock_output.h"       /* per-output division + phase-nudge (P4-010) */
 
@@ -52,13 +51,11 @@ static P4HubConfig g_cfg;   /* loaded from NVS in app_main; edited via the web U
 
 static void clock_out_task(void *arg)
 {
-    BeatClock   bc;   beat_clock_reset(&bc);
+    BeatSource  src;  beat_source_reset(&src);
     ClockTicker cts[P4HUB_CLOCK_OUTPUTS];   /* one grid per output (P4-010) */
     for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
     Metronome   mt;   metronome_reset(&mt);
     Transport   tr;   transport_reset(&tr);
-    bool        running = false;
-    bool        phase_locked = false;  /* did the last emitting tick use session phase? */
     uint32_t    pulses = 0;
     uint32_t    clicks = 0;
     int64_t     last_log = 0;
@@ -71,34 +68,27 @@ static void clock_out_task(void *arg)
         LinkTimeline tl;
         bool have_session = wifi_link_timeline(&tl) && tl.micros_per_beat > 0;
 
-        if (have_session) {
-            /* One shared beat position drives clock-out AND the metronome. Phase-
-             * locked once a GhostXForm is committed (P4-009): map our local clock
-             * into the session ghost-time domain and read the true session beat, so
-             * the emitted tick 0 / downbeat align to the session. Until then, fall
-             * back to the free-running local-tempo accumulator (P4-005): correct
-             * rate, arbitrary phase. The metronome is self-contained — it clicks
-             * even with no USB-MIDI device attached. */
-            LinkGhostXForm xform = link_measurement_current_xform();
-            bool   locked = xform.valid;
-            double beats;
-            if (locked) {
-                int64_t ghost_now = link_ghost_xform_host_to_ghost(xform, esp_timer_get_time());
-                beats = link_phase_beats_now(tl, ghost_now);
-            } else {
-                beats = beat_clock_advance(&bc, esp_timer_get_time(), tl.micros_per_beat);
-            }
+        /* beat_source (ARC-007) owns the basis policy: phase-locked session beat
+         * once a GhostXForm is committed (P4-009, true downbeat) vs the free-
+         * running local accumulator (P4-005, correct rate / arbitrary phase), plus
+         * the re-prime signal on any basis switch or session loss. One shared beat
+         * drives clock-out AND the self-contained metronome. */
+        BeatSourceOut bs = beat_source_step(&src, have_session,
+                                            link_measurement_current_xform(),
+                                            tl, esp_timer_get_time());
 
-            /* Switching basis (free-run <-> session phase) shifts the beat origin;
-             * re-prime the tick + click grids so the boundary realigns instead of
-             * dumping a catch-up burst. On dropping back to free-run, restart
-             * beat_clock too. */
-            if (locked != phase_locked) {
-                for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
-                metronome_reset(&mt);
-                if (!locked) beat_clock_reset(&bc);
-                phase_locked = locked;
-            }
+        /* A basis switch or session loss shifts the beat origin; re-prime the tick
+         * + click grids so the boundary realigns instead of dumping a catch-up
+         * burst. On the session-loss edge, also reset transport so a later re-join
+         * does not fire a spurious Start. */
+        if (bs.reprime) {
+            for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
+            metronome_reset(&mt);
+            if (!bs.active) transport_reset(&tr);
+        }
+
+        if (bs.active) {
+            double beats = bs.beats;
 
             if (usb_midi_host_ready() && g_cfg.clock_out_enable) {
                 /* Fan the shared beat out to each enabled output at its own
@@ -142,15 +132,6 @@ static void clock_out_task(void *arg)
                              accent ? "ACCENT" : "click", beats, (unsigned long)clicks);
                 }
             }
-            running = true;
-        } else if (running) {
-            /* Session went away — reset so we re-prime cleanly. */
-            beat_clock_reset(&bc);
-            for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
-            metronome_reset(&mt);
-            transport_reset(&tr);
-            running = false;
-            phase_locked = false;
         }
 
         int64_t now = esp_timer_get_time();
@@ -158,7 +139,7 @@ static void clock_out_task(void *arg)
             last_log = now;
             ESP_LOGI(TAG, "link peers %d  bpm %.2f  phase %s  usb %s  clock TX %lu  play %d",
                      wifi_link_peers(), link_proto_bpm(),
-                     link_measurement_current_xform().valid ? "locked" : "free",
+                     bs.locked ? "locked" : "free",
                      usb_midi_host_ready() ? "ready" : "-", pulses,
                      link_proto_playing());
         }
