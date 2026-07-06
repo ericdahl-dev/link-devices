@@ -29,7 +29,7 @@ is configured live from a phone — no reboot to dial in timing.
 | Rack-panel **web UI** — config + live status | P4-007 | ✅ on hardware |
 | **MIDI clock IN** → detected BPM (displayed) | P4-011 s1 | ⏳ built + host-tested; needs a clock source to verify |
 | MIDI clock IN → **publish into Link** (P4 as tempo-setting peer) | P4-011 s2 | ⬜ not started |
-| **Web-based OTA update** — push a `.bin` at `/update`, no serial/USB needed | P4-016 | ⏳ built; on-device flash-and-boot check pending |
+| **Web-based OTA update** — push a `.bin` at `/update`, no serial/USB needed | P4-017 | ⏳ built; on-device flash-and-boot check pending |
 
 ## Signal flow
 
@@ -144,7 +144,7 @@ Two write paths:
 > Write & Reboot to rewrite NVS cleanly — otherwise old blobs misload. P4-014
 > (versioned NVS) will remove this footgun.
 
-### Firmware update (OTA, P4-016)
+### Firmware update (OTA, P4-017)
 
 `/update` uploads a compiled `.bin` (`idf.py build`'s
 `build/p4hub.bin`) straight into the inactive OTA slot and boots into it — no

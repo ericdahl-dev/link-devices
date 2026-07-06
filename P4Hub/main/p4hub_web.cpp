@@ -328,7 +328,7 @@ static esp_err_t live_handler(httpd_req_t *req)
     return httpd_resp_send(req, "ok", HTTPD_RESP_USE_STRLEN);
 }
 
-// P4-016: web-based OTA. The partition table is CONFIG_PARTITION_TABLE_TWO_OTA
+// P4-017: web-based OTA. The partition table is CONFIG_PARTITION_TABLE_TWO_OTA
 // (otadata + ota_0 + ota_1, no factory slot), so a push always targets "the
 // other" slot and boots into it on success — the running image is never
 // touched until esp_ota_set_boot_partition commits.

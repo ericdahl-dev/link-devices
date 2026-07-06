@@ -18,7 +18,7 @@ preserved; recovery tag `pre-split-2026-07-04` on the old repo).
   Blokas Midihub directly), **phase-locked downbeat** sync, four Multiclock-style
   outputs with per-output division / phase nudge / **swing**, an audible
   metronome, a rack-panel web UI with **live (no-reboot) timing config**,
-  **web-based OTA updates** (P4-016, dual-slot), and **MIDI clock IN** detection
+  **web-based OTA updates** (P4-017, dual-slot), and **MIDI clock IN** detection
   (publishing it back into Link is next). Reuses this repo's pure modules
   unchanged. See [`P4Hub/README.md`](P4Hub/README.md).
 - **X32MidiClock** (`X32MidiClock/`) — legacy standalone MIDI-clock sketch;
