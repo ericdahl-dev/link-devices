@@ -291,18 +291,6 @@ static void handle_update_upload() {
     }
 }
 
-static void handle_update_result() {
-    bool ok = !Update.hasError();
-    send_result(ok ? 200 : 500,
-                ok ? "Updated — Restarting" : "Update Failed",
-                ok ? "New firmware written. The device restarts now."
-                   : "Upload was interrupted or the image was rejected. Try again.");
-    if (ok) {
-        delay(1000);
-        ESP.restart();
-    }
-}
-
 // Live tempo for the panel's 7-seg readout, plus phase/valid/quantum for
 // the web beat dot (LNK-022) — same data the LED (LNK-021) and touch wheel
 // (LNK-015) already drive off, just surfaced over HTTP so the JS can
@@ -335,6 +323,18 @@ static void send_result(int code, const char* title, const char* body) {
     p += body;
     p += "</p></div></body>";
     server.send(code, "text/html; charset=utf-8", p);
+}
+
+static void handle_update_result() {
+    bool ok = !Update.hasError();
+    send_result(ok ? 200 : 500,
+                ok ? "Updated — Restarting" : "Update Failed",
+                ok ? "New firmware written. The device restarts now."
+                   : "Upload was interrupted or the image was rejected. Try again.");
+    if (ok) {
+        delay(1000);
+        ESP.restart();
+    }
 }
 
 static void handle_save() {
