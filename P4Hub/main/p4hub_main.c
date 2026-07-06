@@ -101,7 +101,7 @@ static void clock_out_task(void *arg)
                 for (int o = 0; o < P4HUB_CLOCK_OUTPUTS; o++) {
                     const ClockOutputCfg* oc = &g_cfg.clock[o];
                     if (!oc->enable) continue;
-                    int due = clock_output_due(&cts[o], beats, oc->ppqn, oc->phase_mbeats, MAX_BURST);
+                    int due = clock_output_due(&cts[o], beats, oc->ppqn, oc->phase_mbeats, oc->swing_mbeats, MAX_BURST);
                     for (int i = 0; i < due; i++) {
                         uint8_t pkt[4];
                         usb_midi_pack_single(oc->cable, 0xF8, pkt);   /* timing clock */

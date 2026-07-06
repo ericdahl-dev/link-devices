@@ -205,6 +205,11 @@ static std::string build_outputs()
              + "<input type=\"number\" class=\"live nudgev\" name=\"clk" + N + "_phase\" value=\""
              + std::to_string(c->phase_mbeats) + "\" min=\"-250\" max=\"250\" step=\"5\">"
              + "<button type=\"button\" class=\"stp\" data-step=\"5\">+</button></div>";
+        s += std::string("<div class=\"fld nudge\"><span class=\"pre\">SWING</span>")
+             + "<button type=\"button\" class=\"stp\" data-step=\"-5\">&minus;</button>"
+             + "<input type=\"number\" class=\"live nudgev\" name=\"clk" + N + "_swing\" value=\""
+             + std::to_string(c->swing_mbeats) + "\" min=\"0\" max=\"250\" step=\"5\">"
+             + "<button type=\"button\" class=\"stp\" data-step=\"5\">+</button></div>";
         s += "</div>";
     }
     return s;
