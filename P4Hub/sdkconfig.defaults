@@ -19,3 +19,18 @@ CONFIG_FREERTOS_HZ=1000
 
 # WiFi credentials (CONFIG_P4HUB_WIFI_*) are intentionally NOT set here — set them
 # locally (menuconfig or a gitignored sdkconfig); never commit credentials.
+
+# OTA firmware updates (P4-017): the built-in two-slot table (otadata + ota_0 +
+# ota_1, ~1.5 MB each) so `POST /update` can write the inactive slot and boot
+# into it via esp_ota_set_boot_partition — no factory partition, both slots are
+# equal-purpose OTA targets.
+CONFIG_PARTITION_TABLE_TWO_OTA=y
+
+# The two-OTA table needs ~3.1MB, which doesn't fit the ESP-IDF default 2MB
+# flash-size assumption (build fails at partition-table generation). 4MB is
+# the minimum step that fits it — NOT a measurement of this board's actual
+# flash chip, which isn't documented anywhere in this repo yet. Confirm the
+# real P4-NANO flash size (e.g. `esptool.py flash_id`) before ever flashing
+# OTA-built images to real hardware; if the chip is larger, raising this is
+# safe, but this value must never exceed the physical chip size.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
