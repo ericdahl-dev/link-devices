@@ -19,3 +19,9 @@ CONFIG_FREERTOS_HZ=1000
 
 # WiFi credentials (CONFIG_P4HUB_WIFI_*) are intentionally NOT set here — set them
 # locally (menuconfig or a gitignored sdkconfig); never commit credentials.
+
+# OTA firmware updates (P4-016): the built-in two-slot table (otadata + ota_0 +
+# ota_1, ~1.5 MB each) so `POST /update` can write the inactive slot and boot
+# into it via esp_ota_set_boot_partition — no factory partition, both slots are
+# equal-purpose OTA targets.
+CONFIG_PARTITION_TABLE_TWO_OTA=y

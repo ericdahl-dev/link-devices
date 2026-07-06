@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include <Update.h>
 
 extern AppConfig g_config;
 extern void config_save(const AppConfig*);
@@ -152,7 +153,7 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 <div class="fld" style="margin-top:6px"><span class="pre">PASS</span><input type="password" name="wifi_pass" placeholder="keep current"></div>
 </div>
 <button class="write" type="submit">Write &amp; Reboot<small>commit to flash &middot; device restarts</small></button>
-<div class="foot">ESP32-S3 &middot; Ableton Link &harr; OSC</div>
+<div class="foot">ESP32-S3 &middot; Ableton Link &harr; OSC &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
 </form>
 </div>
 <script>
@@ -240,6 +241,66 @@ static String build_html() {
 
 static void handle_root() {
     server.send(200, "text/html", build_html());
+}
+
+// LNK-034: web-based OTA. Plain multipart form (no JS needed) posts a compiled
+// .bin to /update; Update.h streams it straight into the inactive OTA app slot
+// (the Arduino esp32 core's default partition scheme reserves app0/app1) and
+// the result page reboots into it on success, same shape as handle_save().
+static const char UPDATE_HTML[] = R"HTML(<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>X32&middot;SYNC &middot; Firmware Update</title>
+<style>
+body{margin:0;min-height:100vh;background:#070809;color:#e9ece6;font-family:ui-monospace,Menlo,monospace;
+display:flex;align-items:center;justify-content:center;padding:16px}
+.card{width:100%;max-width:380px;border:1px solid #262b31;border-radius:14px;padding:28px 26px;background:#12151a}
+h2{margin:0 0 6px;font-size:18px;letter-spacing:.04em}
+p{color:#717a82;font-size:12.5px;margin:0 0 20px;letter-spacing:.03em}
+input[type=file]{display:block;width:100%;margin-bottom:18px;color:#e9ece6;font-family:inherit;font-size:13px}
+input[type=submit]{width:100%;border:0;cursor:pointer;border-radius:10px;font-weight:700;font-size:14px;
+letter-spacing:.06em;text-transform:uppercase;color:#0a0d07;padding:14px;
+background:linear-gradient(180deg,#d2ff63,#9be32a)}
+a{color:#b6ff36;text-decoration:none;font-size:12px}
+</style></head><body>
+<div class="card">
+<h2>Firmware Update</h2>
+<p>Select a compiled .bin. The device flashes it and reboots automatically.</p>
+<form method="POST" action="/update" enctype="multipart/form-data">
+<input type="file" name="update" accept=".bin">
+<input type="submit" value="Upload &amp; Flash">
+</form>
+<p style="margin-top:16px"><a href="/">&larr; Back to config</a></p>
+</div></body></html>)HTML";
+
+static void handle_update_page() {
+    server.send(200, "text/html", UPDATE_HTML);
+}
+
+static void handle_update_upload() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+        Serial.printf("OTA: receiving %s\n", upload.filename.c_str());
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) Update.printError(Serial);
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (Update.end(true)) Serial.printf("OTA: wrote %u bytes, restarting\n", upload.totalSize);
+        else Update.printError(Serial);
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        Update.end();
+    }
+}
+
+static void handle_update_result() {
+    bool ok = !Update.hasError();
+    send_result(ok ? 200 : 500,
+                ok ? "Updated — Restarting" : "Update Failed",
+                ok ? "New firmware written. The device restarts now."
+                   : "Upload was interrupted or the image was rejected. Try again.");
+    if (ok) {
+        delay(1000);
+        ESP.restart();
+    }
 }
 
 // Live tempo for the panel's 7-seg readout, plus phase/valid/quantum for
@@ -333,6 +394,8 @@ void web_config_begin() {
     server.on("/",       HTTP_GET,  handle_root);
     server.on("/status", HTTP_GET,  handle_status);
     server.on("/save",   HTTP_POST, handle_save);
+    server.on("/update", HTTP_GET,  handle_update_page);
+    server.on("/update", HTTP_POST, handle_update_result, handle_update_upload);
     server.begin();
 }
 

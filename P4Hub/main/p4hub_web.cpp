@@ -12,6 +12,8 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "midi_clock_in.h"   /* detected MIDI-clock-IN tempo for /status (P4-011) */
 #include "link_protocol.h"
 #include "wifi_link.h"
@@ -134,7 +136,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 %OUTPUTS%
 <button class="write" type="submit">Write &amp; Reboot</button>
 </form>
-<div class="foot">ESP32-P4 &middot; Ableton Link &rarr; USB-MIDI</div>
+<div class="foot">ESP32-P4 &middot; Ableton Link &rarr; USB-MIDI &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
 </div>
 <script>
 var bpmEl=document.getElementById('bpm'),beatEl=document.getElementById('beat');
@@ -326,6 +328,113 @@ static esp_err_t live_handler(httpd_req_t *req)
     return httpd_resp_send(req, "ok", HTTPD_RESP_USE_STRLEN);
 }
 
+// P4-016: web-based OTA. The partition table is CONFIG_PARTITION_TABLE_TWO_OTA
+// (otadata + ota_0 + ota_1, no factory slot), so a push always targets "the
+// other" slot and boots into it on success — the running image is never
+// touched until esp_ota_set_boot_partition commits.
+static const char UPDATE_PAGE[] = R"HTML(<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P4&middot;HUB &middot; Firmware Update</title>
+<style>
+body{margin:0;min-height:100vh;background:#070809;color:#e9ece6;font-family:ui-monospace,Menlo,monospace;
+display:flex;align-items:center;justify-content:center;padding:16px}
+.card{width:100%;max-width:380px;border:1px solid #262b31;border-radius:14px;padding:28px 26px;background:#12151a}
+h2{margin:0 0 6px;font-size:18px;letter-spacing:.04em}
+p{color:#717a82;font-size:12.5px;margin:0 0 20px;letter-spacing:.03em}
+input[type=file]{display:block;width:100%;margin-bottom:18px;color:#e9ece6;font-family:inherit;font-size:13px}
+button{width:100%;border:0;cursor:pointer;border-radius:10px;font-weight:700;font-size:14px;
+letter-spacing:.06em;text-transform:uppercase;color:#0a0d07;padding:14px;
+background:linear-gradient(180deg,#d2ff63,#9be32a)}
+#st{margin-top:14px;font-size:12px;color:#717a82;letter-spacing:.03em}
+a{color:#b6ff36;text-decoration:none;font-size:12px}
+</style></head><body>
+<div class="card">
+<h2>Firmware Update</h2>
+<p>Select a compiled .bin. The device flashes the inactive OTA slot and reboots
+into it automatically.</p>
+<input type="file" id="fw" accept=".bin">
+<button id="go">Upload &amp; Flash</button>
+<div id="st"></div>
+<p style="margin-top:16px"><a href="/">&larr; Back</a></p>
+</div>
+<script>
+document.getElementById('go').addEventListener('click',function(){
+var f=document.getElementById('fw').files[0],st=document.getElementById('st');
+if(!f){st.textContent='Choose a .bin file first.';return}
+st.textContent='Uploading '+f.size+' bytes...';
+fetch('/update',{method:'POST',body:f}).then(function(r){
+return r.text().then(function(t){return {ok:r.ok,t:t}})
+}).then(function(res){st.textContent=res.ok?'Flashed — rebooting…':('Failed: '+res.t)})
+.catch(function(e){st.textContent='Error: '+e})
+});
+</script></body></html>)HTML";
+
+static esp_err_t update_page_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html");
+    return httpd_resp_send(req, UPDATE_PAGE, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t send_plain(httpd_req_t *req, const char *status, const char *msg)
+{
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, msg, HTTPD_RESP_USE_STRLEN);
+}
+
+// POST /update — the request body IS the raw .bin (the page's JS does
+// fetch('/update',{method:'POST',body:file}), no multipart), streamed straight
+// into esp_ota_ops chunk by chunk so the whole image never sits in RAM at once.
+static esp_err_t update_handler(httpd_req_t *req)
+{
+    const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
+    if (!target) return send_plain(req, "500 Internal Server Error", "no OTA partition available");
+
+    esp_ota_handle_t handle = 0;
+    esp_err_t err = esp_ota_begin(target, OTA_SIZE_UNKNOWN, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ota begin failed: %s", esp_err_to_name(err));
+        return send_plain(req, "500 Internal Server Error", "ota begin failed");
+    }
+
+    char buf[4096];
+    int remaining = req->content_len;
+    while (remaining > 0) {
+        int r = httpd_req_recv(req, buf, remaining < (int)sizeof(buf) ? remaining : (int)sizeof(buf));
+        if (r <= 0) {
+            if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
+            esp_ota_abort(handle);
+            return send_plain(req, "500 Internal Server Error", "upload interrupted");
+        }
+        err = esp_ota_write(handle, buf, r);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "ota write failed: %s", esp_err_to_name(err));
+            esp_ota_abort(handle);
+            return send_plain(req, "500 Internal Server Error", "flash write failed");
+        }
+        remaining -= r;
+    }
+
+    err = esp_ota_end(handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ota end failed: %s", esp_err_to_name(err));
+        return send_plain(req, "500 Internal Server Error",
+                           err == ESP_ERR_OTA_VALIDATE_FAILED ? "image validation failed" : "ota end failed");
+    }
+
+    err = esp_ota_set_boot_partition(target);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "set boot partition failed: %s", esp_err_to_name(err));
+        return send_plain(req, "500 Internal Server Error", "set boot partition failed");
+    }
+
+    ESP_LOGI(TAG, "OTA ok, booting %s next", target->label);
+    esp_err_t rc = send_plain(req, "200 OK", "OK - rebooting");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return rc;
+}
+
 void p4hub_web_start(P4HubConfig* cfg, volatile uint32_t* gen)
 {
     s_cfg = cfg;
@@ -333,13 +442,17 @@ void p4hub_web_start(P4HubConfig* cfg, volatile uint32_t* gen)
     httpd_handle_t server = NULL;
     httpd_config_t hcfg = HTTPD_DEFAULT_CONFIG();
     if (httpd_start(&server, &hcfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
-    httpd_uri_t root   = { .uri = "/",       .method = HTTP_GET,  .handler = root_handler,   .user_ctx = NULL };
-    httpd_uri_t status = { .uri = "/status", .method = HTTP_GET,  .handler = status_handler, .user_ctx = NULL };
-    httpd_uri_t save   = { .uri = "/save",   .method = HTTP_POST, .handler = save_handler,   .user_ctx = NULL };
-    httpd_uri_t live   = { .uri = "/live",   .method = HTTP_POST, .handler = live_handler,   .user_ctx = NULL };
+    httpd_uri_t root       = { .uri = "/",       .method = HTTP_GET,  .handler = root_handler,        .user_ctx = NULL };
+    httpd_uri_t status     = { .uri = "/status", .method = HTTP_GET,  .handler = status_handler,      .user_ctx = NULL };
+    httpd_uri_t save       = { .uri = "/save",   .method = HTTP_POST, .handler = save_handler,        .user_ctx = NULL };
+    httpd_uri_t live       = { .uri = "/live",   .method = HTTP_POST, .handler = live_handler,         .user_ctx = NULL };
+    httpd_uri_t update_get = { .uri = "/update", .method = HTTP_GET,  .handler = update_page_handler,  .user_ctx = NULL };
+    httpd_uri_t update_post= { .uri = "/update", .method = HTTP_POST, .handler = update_handler,       .user_ctx = NULL };
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &status);
     httpd_register_uri_handler(server, &save);
     httpd_register_uri_handler(server, &live);
+    httpd_register_uri_handler(server, &update_get);
+    httpd_register_uri_handler(server, &update_post);
     ESP_LOGI(TAG, "web UI on :80");
 }
