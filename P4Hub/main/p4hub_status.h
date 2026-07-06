@@ -10,11 +10,12 @@
 extern "C" {
 #endif
 
-// Formats {"bpm":F,"peers":N,"usb":bool,"tx":N} into buf. `bpm` is the live Link
-// session tempo, `peers` the Link peer count, `usb` whether a USB-MIDI device is
+// Formats {"bpm":F,"min":F,"peers":N,"usb":bool,"tx":N} into buf. `bpm` is the
+// live Link session tempo, `min` the detected MIDI-clock-IN tempo (0 when no clock
+// in, P4-011), `peers` the Link peer count, `usb` whether a USB-MIDI device is
 // ready, `tx` the running clock-pulse count. Returns snprintf()'s return value so
 // the caller can detect truncation.
-int p4hub_status_json(char* buf, size_t len, float bpm, int peers, bool usb, uint32_t tx);
+int p4hub_status_json(char* buf, size_t len, float bpm, float midi_bpm, int peers, bool usb, uint32_t tx);
 
 #ifdef __cplusplus
 }

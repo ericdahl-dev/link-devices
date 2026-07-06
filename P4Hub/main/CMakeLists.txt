@@ -8,6 +8,8 @@ idf_component_register(
          "wifi_link.c"
          "link_measure_io.c"
          "usb_midi_host.c"
+         "midi_clock_in.c"
+         "${X32LINK_DIR}/midi_bpm_calc.c"
          "p4hub_web.cpp"
          "p4hub_status.c"
          "p4hub_config.c"
