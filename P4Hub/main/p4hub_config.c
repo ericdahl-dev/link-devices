@@ -15,6 +15,7 @@ void p4hub_config_defaults(P4HubConfig* c) {
         c->clock[i].cable        = i;
         c->clock[i].ppqn         = 24;
         c->clock[i].phase_mbeats = 0;
+        c->clock[i].swing_mbeats = 0;   // straight by default (P4-013)
     }
 }
 
@@ -30,6 +31,7 @@ bool p4hub_config_valid(const P4HubConfig* c) {
         if (o->cable < 0 || o->cable > 3) return false;
         if (o->ppqn < 1 || o->ppqn > 48) return false;
         if (o->phase_mbeats < -250 || o->phase_mbeats > 250) return false;
+        if (o->swing_mbeats < 0 || o->swing_mbeats > 250) return false;
     }
     return true;
 }
@@ -90,6 +92,7 @@ bool p4hub_config_set(P4HubConfig* c, const char* key, const char* value) {
         if (strcmp(f, "cable") == 0) { if (v < 0 || v > 3)   return false; o->cable = v; return true; }
         if (strcmp(f, "ppqn") == 0)  { if (v < 1 || v > 48)  return false; o->ppqn = v; return true; }
         if (strcmp(f, "phase") == 0) { if (v < -250 || v > 250) return false; o->phase_mbeats = v; return true; }
+        if (strcmp(f, "swing") == 0) { if (v < 0 || v > 250)    return false; o->swing_mbeats = v; return true; }
         return false;
     }
     return false;
