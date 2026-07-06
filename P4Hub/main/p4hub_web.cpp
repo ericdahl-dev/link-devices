@@ -10,7 +10,9 @@
 #include "freertos/task.h"
 #include "esp_http_server.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_log.h"
+#include "midi_clock_in.h"   /* detected MIDI-clock-IN tempo for /status (P4-011) */
 #include "link_protocol.h"
 #include "wifi_link.h"
 #include "usb_midi_host.h"
@@ -113,6 +115,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="rows">
 <div class="row"><label>Link Peers</label><span class="val" id="peers">0</span></div>
 <div class="row"><label>USB-MIDI Device</label><span class="pill" id="usb">Waiting</span></div>
+<div class="row"><label>MIDI Clock In</label><span class="val" id="min">&mdash;&mdash;.&mdash; BPM</span></div>
 <div class="row"><label>Clock Out</label><span class="val" id="tx">0 pulses</span></div>
 </div>
 <form method="POST" action="/save">
@@ -135,7 +138,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 </div>
 <script>
 var bpmEl=document.getElementById('bpm'),beatEl=document.getElementById('beat');
-var peersEl=document.getElementById('peers'),usbEl=document.getElementById('usb'),txEl=document.getElementById('tx');
+var peersEl=document.getElementById('peers'),usbEl=document.getElementById('usb'),txEl=document.getElementById('tx'),minEl=document.getElementById('min');
 var beatTimer=null,shownBpm=-1;
 function setBeat(bpm){if(beatTimer){clearInterval(beatTimer);beatTimer=null}
 if(bpm>0){beatTimer=setInterval(function(){beatEl.classList.add('on');setTimeout(function(){beatEl.classList.remove('on')},90)},60000/bpm)}}
@@ -143,6 +146,7 @@ function showBpm(bpm){if(Math.abs(bpm-shownBpm)<0.05)return;shownBpm=bpm;bpmEl.t
 function poll(){fetch('/status',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
 if(typeof d.bpm==='number')showBpm(d.bpm);peersEl.textContent=d.peers;
 usbEl.textContent=d.usb?'Connected':'Waiting';usbEl.className='pill'+(d.usb?' on':'');
+minEl.textContent=(d.min>0)?d.min.toFixed(1)+' BPM':'——.— BPM';
 txEl.textContent=(d.tx||0)+' pulses';}).catch(function(){})}
 poll();setInterval(poll,1000);
 // Live controls (P4-015): POST the changed field to /live so timing/division are
@@ -237,10 +241,10 @@ static esp_err_t root_handler(httpd_req_t *req)
 
 static esp_err_t status_handler(httpd_req_t *req)
 {
-    char buf[96];
+    char buf[128];
     p4hub_status_json(buf, sizeof(buf),
-                      (float)link_proto_bpm(), wifi_link_peers(),
-                      usb_midi_host_ready(), usb_midi_host_tx());
+                      (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
+                      wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx());
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }
