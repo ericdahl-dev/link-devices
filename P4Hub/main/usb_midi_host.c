@@ -9,8 +9,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "usb/usb_host.h"
 #include "usb_midi_host.h"
+#include "midi_clock_in.h"   /* feed incoming 0xF8 timing to the BPM tracker (P4-011) */
 
 static const char *TAG = "usb_midi_host";
 
@@ -38,8 +40,12 @@ static void out_cb(usb_transfer_t *t)
 static void in_cb(usb_transfer_t *t)
 {
     if (t->status == USB_TRANSFER_STATUS_COMPLETED) {
+        int64_t now = esp_timer_get_time();
         for (int i = 0; i + 1 < t->actual_num_bytes; i += 4)
-            if (t->data_buffer[i + 1] == 0xF8) s_rx_clocks++;   /* loopback tick */
+            if (t->data_buffer[i + 1] == 0xF8) {
+                s_rx_clocks++;                 /* loopback proof counter */
+                midi_clock_in_pulse(now);      /* -> BPM tracker (P4-011) */
+            }
     }
     if (s_ready) { t->num_bytes = s_in_mps; usb_host_transfer_submit(t); }
 }

@@ -31,6 +31,7 @@ BEATSOURCE = ../X32Link/beat_source.c
 P4STATUS = ../P4Hub/main/p4hub_status.c
 P4CONFIG = ../P4Hub/main/p4hub_config.c
 P4FORM  = ../P4Hub/main/p4hub_form.c
+MIDICLOCKIN = ../P4Hub/main/midi_clock_in.c
 TRANSPORT = ../X32Link/transport.c
 CLOCKOUTPUT = ../X32Link/clock_output.c
 MVOICE = ../X32Link/metronome_voice.c
@@ -38,7 +39,7 @@ SWING   = ../X32Link/swing.c
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_usb_midi_pack test_beat_clock test_p4hub_status test_p4hub_config test_p4hub_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_usb_midi_pack test_beat_clock test_p4hub_status test_p4hub_config test_p4hub_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -68,6 +69,7 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_clock_output
 	./test_metronome_voice
 	./test_swing
+	./test_midi_clock_in
 	./test_metronome
 	./check_docs.sh
 
@@ -151,6 +153,9 @@ test_p4hub_config: test_p4hub_config.c $(P4CONFIG) $(UNITY)
 
 test_p4hub_form: test_p4hub_form.c $(P4FORM) $(P4CONFIG) $(UNITY)
 	$(CC) $(CFLAGS) -I../P4Hub/main $^ -o $@
+
+test_midi_clock_in: test_midi_clock_in.c $(MIDICLOCKIN) $(MIDICALC) $(UNITY)
+	$(CC) $(CFLAGS) -I../P4Hub/main $^ -o $@ -lm
 
 test_metronome: test_metronome.c $(METRO) $(CLOCKTICK) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
