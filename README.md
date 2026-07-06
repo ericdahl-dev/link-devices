@@ -11,16 +11,19 @@ preserved; recovery tag `pre-split-2026-07-04` on the old repo).
   to a Behringer XR18/X32 FX slot over OSC. Also drives a 1.47" touch LCD
   (Waveshare board), **USB-MIDI clock OUT** (LNK-027), and a planned analog
   Eurorack sync (LNK-028). Runtime source is chosen from the web/touch config UI.
+- **P4Hub** (`P4Hub/`) — the "pro" hub tier, in active development
+  (ESP32-P4-NANO, native ESP-IDF). Turns a Link session into phase-accurate MIDI
+  for real hardware: **USB-MIDI host** clock + transport out (drive gear like a
+  Blokas Midihub directly), **phase-locked downbeat** sync, four Multiclock-style
+  outputs with per-output division / phase nudge / **swing**, an audible
+  metronome, a rack-panel web UI with **live (no-reboot) timing config**, and
+  **MIDI clock IN** detection (publishing it back into Link is next). Reuses this
+  repo's pure modules unchanged. See [`P4Hub/README.md`](P4Hub/README.md).
 - **X32MidiClock** (`X32MidiClock/`) — legacy standalone MIDI-clock sketch;
   superseded by X32Link (retirement tracked in LNK-024). Shares C files with
   X32Link via symlinks.
-- **X32FaderDisp** (`X32FaderDisp/`) — ESP32 fader-dB scribble-strip display (X32).
 - **X32_emulator** (`X32_emulator/`) — on-device X32 OSC emulator used for
   integration tests (also consumed by the CLI tests in the `behringer` repo).
-- **ESP32-P4 hub** — *planned* "pro" tier (ESP32-P4-NANO): USB-MIDI **host**
-  (drive USB gear like a Blokas MIDIHub directly from Link clock), audible
-  metronome (onboard speaker), bigger display, PoE/Ethernet. A new firmware target
-  that reuses this repo's pure modules. Scoping: `tasks/P4-001.md`.
 
 ## Architecture
 
@@ -40,6 +43,14 @@ CI (`.github/workflows/ci.yml`) runs the host suite + compiles X32Link (headless
 
 ## Tasks
 
-Own Ordna tracker in `tasks/` (prefixes: `LNK-` X32Link, `ESP-` emulator, `MCK-`,
-`FDR-`, `MUT-`, `ITT-`, `TSV-`; `.ordna/config.yaml`). The `behringer` monorepo
-keeps its `T-*` CLI tracker separately.
+Own Ordna tracker in `tasks/` (prefixes: `LNK-` X32Link, `P4-` P4Hub, `ARC-`
+cross-cutting firmware architecture, `ESP-` emulator, `MCK-` X32MidiClock;
+`.ordna/config.yaml`). The `behringer` monorepo keeps its `T-*` CLI tracker
+separately.
+
+## Credits
+
+This firmware builds on third-party work — Unity, ESP-IDF + Espressif components,
+Arduino-ESP32, LovyanGFX, and the web-UI fonts — and speaks the Ableton Link
+protocol via a clean-room implementation. See [`THIRD_PARTY.md`](THIRD_PARTY.md)
+for authors, licenses, and where each is used.
