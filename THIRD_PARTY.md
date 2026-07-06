@@ -52,6 +52,15 @@ references these over Google Fonts / jsDelivr. All **SIL Open Font License 1.1**
 - **MIDI** is a specification of the MIDI Association; the clock/transport bytes
   here are implemented directly.
 
+## Documentation & references
+
+- **X32 / M32 OSC protocol — Patrick Maillot.** The entire X32 / XR18 OSC side of
+  this project (writing FX delay times and reading mixer state over OSC) rests on
+  **Patrick Maillot's** meticulous *Unofficial X32/M32 OSC protocol* documentation:
+  <https://sites.google.com/site/patrickmaillot/x32>. Behringer publishes no
+  official OSC spec; his reverse-engineered reference is what makes talking to the
+  console possible at all. This work would not exist without it — thank you.
+
 ---
 
 *Spot a missing or mis-stated attribution? It's a bug — please open an issue.*
