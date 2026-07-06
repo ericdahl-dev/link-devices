@@ -57,6 +57,12 @@ void test_output_set_and_ranges(void) {
     TEST_ASSERT_TRUE(p4hub_config_set(&c, "clk2_phase", "-50"));  // nudge earlier
     TEST_ASSERT_EQUAL_INT(-50, c.clock[2].phase_mbeats);
     TEST_ASSERT_FALSE(p4hub_config_set(&c, "clk2_phase", "300")); // ±250
+
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "clk3_swing", "167"));  // triplet feel
+    TEST_ASSERT_EQUAL_INT(167, c.clock[3].swing_mbeats);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "clk3_swing", "-1"));  // 0..250
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "clk3_swing", "251"));
+    TEST_ASSERT_EQUAL_INT(167, c.clock[3].swing_mbeats);         // unchanged
 }
 
 // Out-of-range index and unknown per-output field are rejected.
