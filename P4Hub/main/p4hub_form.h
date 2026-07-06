@@ -13,12 +13,19 @@
 extern "C" {
 #endif
 
-// Resolve an application/x-www-form-urlencoded body into *out, starting from
-// *base. Mutates `body` in place (decode + tokenize). Checkbox-backed booleans
-// (clock out, metronome, accent, per-output enables) are cleared before the
-// walk, so a checkbox absent from the body reads as off; a present key turns its
-// own back on. Value fields absent from the body keep their base value.
+// Resolve a FULL config form into *out, starting from *base. Mutates `body` in
+// place (decode + tokenize). Checkbox-backed booleans (clock out, metronome,
+// accent, per-output enables) are cleared before the walk, so a checkbox absent
+// from the body reads as off; a present key turns its own back on. Value fields
+// absent from the body keep their base value. Used by POST /save.
 void p4hub_form_resolve(char *body, const P4HubConfig *base, P4HubConfig *out);
+
+// Apply a PARTIAL body as a patch onto *base: set only the fields whose keys are
+// present, leave everything else at its base value (no checkbox clearing). Mutates
+// `body` in place. Used by POST /live, where a body carrying one field must not
+// disable the checkboxes it happens to omit. p4hub_form_resolve is this plus a
+// checkbox pre-clear.
+void p4hub_form_apply(char *body, const P4HubConfig *base, P4HubConfig *out);
 
 #ifdef __cplusplus
 }

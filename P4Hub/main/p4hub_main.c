@@ -48,6 +48,7 @@ static const char *TAG = "p4hub";
 #define METRO_BURST     8    /* re-prime the click grid past this beat backlog */
 
 static P4HubConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
+static volatile uint32_t g_cfg_gen = 0;   /* bumped by web POST /live; clock task re-primes on change (P4-015) */
 
 static void clock_out_task(void *arg)
 {
@@ -59,6 +60,7 @@ static void clock_out_task(void *arg)
     uint32_t    pulses = 0;
     uint32_t    clicks = 0;
     int64_t     last_log = 0;
+    uint32_t    seen_gen = g_cfg_gen;   /* re-prime when the web UI live-edits timing (P4-015) */
 
     while (1) {
         /* Drive the measurement client (ping/pong -> GhostXForm). Opens its own
@@ -77,11 +79,14 @@ static void clock_out_task(void *arg)
                                             link_measurement_current_xform(),
                                             tl, esp_timer_get_time());
 
-        /* A basis switch or session loss shifts the beat origin; re-prime the tick
-         * + click grids so the boundary realigns instead of dumping a catch-up
-         * burst. On the session-loss edge, also reset transport so a later re-join
-         * does not fire a spurious Start. */
-        if (bs.reprime) {
+        /* A basis switch, session loss, or a live config edit (P4-015: phase /
+         * division / swing changed via POST /live) shifts the beat grid; re-prime
+         * the tick + click grids so the boundary realigns instead of dumping a
+         * catch-up burst. On the session-loss edge, also reset transport so a later
+         * re-join does not fire a spurious Start. */
+        bool reprime = bs.reprime;
+        if (g_cfg_gen != seen_gen) { reprime = true; seen_gen = g_cfg_gen; }
+        if (reprime) {
             for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
             metronome_reset(&mt);
             if (!bs.active) transport_reset(&tr);
@@ -160,7 +165,7 @@ void app_main(void)
     ESP_LOGI(TAG, "P4Hub — Link tempo -> USB-MIDI host clock out (P4-005/007)");
     usb_midi_host_start();
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
-    p4hub_web_start(&g_cfg);
+    p4hub_web_start(&g_cfg, &g_cfg_gen);
     if (g_cfg.metronome_enable)
         metronome_audio_start(g_cfg.metronome_volume, g_cfg.metronome_voice);   /* codec/I2S only when used */
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);

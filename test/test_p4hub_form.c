@@ -80,6 +80,46 @@ void test_encoded_ampersand_survives_split(void) {
     TEST_ASSERT_EQUAL_STRING("a&b", out.wifi_pass);
 }
 
+// --- p4hub_form_apply: PATCH semantics for POST /live ---------------------
+
+static void apply(const char *body) {
+    char buf[1024];
+    strncpy(buf, body, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    p4hub_form_apply(buf, &base, &out);
+}
+
+// A present field is applied; an absent CHECKBOX is left alone (not cleared).
+// This is the difference from resolve() — a live nudge that carries only a phase
+// value must not disable clock-out or the metronome.
+void test_apply_patches_present_leaves_absent_checkbox(void) {
+    base.clock_out_enable = 1;
+    base.metronome_enable = 1;
+    base.metronome_accent = 1;
+    base.clock[0].enable  = 1;
+    apply("clk0_phase=40");
+    TEST_ASSERT_EQUAL_INT(40, out.clock[0].phase_mbeats);   // applied
+    TEST_ASSERT_EQUAL_INT(1,  out.clock_out_enable);        // untouched
+    TEST_ASSERT_EQUAL_INT(1,  out.metronome_enable);
+    TEST_ASSERT_EQUAL_INT(1,  out.metronome_accent);
+    TEST_ASSERT_EQUAL_INT(1,  out.clock[0].enable);
+}
+
+// A present checkbox key still turns it on (patch can enable, just can't
+// implicitly disable via absence).
+void test_apply_present_checkbox_still_sets(void) {
+    base.metronome_accent = 0;
+    apply("metro_accent=1");
+    TEST_ASSERT_EQUAL_INT(1, out.metronome_accent);
+}
+
+// Absent value fields keep their base value, same as resolve.
+void test_apply_absent_value_keeps_base(void) {
+    base.clock[1].ppqn = 48;
+    apply("clk0_phase=10");
+    TEST_ASSERT_EQUAL_INT(48, out.clock[1].ppqn);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_sets_one_field_keeps_base);
@@ -89,5 +129,8 @@ int main(void) {
     RUN_TEST(test_absent_value_field_keeps_base);
     RUN_TEST(test_url_decode_value);
     RUN_TEST(test_encoded_ampersand_survives_split);
+    RUN_TEST(test_apply_patches_present_leaves_absent_checkbox);
+    RUN_TEST(test_apply_present_checkbox_still_sets);
+    RUN_TEST(test_apply_absent_value_keeps_base);
     return UNITY_END();
 }

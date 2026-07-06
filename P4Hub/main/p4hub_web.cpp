@@ -22,6 +22,7 @@
 
 static const char *TAG = "p4hub_web";
 static P4HubConfig *s_cfg = nullptr;
+static volatile uint32_t *s_gen = nullptr;   // bumped on /live so the clock task re-primes
 
 // %SSID% / %MCKCHK% / %CABLE% are filled per-request from the live config.
 static const char PAGE[] = R"HTML(<!doctype html>
@@ -78,6 +79,13 @@ form{padding:2px 26px 26px}
 .fld .pre{color:#4b535b;font-size:12px;letter-spacing:.1em;padding-right:9px;border-right:1px solid var(--line);margin-right:11px}
 .fld input,.fld select{flex:1;appearance:none;background:transparent;border:0;outline:0;color:var(--ink);font-family:var(--mono);font-size:14.5px;padding:13px 0}
 .fld option{background:#0f1216}
+.fld.nudge{gap:9px}
+.fld.nudge input{text-align:center;padding:9px 0}
+.stp{flex:none;width:46px;height:46px;border-radius:9px;border:1px solid var(--line);
+background:linear-gradient(180deg,#1a1f25,#12161b);color:var(--ink);font-family:var(--disp);
+font-weight:800;font-size:24px;line-height:1;cursor:pointer;display:flex;align-items:center;
+justify-content:center;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.stp:active{background:#0d1014;transform:translateY(1px);border-color:#4a5a2c}
 .sw{display:flex;align-items:center;gap:13px;cursor:pointer;user-select:none}
 .sw input{position:absolute;opacity:0;width:0;height:0}
 .sw .track{position:relative;flex:none;width:52px;height:28px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);transition:.2s}
@@ -112,11 +120,11 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="fld"><span class="pre">SSID</span><input name="wifi_ssid" value="%SSID%" autocomplete="off"></div>
 <div class="fld"><span class="pre">PASS</span><input name="wifi_pass" type="password" placeholder="keep current"></div></div>
 <div class="frow"><span class="cap">MIDI Clock Out</span>
-<label class="sw"><input type="checkbox" name="clock_out" value="1" %MCKCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
+<label class="sw"><input type="checkbox" class="live" name="clock_out" value="1" %MCKCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="frow"><span class="cap">Metronome (Speaker)</span>
 <label class="sw"><input type="checkbox" name="metronome" value="1" %MTOCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="frow"><span class="cap">Accent Bar 1</span>
-<label class="sw"><input type="checkbox" name="metro_accent" value="1" %MTACHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
+<label class="sw"><input type="checkbox" class="live" name="metro_accent" value="1" %MTACHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="frow"><span class="cap">Metronome Sound</span>
 <div class="fld"><span class="pre">VOL</span><input type="number" name="metro_vol" value="%MVOL%" min="0" max="100" step="5"></div>
 <div class="fld"><span class="pre">VOICE</span><select name="metro_voice" id="mvoice"><option value="0">Tone</option><option value="1">Click</option><option value="2">Wood</option></select></div></div>
@@ -137,6 +145,25 @@ if(typeof d.bpm==='number')showBpm(d.bpm);peersEl.textContent=d.peers;
 usbEl.textContent=d.usb?'Connected':'Waiting';usbEl.className='pill'+(d.usb?' on':'');
 txEl.textContent=(d.tx||0)+' pulses';}).catch(function(){})}
 poll();setInterval(poll,1000);
+// Live controls (P4-015): POST the changed field to /live so timing/division are
+// audible immediately, no reboot. Save still persists everything via /save.
+function postLive(el){var n=el.name;if(!n)return;
+var v=el.type==='checkbox'?(el.checked?'1':'0'):el.value;
+fetch('/live',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+body:encodeURIComponent(n)+'='+encodeURIComponent(v)}).catch(function(){})}
+var liveT=null;
+Array.prototype.forEach.call(document.querySelectorAll('.live'),function(el){
+var num=el.type==='number';
+el.addEventListener(num?'input':'change',function(){
+if(num){clearTimeout(liveT);liveT=setTimeout(function(){postLive(el)},60)}else postLive(el)})});
+// NUDGE +/- steppers: bump the phase input by its step, clamp, POST immediately.
+Array.prototype.forEach.call(document.querySelectorAll('.stp'),function(b){
+b.addEventListener('click',function(){
+var inp=b.parentNode.querySelector('.nudgev');if(!inp)return;
+var v=(parseInt(inp.value,10)||0)+(parseInt(b.getAttribute('data-step'),10)||0);
+var lo=parseInt(inp.min,10),hi=parseInt(inp.max,10);
+if(v<lo)v=lo;if(v>hi)v=hi;
+inp.value=v;postLive(inp)})});
 </script></body></html>)HTML";
 
 // Replace every "%KEY%" in s with val.
@@ -160,21 +187,24 @@ static std::string build_outputs()
         const ClockOutputCfg* c = &s_cfg->clock[o];
         std::string N = std::to_string(o);
         s += "<div class=\"frow\"><span class=\"cap\">Clock Out " + std::to_string(o + 1) + "</span>";
-        s += "<label class=\"sw\"><input type=\"checkbox\" name=\"clk" + N + "_en\" value=\"1\""
+        s += "<label class=\"sw\"><input type=\"checkbox\" class=\"live\" name=\"clk" + N + "_en\" value=\"1\""
              + (c->enable ? " checked" : "")
              + "><span class=\"track\"><span class=\"knob\"></span></span><span class=\"swlbl\"></span></label>";
-        s += "<div class=\"fld\"><span class=\"pre\">CABLE</span><select name=\"clk" + N + "_cable\">";
+        s += "<div class=\"fld\"><span class=\"pre\">CABLE</span><select class=\"live\" name=\"clk" + N + "_cable\">";
         for (int p = 0; p < 4; p++)
             s += "<option value=\"" + std::to_string(p) + "\"" + (c->cable == p ? " selected" : "")
                  + ">" + PORTS[p] + "</option>";
         s += "</select></div>";
-        s += "<div class=\"fld\"><span class=\"pre\">RATE</span><select name=\"clk" + N + "_ppqn\">";
+        s += "<div class=\"fld\"><span class=\"pre\">RATE</span><select class=\"live\" name=\"clk" + N + "_ppqn\">";
         for (size_t k = 0; k < sizeof(PPQN) / sizeof(PPQN[0]); k++)
             s += "<option value=\"" + std::to_string(PPQN[k]) + "\"" + (c->ppqn == PPQN[k] ? " selected" : "")
                  + ">" + PPQN_LBL[k] + "</option>";
         s += "</select></div>";
-        s += "<div class=\"fld\"><span class=\"pre\">NUDGE</span><input type=\"number\" name=\"clk" + N
-             + "_phase\" value=\"" + std::to_string(c->phase_mbeats) + "\" min=\"-250\" max=\"250\" step=\"5\"></div>";
+        s += std::string("<div class=\"fld nudge\"><span class=\"pre\">NUDGE</span>")
+             + "<button type=\"button\" class=\"stp\" data-step=\"-5\">&minus;</button>"
+             + "<input type=\"number\" class=\"live nudgev\" name=\"clk" + N + "_phase\" value=\""
+             + std::to_string(c->phase_mbeats) + "\" min=\"-250\" max=\"250\" step=\"5\">"
+             + "<button type=\"button\" class=\"stp\" data-step=\"5\">+</button></div>";
         s += "</div>";
     }
     return s;
@@ -249,17 +279,58 @@ static esp_err_t save_handler(httpd_req_t *req)
     return rc;
 }
 
-void p4hub_web_start(P4HubConfig* cfg)
+// POST /live (P4-015): apply the live-safe fields into the running config with no
+// NVS write and no reboot, so timing (phase nudge, division, swing) is audible the
+// moment a control moves. The body is a PARTIAL form, so it's applied as a patch
+// (only present keys change). wifi + metronome enable/volume/voice are NOT touched
+// here — they need a reconnect / codec re-init and only /save changes them.
+static esp_err_t live_handler(httpd_req_t *req)
+{
+    char body[1024];
+    int len = req->content_len < (int)sizeof(body) - 1 ? req->content_len : (int)sizeof(body) - 1;
+    int got = 0;
+    while (got < len) {
+        int r = httpd_req_recv(req, body + got, len - got);
+        if (r <= 0) return ESP_FAIL;
+        got += r;
+    }
+    body[got] = '\0';
+
+    P4HubConfig cand;
+    p4hub_form_apply(body, s_cfg, &cand);   // patch onto the current live config
+    if (!p4hub_config_valid(&cand)) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_send(req, "invalid", HTTPD_RESP_USE_STRLEN);
+    }
+
+    // Copy only the live-safe fields into the running config the clock task reads
+    // each tick. Single-field int writes are atomic on the P4; the generation bump
+    // makes the task re-prime its grids so a phase/rate change realigns cleanly
+    // instead of dumping a catch-up burst.
+    s_cfg->clock_out_enable = cand.clock_out_enable;
+    s_cfg->metronome_accent = cand.metronome_accent;
+    for (int o = 0; o < P4HUB_CLOCK_OUTPUTS; o++) s_cfg->clock[o] = cand.clock[o];
+    if (s_gen) (*s_gen)++;
+
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, "ok", HTTPD_RESP_USE_STRLEN);
+}
+
+void p4hub_web_start(P4HubConfig* cfg, volatile uint32_t* gen)
 {
     s_cfg = cfg;
+    s_gen = gen;
     httpd_handle_t server = NULL;
     httpd_config_t hcfg = HTTPD_DEFAULT_CONFIG();
     if (httpd_start(&server, &hcfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
     httpd_uri_t root   = { .uri = "/",       .method = HTTP_GET,  .handler = root_handler,   .user_ctx = NULL };
     httpd_uri_t status = { .uri = "/status", .method = HTTP_GET,  .handler = status_handler, .user_ctx = NULL };
     httpd_uri_t save   = { .uri = "/save",   .method = HTTP_POST, .handler = save_handler,   .user_ctx = NULL };
+    httpd_uri_t live   = { .uri = "/live",   .method = HTTP_POST, .handler = live_handler,   .user_ctx = NULL };
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &status);
     httpd_register_uri_handler(server, &save);
+    httpd_register_uri_handler(server, &live);
     ESP_LOGI(TAG, "web UI on :80");
 }
