@@ -47,3 +47,10 @@ Own Ordna tracker in `tasks/` (prefixes: `LNK-` X32Link, `P4-` P4Hub, `ARC-`
 cross-cutting firmware architecture, `ESP-` emulator, `MCK-` X32MidiClock;
 `.ordna/config.yaml`). The `behringer` monorepo keeps its `T-*` CLI tracker
 separately.
+
+## Credits
+
+This firmware builds on third-party work — Unity, ESP-IDF + Espressif components,
+Arduino-ESP32, LovyanGFX, and the web-UI fonts — and speaks the Ableton Link
+protocol via a clean-room implementation. See [`THIRD_PARTY.md`](THIRD_PARTY.md)
+for authors, licenses, and where each is used.
