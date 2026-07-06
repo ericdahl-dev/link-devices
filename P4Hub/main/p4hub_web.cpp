@@ -17,6 +17,7 @@
 #include "p4hub_status.h"
 #include "p4hub_config.h"
 #include "p4hub_config_nvs.h"
+#include "p4hub_form.h"
 #include "p4hub_web.h"
 
 static const char *TAG = "p4hub_web";
@@ -223,20 +224,6 @@ static esp_err_t send_result(httpd_req_t *req, const char *title, const char *ms
     return httpd_resp_send(req, p.c_str(), p.size());
 }
 
-// In-place URL-decode (%XX and '+') of a form field value.
-static void url_decode(char *s)
-{
-    char *o = s;
-    for (char *p = s; *p; p++) {
-        if (*p == '+') { *o++ = ' '; }
-        else if (*p == '%' && p[1] && p[2]) {
-            auto hex = [](char c){ return c<='9'?c-'0':(c|0x20)-'a'+10; };
-            *o++ = (char)(hex(p[1]) * 16 + hex(p[2])); p += 2;
-        } else *o++ = *p;
-    }
-    *o = '\0';
-}
-
 static esp_err_t save_handler(httpd_req_t *req)
 {
     char body[1024];   /* wifi + 4 outputs x 4 fields fits comfortably */
@@ -249,35 +236,9 @@ static esp_err_t save_handler(httpd_req_t *req)
     }
     body[got] = '\0';
 
-    P4HubConfig cfg = *s_cfg;
-    // Walk "key=value&key=value" pairs, URL-decoding each side. Track whether the
-    // clock_out checkbox was present: an unchecked box is simply absent from the
-    // POST body, so its absence means "off". (Can't strstr(body) after this loop —
-    // strtok_r has already split body at the '&' separators.)
-    bool saw_clock_out = false, saw_metronome = false, saw_metro_accent = false;
-    bool saw_out_en[P4HUB_CLOCK_OUTPUTS] = { false };
-    char *save = nullptr;
-    for (char *pair = strtok_r(body, "&", &save); pair; pair = strtok_r(nullptr, "&", &save)) {
-        char *eq = strchr(pair, '=');
-        if (!eq) continue;
-        *eq = '\0';
-        char *key = pair, *val = eq + 1;
-        url_decode(key); url_decode(val);
-        if (strcmp(key, "clock_out") == 0)    saw_clock_out = true;
-        if (strcmp(key, "metronome") == 0)    saw_metronome = true;
-        if (strcmp(key, "metro_accent") == 0) saw_metro_accent = true;
-        if (strncmp(key, "clk", 3) == 0 && key[3] >= '0' && key[3] <= '9' && strcmp(key + 4, "_en") == 0) {
-            int idx = key[3] - '0';
-            if (idx >= 0 && idx < P4HUB_CLOCK_OUTPUTS) saw_out_en[idx] = true;
-        }
-        p4hub_config_set(&cfg, key, val);
-    }
-    // An unchecked checkbox is simply absent from the POST body -> "off".
-    if (!saw_clock_out)    cfg.clock_out_enable = 0;
-    if (!saw_metronome)    cfg.metronome_enable = 0;
-    if (!saw_metro_accent) cfg.metronome_accent = 0;
-    for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++)
-        if (!saw_out_en[i]) cfg.clock[i].enable = 0;
+    // Decode + parse the POST body into a candidate config (pure, host-tested).
+    P4HubConfig cfg;
+    p4hub_form_resolve(body, s_cfg, &cfg);
 
     if (!p4hub_config_valid(&cfg)) return send_result(req, "Invalid Config", "Check the values and go back.");
     *s_cfg = cfg;

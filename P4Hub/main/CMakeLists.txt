@@ -11,6 +11,7 @@ idf_component_register(
          "p4hub_web.cpp"
          "p4hub_status.c"
          "p4hub_config.c"
+         "p4hub_form.c"
          "p4hub_config_nvs.c"
          "metronome_audio.c"
          "${X32LINK_DIR}/clock_ticker.c"
