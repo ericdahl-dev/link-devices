@@ -6,6 +6,7 @@ set(X32LINK_DIR "${CMAKE_CURRENT_LIST_DIR}/../../X32Link")
 idf_component_register(
     SRCS "p4hub_main.c"
          "wifi_link.c"
+         "wifi_fallback.c"
          "link_measure_io.c"
          "usb_midi_host.c"
          "midi_clock_in.c"
@@ -30,4 +31,5 @@ idf_component_register(
          "${X32LINK_DIR}/link_measurement_session.c"
          "${X32LINK_DIR}/link_phase.c"
     INCLUDE_DIRS "." "${X32LINK_DIR}"
-    PRIV_REQUIRES esp_wifi nvs_flash esp_timer lwip esp_netif esp_event usb esp_http_server driver)
+    PRIV_REQUIRES esp_wifi nvs_flash esp_timer lwip esp_netif esp_event usb esp_http_server driver
+                  app_update esp_partition)
