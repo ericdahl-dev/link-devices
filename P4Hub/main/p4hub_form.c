@@ -21,17 +21,9 @@ static void url_decode(char *s) {
     *o = '\0';
 }
 
-void p4hub_form_resolve(char *body, const P4HubConfig *base, P4HubConfig *out) {
-    *out = *base;
-    // Checkboxes: an unchecked box is simply absent from the POST body, so its
-    // absence means "off". Clear them up front; a present key flips its own back
-    // on when replayed through p4hub_config_set. This replaces the save_handler
-    // saw_* tracking and the clk<N>_en detection that duplicated the grammar.
-    out->clock_out_enable = 0;
-    out->metronome_enable = 0;
-    out->metronome_accent = 0;
-    for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) out->clock[i].enable = 0;
-
+// Walk "key=value&..." pairs, URL-decoding both sides, and apply each present key
+// to *out via the tested grammar. `out` is already initialized by the caller.
+static void apply_pairs(char *body, P4HubConfig *out) {
     char *save = NULL;
     for (char *pair = strtok_r(body, "&", &save); pair; pair = strtok_r(NULL, "&", &save)) {
         char *eq = strchr(pair, '=');
@@ -42,4 +34,23 @@ void p4hub_form_resolve(char *body, const P4HubConfig *base, P4HubConfig *out) {
         url_decode(val);
         p4hub_config_set(out, key, val);   // per-field range failures ignored; caller validates
     }
+}
+
+void p4hub_form_apply(char *body, const P4HubConfig *base, P4HubConfig *out) {
+    *out = *base;                 // patch: only keys present in the body change
+    apply_pairs(body, out);
+}
+
+void p4hub_form_resolve(char *body, const P4HubConfig *base, P4HubConfig *out) {
+    *out = *base;
+    // Full form: an unchecked checkbox is simply absent from the POST body, so its
+    // absence means "off". Clear the checkbox-backed booleans up front; a present
+    // key flips its own back on. This is p4hub_form_apply plus the pre-clear, and
+    // replaces the save_handler saw_* tracking + the duplicated clk<N>_en detection.
+    out->clock_out_enable = 0;
+    out->metronome_enable = 0;
+    out->metronome_accent = 0;
+    for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) out->clock[i].enable = 0;
+
+    apply_pairs(body, out);
 }
