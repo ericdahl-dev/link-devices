@@ -17,6 +17,7 @@ idf_component_register(
          "${X32LINK_DIR}/clock_ticker.c"
          "${X32LINK_DIR}/clock_output.c"
          "${X32LINK_DIR}/beat_clock.c"
+         "${X32LINK_DIR}/beat_source.c"
          "${X32LINK_DIR}/metronome.c"
          "${X32LINK_DIR}/metronome_voice.c"
          "${X32LINK_DIR}/usb_midi_pack.c"
