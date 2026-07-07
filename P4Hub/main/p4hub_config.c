@@ -9,6 +9,7 @@ void p4hub_config_defaults(P4HubConfig* c) {
     c->metronome_accent = 1;   // when enabled, accent the bar-1 downbeat
     c->metronome_volume = 80;  // ES8311 codec volume
     c->metronome_voice  = 0;   // Tone (default)
+    c->led_enable       = 0;   // visual metronome on the user LED: default off
     // P4-010: output 0 is the default 24-PPQN MIDI clock on cable 0; rest off.
     for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) {
         c->clock[i].enable       = (i == 0) ? 1 : 0;
@@ -25,6 +26,7 @@ bool p4hub_config_valid(const P4HubConfig* c) {
     if (c->metronome_accent != 0 && c->metronome_accent != 1) return false;
     if (c->metronome_volume < 0 || c->metronome_volume > 100) return false;
     if (c->metronome_voice < 0 || c->metronome_voice > 2) return false;
+    if (c->led_enable != 0 && c->led_enable != 1) return false;
     for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) {
         const ClockOutputCfg* o = &c->clock[i];
         if (o->enable != 0 && o->enable != 1) return false;
@@ -79,6 +81,12 @@ bool p4hub_config_set(P4HubConfig* c, const char* key, const char* value) {
         int v = atoi(value);
         if (v < 0 || v > 2) return false;
         c->metronome_voice = v;
+        return true;
+    }
+    if (strcmp(key, "led") == 0) {
+        int v = atoi(value);
+        if (v != 0 && v != 1) return false;
+        c->led_enable = v;
         return true;
     }
     // P4-010 per-output fields: "clk<N>_en|cable|ppqn|phase" (N = 0..3).

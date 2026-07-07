@@ -50,6 +50,7 @@ void p4hub_form_resolve(char *body, const P4HubConfig *base, P4HubConfig *out) {
     out->clock_out_enable = 0;
     out->metronome_enable = 0;
     out->metronome_accent = 0;
+    out->led_enable       = 0;
     for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) out->clock[i].enable = 0;
 
     apply_pairs(body, out);

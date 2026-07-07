@@ -16,6 +16,8 @@ idf_component_register(
          "p4hub_form.c"
          "p4hub_config_nvs.c"
          "metronome_audio.c"
+         "p4hub_led.c"
+         "${X32LINK_DIR}/metro_strip.c"
          "${X32LINK_DIR}/clock_ticker.c"
          "${X32LINK_DIR}/clock_output.c"
          "${X32LINK_DIR}/swing.c"

@@ -29,6 +29,8 @@ typedef struct {
     int  metronome_volume;  // 0..100 — ES8311 codec volume (P4-012)
     int  metronome_voice;   // 0..2 — click voice preset Tone/Click/Wood (P4-012)
     ClockOutputCfg clock[P4HUB_CLOCK_OUTPUTS];   // P4-010 per-output clocks
+    int  led_enable;        // 0/1 — pulse the user LED on each metronome beat (P4-018);
+                            // independent of metronome_enable (visual metronome)
 } P4HubConfig;
 
 void p4hub_config_defaults(P4HubConfig* c);
