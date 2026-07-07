@@ -38,7 +38,7 @@ static const char PAGE[] = R"HTML(<!doctype html>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/dseg@0.46.0/css/dseg.css" rel="stylesheet">
 <style>
-:root{--bg:#070809;--panel-2:#0f1216;--ink:#e9ece6;--mut:#717a82;--line:#262b31;
+:root{--bg:#070809;--panel-2:#0f1216;--ink:#e9ece6;--mut:#838d95;--line:#262b31;
 --led:#b6ff36;--led-dim:#36431a;--amber:#ff9d3b;
 --mono:'DM Mono',ui-monospace,Menlo,monospace;--disp:'Bricolage Grotesque','Arial Narrow',sans-serif;--seg:'DSEG7 Classic','DM Mono',monospace;}
 *{box-sizing:border-box}html,body{margin:0}
@@ -125,6 +125,38 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 .foot{text-align:center;color:#3c444c;font-size:10.5px;letter-spacing:.18em;margin:8px 0 20px;text-transform:uppercase}
 @keyframes breathe{0%,100%{opacity:1}50%{opacity:.45}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* Let the 2-up grid cells shrink to their track so wide inner controls (the
+   nudge steppers) don't spill past the card edge. Applies at every width. */
+.grid2,.colrow{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.fld input{min-width:0}
+/* Each clock output stacks RATE / NUDGE / SWING as full rows at every width —
+   side-by-side pinches the rate label to "MIDI c" and squeezes the nudge input. */
+.sect[data-when="clock_out"] .grid2{grid-template-columns:minmax(0,1fr)}
+/* Wide viewports (desktop): widen the card and pack the config form into two
+   masonry-flow columns so it isn't a long, skinny strip. Column-flow (not grid)
+   keeps a short group from waiting on a tall neighbour's row height. Status
+   readout stays full-width above. */
+@media (min-width:760px){
+.unit{max-width:900px}
+/* Real grid (not masonry) so the tall MIDI Clock Out group can span both
+   columns as a hero band instead of being dumped into one column. order:-1
+   floats it to the top on desktop while the DOM keeps WiFi first for the
+   phone setup flow (order is ignored in the mobile block layout). */
+.formcols{display:grid;grid-template-columns:1fr 1fr;column-gap:26px;align-items:start}
+.grp{margin-bottom:16px}
+.grp--wide{grid-column:1/-1;order:-1}
+.grp--wide .sect{display:grid;grid-template-columns:1fr 1fr;gap:6px 22px}
+.grp--wide .sect .frow.out{margin-top:0}
+.grp .frow.head:first-child{padding-top:2px}
+/* Status rows become a 4-across meter bridge so they fill the width and read
+   like a rack unit, instead of label/value flung to opposite edges. */
+.rows{display:grid;grid-template-columns:repeat(4,1fr);column-gap:26px;padding-top:4px}
+.row{border-top:0;flex-direction:column;align-items:flex-start;gap:7px;padding:16px 0}
+/* Own the wider tempo glass — scale the segmented readout up (ghost + live
+   share .bignum, so the unlit-segment effect stays intact). */
+.bignum{font-size:74px}
+.foot{max-width:900px}
+}
 </style></head><body>
 <div class="unit">
 <span class="screw tl"></span><span class="screw tr"></span><span class="screw bl"></span><span class="screw br"></span>
@@ -140,13 +172,14 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="row"><label>Clock Out</label><span class="val" id="tx">0 pulses</span></div>
 </div>
 <form method="POST" action="/save">
-<div class="frow head"><span class="cap">WiFi Network</span>
+<div class="formcols">
+<div class="grp"><div class="frow head"><span class="cap">WiFi Network</span>
 <div class="fld"><span class="pre">SSID</span><input name="wifi_ssid" value="%SSID%" autocomplete="off"></div>
-<div class="fld"><span class="pre">PASS</span><input name="wifi_pass" type="password" placeholder="keep current"></div></div>
-<div class="frow head"><span class="cap">MIDI Clock Out</span>
+<div class="fld"><span class="pre">PASS</span><input name="wifi_pass" type="password" placeholder="keep current"></div></div></div>
+<div class="grp grp--wide"><div class="frow head"><span class="cap">MIDI Clock Out</span>
 <label class="sw"><input type="checkbox" class="live" name="clock_out" value="1" %MCKCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
-<div class="sect %CLKSECT%" data-when="clock_out">%OUTPUTS%</div>
-<div class="frow head"><span class="cap">Metronome (Speaker)</span>
+<div class="sect %CLKSECT%" data-when="clock_out">%OUTPUTS%</div></div>
+<div class="grp"><div class="frow head"><span class="cap">Metronome (Speaker)</span>
 <label class="sw"><input type="checkbox" name="metronome" value="1" %MTOCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="sect %METSECT%" data-when="metronome">
 <div class="frow"><span class="cap">Accent Bar 1</span>
@@ -155,10 +188,11 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="grid2">
 <div class="fld"><span class="pre">VOL</span><input type="number" name="metro_vol" value="%MVOL%" min="0" max="100" step="5"></div>
 <div class="fld"><span class="pre">VOICE</span><select name="metro_voice" id="mvoice"><option value="0">Tone</option><option value="1">Click</option><option value="2">Wood</option></select></div></div></div>
-</div>
-<div class="frow head"><span class="cap">LED Strip &middot; Visual Metronome</span>
+</div></div>
+<div class="grp"><div class="frow head"><span class="cap">LED Strip &middot; Visual Metronome</span>
 <label class="sw"><input type="checkbox" class="live" name="led" value="1" %LEDCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
-<div class="sect %LEDSECT%" data-when="led">%LEDCTL%</div>
+<div class="sect %LEDSECT%" data-when="led">%LEDCTL%</div></div>
+</div>
 <button class="write" type="submit">Write &amp; Reboot</button>
 </form>
 <div class="foot">Everything and the kitchen sync &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
