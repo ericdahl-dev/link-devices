@@ -29,6 +29,18 @@ int  config_model_port(int model);
 int  config_model_slot_max(int model);
 bool config_validate(const AppConfig* cfg);
 
+// ARC-012: one int-field setter for both editors (web + touch), so per-field ranges
+// live only in config_validate. Tentatively applies `value` to `field`, keeps it iff
+// the result validates (returns true); otherwise leaves cfg unchanged (returns false).
+// model/fx_slot route through config_set_model so the model->slot clamp stays shared.
+typedef enum {
+    ACF_INPUT_SOURCE = 1, ACF_MODEL, ACF_FX_SLOT, ACF_QUANTUM_BEATS,
+    ACF_MIDI_CLOCK_OUT, ACF_FDR_ENABLE, ACF_FDR_CHAN_COUNT,
+    ACF_PHASE_DISPLAY_MODE, ACF_DOT_BEAT_COLOR, ACF_DOT_ACCENT_COLOR,
+} AppConfigField;
+
+bool app_config_set(AppConfig* cfg, AppConfigField field, int value);
+
 // LNK-032: the model→fx_slot dependency, shared by the web and touch config
 // editors so the "slot must be ≤ the model's max" rule lives in one host-tested
 // place. Sets model (ignored if not a known model) and clamps fx_slot into
