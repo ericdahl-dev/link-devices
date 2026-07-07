@@ -16,6 +16,7 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "wifi_link.h"
+#include "wifi_fallback.h"
 
 static const char *TAG = "wifi_link";
 
@@ -76,13 +77,55 @@ static void link_task(void *arg)
 
 /* ---- WiFi station -------------------------------------------------------- */
 
+#define AP_SSID "KitchenSync-Setup"
+
+static bool    s_ap_mode          = false;
+static int64_t s_connect_start_us = 0;   /* when STA association began (P4-027) */
+
+/* SoftAP config fallback — reached either from a first-boot empty ssid, or from
+ * give_up_and_start_ap() once wifi_fallback_should_give_up() trips. Does not
+ * re-init the WiFi stack or re-register events — wifi_link_start() did that once,
+ * regardless of which path is taken. */
+static void start_ap(void)
+{
+    s_ap_mode = true;
+    esp_netif_create_default_wifi_ap();
+
+    wifi_config_t wc = {0};
+    strcpy((char *)wc.ap.ssid, AP_SSID);
+    wc.ap.ssid_len       = strlen(AP_SSID);
+    wc.ap.max_connection = 4;
+    wc.ap.authmode       = WIFI_AUTH_OPEN;   // open network for first-boot/fallback setup
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wc));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_LOGW(TAG, "SoftAP '%s' at 192.168.4.1 for config", AP_SSID);
+}
+
+/* P4-027: parity with X32Link's wifi_try_connect()/start_config_ap() — give STA
+ * a fixed budget (wifi_fallback.h) instead of retrying esp_wifi_connect() forever
+ * when the configured network can't be reached (e.g. moved from home to a gig).
+ * Terminal until reboot: once here, STA is stopped and the mode is switched. */
+static void give_up_and_start_ap(void)
+{
+    ESP_LOGW(TAG, "no connection after %llds — giving up on STA, falling back to AP",
+             (long long)(WIFI_FALLBACK_TIMEOUT_US / 1000000));
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    start_ap();
+}
+
 static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "disconnected, retrying");
-        esp_wifi_connect();
+        if (wifi_fallback_should_give_up(esp_timer_get_time(), s_connect_start_us)) {
+            give_up_and_start_ap();
+        } else {
+            ESP_LOGW(TAG, "disconnected, retrying");
+            esp_wifi_connect();
+        }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "got ip " IPSTR, IP2STR(&e->ip_info.ip));
@@ -93,47 +136,32 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     }
 }
 
-static bool s_ap_mode = false;
-
 static void start_sta(const char* ssid, const char* pass)
 {
     esp_netif_create_default_wifi_sta();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi_event, NULL));
 
     wifi_config_t wc = {0};
     strncpy((char *)wc.sta.ssid,     ssid, sizeof(wc.sta.ssid) - 1);
     strncpy((char *)wc.sta.password, pass, sizeof(wc.sta.password) - 1);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+    s_connect_start_us = esp_timer_get_time();
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI(TAG, "connecting to SSID:%s", ssid);
-}
-
-static void start_ap(void)
-{
-    s_ap_mode = true;
-    esp_netif_create_default_wifi_ap();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    wifi_config_t wc = {0};
-    strcpy((char *)wc.ap.ssid, "KitchenSync-Setup");
-    wc.ap.ssid_len       = 11;
-    wc.ap.max_connection = 4;
-    wc.ap.authmode       = WIFI_AUTH_OPEN;   // open network for first-boot setup
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wc));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGW(TAG, "no WiFi credentials — SoftAP 'KitchenSync-Setup' at 192.168.4.1 for config");
 }
 
 void wifi_link_start(const char* ssid, const char* pass)
 {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    /* Init the stack + register events once — start_sta() and the AP fallback
+     * both rely on this being done regardless of which path runs. */
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi_event, NULL));
+
     if (ssid && ssid[0] != '\0') start_sta(ssid, pass);
     else                         start_ap();
 }
