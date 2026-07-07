@@ -358,22 +358,17 @@ static void handle_update_result() {
 static void handle_save() {
     AppConfig cfg = g_config;
 
-    // LNK-032: model + the model→slot clamp go through the shared pure helper,
-    // so a stale fx_slot can't outlive a model change (same rule as the touch UI).
-    config_set_model(&cfg, server.arg("model").toInt());
+    // ARC-012: int fields go through app_config_set — one range owner
+    // (config_validate); out-of-range posts are ignored (old value kept) rather than
+    // 400-ing. Model first so fx_slot validates against the new model's slot max.
+    app_config_set(&cfg, ACF_MODEL,     server.arg("model").toInt());
 
     String ip = server.arg("mixer_ip");
     if (ip.length() > 0 && ip.length() < (int)sizeof(cfg.mixer_ip))
         ip.toCharArray(cfg.mixer_ip, sizeof(cfg.mixer_ip));
 
-    int slot = server.arg("fx_slot").toInt();
-    if (slot >= 1 && slot <= config_model_slot_max(cfg.model)) cfg.fx_slot = slot;
-
-    // No 1-16 pre-check here — config_validate() (LNK-019) already enforces
-    // that range as the single source of truth; an out-of-range post just
-    // fails validation below (400, config untouched) same as a bad
-    // mixer_ip, rather than silently clamping or duplicating the check.
-    cfg.quantum_beats = server.arg("quantum_beats").toInt();
+    app_config_set(&cfg, ACF_FX_SLOT,       server.arg("fx_slot").toInt());
+    app_config_set(&cfg, ACF_QUANTUM_BEATS, server.arg("quantum_beats").toInt());
 
     String ssid = server.arg("wifi_ssid");
     if (ssid.length() > 0 && ssid.length() < (int)sizeof(cfg.wifi_ssid))
@@ -383,20 +378,17 @@ static void handle_save() {
     if (pass.length() > 0 && pass.length() < (int)sizeof(cfg.wifi_pass))
         pass.toCharArray(cfg.wifi_pass, sizeof(cfg.wifi_pass));
 
-    int src = server.arg("input_source").toInt();
-    if (src == 0 || src == 1) cfg.input_source = src;
-
-    int mck = server.arg("midi_clock_out").toInt();  // LNK-027
-    if (mck == 0 || mck == 1) cfg.midi_clock_out_enable = mck;
+    app_config_set(&cfg, ACF_INPUT_SOURCE,   server.arg("input_source").toInt());
+    app_config_set(&cfg, ACF_MIDI_CLOCK_OUT, server.arg("midi_clock_out").toInt());  // LNK-027
 
     // LNK-036: phase display mode + dot colours (unchecked box -> "" -> 0 -> sweep).
-    cfg.phase_display_mode = server.arg("phase_flash").toInt() == 1 ? 1 : 0;
+    app_config_set(&cfg, ACF_PHASE_DISPLAY_MODE, server.arg("phase_flash").toInt() == 1 ? 1 : 0);
     String cb = server.arg("dot_beat");              // "#RRGGBB" from <input type=color>
     if (cb.length() == 7 && cb[0] == '#')
-        cfg.dot_beat_color = (int)strtol(cb.c_str() + 1, NULL, 16);
+        app_config_set(&cfg, ACF_DOT_BEAT_COLOR, (int)strtol(cb.c_str() + 1, NULL, 16));
     String ca = server.arg("dot_acc");
     if (ca.length() == 7 && ca[0] == '#')
-        cfg.dot_accent_color = (int)strtol(ca.c_str() + 1, NULL, 16);
+        app_config_set(&cfg, ACF_DOT_ACCENT_COLOR, (int)strtol(ca.c_str() + 1, NULL, 16));
 
     if (config_validate(&cfg)) {
         g_config = cfg;
@@ -413,22 +405,21 @@ static void handle_save() {
 // write (Save persists), mirroring the P4's /live. touch_display reads g_config each
 // render, so the phase dot mode/colours update instantly for preview.
 static void handle_live() {
+    // ARC-012: same validated setter as save; ranges live in config_validate only.
     if (server.hasArg("phase_flash"))
-        g_config.phase_display_mode = server.arg("phase_flash").toInt() == 1 ? 1 : 0;
+        app_config_set(&g_config, ACF_PHASE_DISPLAY_MODE, server.arg("phase_flash").toInt() == 1 ? 1 : 0);
     if (server.hasArg("dot_beat")) {
         String cb = server.arg("dot_beat");
         if (cb.length() == 7 && cb[0] == '#')
-            g_config.dot_beat_color = (int)strtol(cb.c_str() + 1, NULL, 16);
+            app_config_set(&g_config, ACF_DOT_BEAT_COLOR, (int)strtol(cb.c_str() + 1, NULL, 16));
     }
     if (server.hasArg("dot_acc")) {
         String ca = server.arg("dot_acc");
         if (ca.length() == 7 && ca[0] == '#')
-            g_config.dot_accent_color = (int)strtol(ca.c_str() + 1, NULL, 16);
+            app_config_set(&g_config, ACF_DOT_ACCENT_COLOR, (int)strtol(ca.c_str() + 1, NULL, 16));
     }
-    if (server.hasArg("quantum_beats")) {
-        int q = server.arg("quantum_beats").toInt();
-        if (q >= 1 && q <= 16) g_config.quantum_beats = q;
-    }
+    if (server.hasArg("quantum_beats"))
+        app_config_set(&g_config, ACF_QUANTUM_BEATS, server.arg("quantum_beats").toInt());
     server.send(200, "text/plain", "ok");
 }
 
