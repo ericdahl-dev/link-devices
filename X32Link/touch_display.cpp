@@ -23,7 +23,7 @@ extern AppConfig g_config;
 // ---- Panel (validated on glass, LNK-014 Progress) --------------------------
 // JD9853 via LovyanGFX Panel_ST7789. Pins: SCK38 MOSI39 DC45 CS21 RST40, BL46.
 // 172x320 visible in 240x320 controller RAM -> offset_x=34. invert=false,
-// setRotation(4). Backlight driven manually (GPIO46 HIGH), not via Light_PWM.
+// setRotation(6) after LNK-035. Backlight driven manually (GPIO46 HIGH), not Light_PWM.
 class LGFX : public lgfx::LGFX_Device {
     lgfx::Panel_ST7789 _panel;
     lgfx::Bus_SPI      _bus;
@@ -73,7 +73,7 @@ static void draw_splash(void) {
 enum ui_screen_t { SCREEN_STATUS, SCREEN_SETTINGS, SCREEN_KEYBOARD };
 static ui_screen_t s_screen = SCREEN_STATUS;
 
-// Status-screen phase wheel geometry (portrait 172x320, setRotation(4)).
+// Status-screen phase wheel geometry (portrait 172x320, setRotation(6) after LNK-035).
 #define WHEEL_CX 86
 #define WHEEL_CY 252
 #define WHEEL_R  44
@@ -85,7 +85,7 @@ static int      s_prev_mx = -1, s_prev_my = -1;
 static bool     s_wheel_valid_shown = false;
 static uint32_t s_last_update_ms = 0;
 
-// Tap targets (screen coords after the rotation-4 map). Task 9: nav only.
+// Tap targets (screen coords after the rotation-6 map (LNK-035)). Task 9: nav only.
 static const ui_rect_t STATUS_SET_RECT     = {116, 4, 52, 28};   // "SET" on status
 static const ui_rect_t SETTINGS_BACK_RECT  = {8, 4, 40, 28};     // "<" top-left
 static const ui_rect_t SETTINGS_WRITE_RECT = {8, 272, 156, 40};  // Write & Reboot
@@ -387,7 +387,10 @@ static bool axs_read(axs_touch_t *t) {
 
 void touch_display_begin(void) {
     s_lcd.init();
-    s_lcd.setRotation(4);
+    s_lcd.setRotation(6);      // LNK-035: 180deg from rotation 4 so the USB cable
+                               // exits downward when the unit is hand-held. Drawing
+                               // is in screen space (LovyanGFX remaps); only the
+                               // touch transform below flips to match.
     backlight_on();            // manual GPIO46 HIGH — LovyanGFX Light_PWM/LEDC
                                // failed to drive the backlight in the full build
     draw_splash();
@@ -403,9 +406,10 @@ void touch_display_begin(void) {
 }
 
 void touch_display_tick(void) {
-    // Poll the AXS5106L and dispatch taps. Coordinates are mapped to screen
-    // space with LNK-014's rotation-4 transform (X direct, Y inverted). One tap
-    // per press: act on the touch-down edge, rearm on release.
+    // Poll the AXS5106L and dispatch taps. Coordinates are mapped to screen space
+    // with the rotation-6 transform (LNK-035, 180deg from LNK-014's rotation 4): both
+    // axes flip vs rotation 4, so X is inverted and Y maps direct. One tap per press:
+    // act on the touch-down edge, rearm on release.
     static bool s_touch_down = false;
 
     axs_touch_t t;
@@ -414,8 +418,8 @@ void touch_display_tick(void) {
 
     if (touched && !s_touch_down) {
         s_touch_down = true;
-        int x = t.points[0].x;                 // rotation-4: X maps direct,
-        int y = 319 - t.points[0].y;           //             Y is inverted
+        int x = 171 - t.points[0].x;           // rotation-6: X inverted (panel w=172),
+        int y = t.points[0].y;                 //             Y maps direct
         if (s_screen == SCREEN_STATUS) {
             if (ui_hit(&STATUS_SET_RECT, 1, x, y) >= 0) enter_settings();
         } else if (s_screen == SCREEN_SETTINGS) {
