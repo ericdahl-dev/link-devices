@@ -144,6 +144,12 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 <label class="sw"><input type="checkbox" name="midi_clock_out" value="1" %MCKCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
 </div>
 <div class="row">
+<div class="cap"><label>Phase Display</label><span class="hint">beat-flash dot vs sweep wheel &middot; restart to apply</span></div>
+<label class="sw"><input type="checkbox" name="phase_flash" value="1" %PHFLASHCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
+<div class="fld" style="margin-top:6px"><span class="pre">BEAT</span><input type="color" name="dot_beat" value="%DOTBEAT%"></div>
+<div class="fld" style="margin-top:6px"><span class="pre">BAR1</span><input type="color" name="dot_acc" value="%DOTACC%"></div>
+</div>
+<div class="row">
 <div class="cap"><label>Mixer IP</label><span class="hint">on this network</span></div>
 <div class="fld"><span class="pre">HOST</span><input type="text" name="mixer_ip" value="%IP%" inputmode="decimal" autocomplete="off"></div>
 </div>
@@ -233,6 +239,12 @@ static String build_html() {
     h.replace("%SLOT%",  String(g_config.fx_slot));
     h.replace("%QUANTUM%", String(g_config.quantum_beats));
     h.replace("%MCKCHK%", g_config.midi_clock_out_enable ? "checked" : "");
+    h.replace("%PHFLASHCHK%", g_config.phase_display_mode == 1 ? "checked" : "");
+    char dotbuf[8];
+    snprintf(dotbuf, sizeof(dotbuf), "#%06X", g_config.dot_beat_color & 0xFFFFFF);
+    h.replace("%DOTBEAT%", dotbuf);
+    snprintf(dotbuf, sizeof(dotbuf), "#%06X", g_config.dot_accent_color & 0xFFFFFF);
+    h.replace("%DOTACC%", dotbuf);
     h.replace("%SRC%",   String(g_config.input_source));
     h.replace("%SSID%",  g_config.wifi_ssid);
     h.replace("%BPM%",   bpm);
@@ -370,6 +382,15 @@ static void handle_save() {
 
     int mck = server.arg("midi_clock_out").toInt();  // LNK-027
     if (mck == 0 || mck == 1) cfg.midi_clock_out_enable = mck;
+
+    // LNK-036: phase display mode + dot colours (unchecked box -> "" -> 0 -> sweep).
+    cfg.phase_display_mode = server.arg("phase_flash").toInt() == 1 ? 1 : 0;
+    String cb = server.arg("dot_beat");              // "#RRGGBB" from <input type=color>
+    if (cb.length() == 7 && cb[0] == '#')
+        cfg.dot_beat_color = (int)strtol(cb.c_str() + 1, NULL, 16);
+    String ca = server.arg("dot_acc");
+    if (ca.length() == 7 && ca[0] == '#')
+        cfg.dot_accent_color = (int)strtol(ca.c_str() + 1, NULL, 16);
 
     if (config_validate(&cfg)) {
         g_config = cfg;

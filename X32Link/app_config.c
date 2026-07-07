@@ -16,6 +16,9 @@ void config_defaults(AppConfig* cfg) {
     cfg->fdr_chan_count = DEFAULT_FDR_CHAN_COUNT;
     cfg->quantum_beats  = DEFAULT_QUANTUM_BEATS;
     cfg->midi_clock_out_enable = DEFAULT_MIDI_CLOCK_OUT_ENABLE;
+    cfg->phase_display_mode = DEFAULT_PHASE_DISPLAY_MODE;
+    cfg->dot_beat_color     = DEFAULT_DOT_BEAT_COLOR;
+    cfg->dot_accent_color   = DEFAULT_DOT_ACCENT_COLOR;
 }
 
 int config_model_port(int model) {
@@ -43,5 +46,8 @@ bool config_validate(const AppConfig* cfg) {
     if (cfg->fdr_chan_count != 16 && cfg->fdr_chan_count != 32) return false;
     if (cfg->quantum_beats < 1 || cfg->quantum_beats > 16)        return false;
     if (cfg->midi_clock_out_enable != 0 && cfg->midi_clock_out_enable != 1) return false;
+    if (cfg->phase_display_mode != 0 && cfg->phase_display_mode != 1)       return false;
+    if (cfg->dot_beat_color   < 0 || cfg->dot_beat_color   > 0xFFFFFF)      return false;
+    if (cfg->dot_accent_color < 0 || cfg->dot_accent_color > 0xFFFFFF)      return false;
     return true;
 }
