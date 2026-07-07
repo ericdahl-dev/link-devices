@@ -137,7 +137,7 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 </div>
 <div class="row">
 <div class="cap"><label>Bar Quantum</label><span class="hint">beats per bar &middot; 1&ndash;16</span></div>
-<div class="fld"><span class="pre">BEATS</span><input type="number" name="quantum_beats" value="%QUANTUM%" min="1" max="16" step="1" inputmode="numeric"></div>
+<div class="fld"><span class="pre">BEATS</span><input type="number" class="live" name="quantum_beats" value="%QUANTUM%" min="1" max="16" step="1" inputmode="numeric"></div>
 </div>
 <div class="row">
 <div class="cap"><label>MIDI Clock Out</label><span class="hint">Link&rarr;USB 24PPQN 0xF8 &middot; restart to apply</span></div>
@@ -145,9 +145,9 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 </div>
 <div class="row">
 <div class="cap"><label>Phase Display</label><span class="hint">beat-flash dot vs sweep wheel &middot; restart to apply</span></div>
-<label class="sw"><input type="checkbox" name="phase_flash" value="1" %PHFLASHCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
-<div class="fld" style="margin-top:6px"><span class="pre">BEAT</span><input type="color" name="dot_beat" value="%DOTBEAT%"></div>
-<div class="fld" style="margin-top:6px"><span class="pre">BAR1</span><input type="color" name="dot_acc" value="%DOTACC%"></div>
+<label class="sw"><input type="checkbox" class="live" name="phase_flash" value="1" %PHFLASHCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
+<div class="fld" style="margin-top:6px"><span class="pre">BEAT</span><input type="color" class="live" name="dot_beat" value="%DOTBEAT%"></div>
+<div class="fld" style="margin-top:6px"><span class="pre">BAR1</span><input type="color" class="live" name="dot_acc" value="%DOTACC%"></div>
 </div>
 <div class="row">
 <div class="cap"><label>Mixer IP</label><span class="hint">on this network</span></div>
@@ -227,6 +227,12 @@ setBeat(shownBpm);
 }).catch(function(){})}
 var t=0,boot=setInterval(function(){bpmEl.textContent=(Math.random()*200+40).toFixed(1);
 if(++t>6){clearInterval(boot);showBpm(seedBpm);poll();setInterval(poll,1000)}},70);
+// LNK-037: live preview — POST each changed live-safe field to /live (no reboot).
+function postLive(el){var v=el.type==='checkbox'?(el.checked?'1':'0'):el.value;
+fetch('/live',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+body:encodeURIComponent(el.name)+'='+encodeURIComponent(v)});}
+[].forEach.call(document.querySelectorAll('.live'),function(el){
+el.addEventListener(el.type==='color'||el.type==='number'?'input':'change',function(){postLive(el)});});
 </script></body></html>)HTML";
 
 static String build_html() {
@@ -403,6 +409,29 @@ static void handle_save() {
     }
 }
 
+// LNK-037: apply live-safe fields to the running config with no reboot and no NVS
+// write (Save persists), mirroring the P4's /live. touch_display reads g_config each
+// render, so the phase dot mode/colours update instantly for preview.
+static void handle_live() {
+    if (server.hasArg("phase_flash"))
+        g_config.phase_display_mode = server.arg("phase_flash").toInt() == 1 ? 1 : 0;
+    if (server.hasArg("dot_beat")) {
+        String cb = server.arg("dot_beat");
+        if (cb.length() == 7 && cb[0] == '#')
+            g_config.dot_beat_color = (int)strtol(cb.c_str() + 1, NULL, 16);
+    }
+    if (server.hasArg("dot_acc")) {
+        String ca = server.arg("dot_acc");
+        if (ca.length() == 7 && ca[0] == '#')
+            g_config.dot_accent_color = (int)strtol(ca.c_str() + 1, NULL, 16);
+    }
+    if (server.hasArg("quantum_beats")) {
+        int q = server.arg("quantum_beats").toInt();
+        if (q >= 1 && q <= 16) g_config.quantum_beats = q;
+    }
+    server.send(200, "text/plain", "ok");
+}
+
 static void handle_captive_redirect() {
     String url = "http://";
     url += s_ap_ip.toString();
@@ -415,6 +444,7 @@ void web_config_begin() {
     server.on("/",       HTTP_GET,  handle_root);
     server.on("/status", HTTP_GET,  handle_status);
     server.on("/save",   HTTP_POST, handle_save);
+    server.on("/live",   HTTP_POST, handle_live);   // LNK-037: no-reboot preview
     server.on("/update", HTTP_GET,  handle_update_page);
     server.on("/update", HTTP_POST, handle_update_result, handle_update_upload);
     server.begin();
@@ -430,6 +460,7 @@ void web_config_ap_begin() {
     server.on("/",       HTTP_GET,  handle_root);
     server.on("/status", HTTP_GET,  handle_status);
     server.on("/save",   HTTP_POST, handle_save);
+    server.on("/live",   HTTP_POST, handle_live);   // LNK-037: no-reboot preview
 
     // OS captive-portal detection endpoints → redirect to config page.
     server.on("/hotspot-detect.html",  HTTP_GET, handle_captive_redirect);  // iOS/macOS
