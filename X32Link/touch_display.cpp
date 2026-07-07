@@ -85,6 +85,7 @@ static int      s_prev_mx = -1, s_prev_my = -1;
 static int      s_prev_beat = -1;               // LNK-036: last beat index shown (flash mode)
 static bool     s_flash_on  = false;            // LNK-036: dot currently lit (flash mode)
 static uint32_t s_flash_off_at_ms = 0;          // LNK-036: when to blank the flash
+static int      s_prev_mode = -1;               // LNK-037: last phase_display_mode drawn
 static bool     s_wheel_valid_shown = false;
 static uint32_t s_last_update_ms = 0;
 
@@ -322,6 +323,12 @@ static void enter_keyboard(void) {
 #define DOT_FLASH_ON_MS 70
 static void render_phase_indicator(const TempoSnapshot &ts, uint32_t now) {
     bool valid = ts.valid;                          // snapshot: valid ⇒ phase >= 0
+    if (g_config.phase_display_mode != s_prev_mode) {  // LNK-037: /live mode switch — clear
+        s_lcd.fillCircle(WHEEL_CX, WHEEL_CY, WHEEL_R - 1, TFT_BLACK);
+        s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);
+        s_prev_mx = -1; s_prev_beat = -1; s_flash_on = false;
+        s_prev_mode = g_config.phase_display_mode;
+    }
     if (valid != s_wheel_valid_shown) {            // state change: clear interior once
         s_lcd.fillCircle(WHEEL_CX, WHEEL_CY, WHEEL_R - 1, TFT_BLACK);
         s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);
