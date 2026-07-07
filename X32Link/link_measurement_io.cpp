@@ -75,12 +75,13 @@ void link_measurement_io_poll() {
     LinkSessionAct acts[4];
     int n;
 
-    // 1. Timeline gossip → epoch-reset detection.
-    LinkTimeline tl;
-    bool tl_valid = link_proto_timeline(&tl);
-    n = link_session_on_timeline(&s_session, tl_valid, tl_valid ? tl.time_origin_us : 0,
-                                 now_us(), acts, 4);
-    run_all(acts, n);
+    // 1. Epoch reset (ARC-011): the settled-timeline debounce in link_protocol
+    //    (session_timeline) confirms a genuine re-origin — drop the stale committed
+    //    xform and re-measure against the new epoch.
+    if (link_proto_epoch_reset_pending()) {
+        n = link_session_on_epoch_reset(&s_session, acts, 4);
+        run_all(acts, n);
+    }
 
     // 2. Trigger: pick the first peer with an advertised endpoint, let the
     //    session decide whether to (re)start an attempt.

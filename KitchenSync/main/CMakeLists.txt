@@ -31,6 +31,7 @@ idf_component_register(
          "${X32LINK_DIR}/link_protocol.c"
          "${X32LINK_DIR}/link_measurement.c"
          "${X32LINK_DIR}/link_measurement_session.c"
+         "${X32LINK_DIR}/session_timeline.c"
          "${X32LINK_DIR}/link_phase.c"
     INCLUDE_DIRS "." "${X32LINK_DIR}"
     PRIV_REQUIRES esp_wifi nvs_flash esp_timer lwip esp_netif esp_event usb esp_http_server driver
