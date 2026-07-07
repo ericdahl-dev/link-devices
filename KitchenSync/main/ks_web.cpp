@@ -1,7 +1,7 @@
 /*
- * P4Hub web UI (P4-007) — rack-panel status + config page styled like X32Link,
- * served over esp_http_server. Thin glue: live values from pure p4hub_status.c
- * (/status, polled 1 Hz); config model is pure p4hub_config.c; NVS + reboot are
+ * KitchenSync web UI (P4-007) — rack-panel status + config page styled like X32Link,
+ * served over esp_http_server. Thin glue: live values from pure ks_status.c
+ * (/status, polled 1 Hz); config model is pure ks_config.c; NVS + reboot are
  * the only side effects. CSS/aesthetic lifted from X32Link/web_config.cpp.
  */
 #include <string>
@@ -19,21 +19,21 @@
 #include "link_protocol.h"
 #include "wifi_link.h"
 #include "usb_midi_host.h"
-#include "p4hub_status.h"
-#include "p4hub_config.h"
-#include "p4hub_config_nvs.h"
-#include "p4hub_form.h"
-#include "p4hub_web.h"
+#include "ks_status.h"
+#include "ks_config.h"
+#include "ks_config_nvs.h"
+#include "ks_form.h"
+#include "ks_web.h"
 
-static const char *TAG = "p4hub_web";
-static P4HubConfig *s_cfg = nullptr;
+static const char *TAG = "ks_web";
+static KsConfig *s_cfg = nullptr;
 static volatile uint32_t *s_gen = nullptr;   // bumped on /live so the clock task re-primes
 
 // %SSID% / %MCKCHK% / %CABLE% are filled per-request from the live config.
 static const char PAGE[] = R"HTML(<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>P4&middot;HUB</title>
+<title>KitchenSync</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/dseg@0.46.0/css/dseg.css" rel="stylesheet">
@@ -128,7 +128,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 </style></head><body>
 <div class="unit">
 <span class="screw tl"></span><span class="screw tr"></span><span class="screw bl"></span><span class="screw br"></span>
-<div class="brand"><span class="pwr"></span><span class="wordmark">P4&middot;<b>HUB</b></span><span class="rev">ESP32-P4</span></div>
+<div class="brand"><span class="pwr"></span><span class="wordmark">KITCHEN&middot;<b>SYNC</b></span><span class="rev">ESP32-P4</span></div>
 <div class="scr">
 <div class="scr-top"><span class="beat" id="beat"></span><span class="scr-lbl">Session Tempo</span><span class="scr-src">Ableton Link</span></div>
 <div class="readout"><span class="ghost bignum">188.8</span><span class="live"><span class="bignum" id="bpm">--.-</span><span class="unit-bpm">BPM</span></span></div>
@@ -161,7 +161,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="sect %LEDSECT%" data-when="led">%LEDCTL%</div>
 <button class="write" type="submit">Write &amp; Reboot</button>
 </form>
-<div class="foot">ESP32-P4 &middot; Ableton Link &rarr; USB-MIDI &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
+<div class="foot">Everything and the kitchen sync &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
 </div>
 <script>
 var bpmEl=document.getElementById('bpm'),beatEl=document.getElementById('beat');
@@ -220,7 +220,7 @@ static std::string build_outputs()
     static const char* PPQN_LBL[] = { "MIDI clock (24)", "&times;2 (48)", "&divide;2 (12)",
                                       "&divide;4 (6)", "1/16 (4)", "1/8 (2)", "1/4 (1)" };
     std::string s;
-    for (int o = 0; o < P4HUB_CLOCK_OUTPUTS; o++) {
+    for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
         const ClockOutputCfg* c = &s_cfg->clock[o];
         std::string N = std::to_string(o);
         s += "<div class=\"frow out\"><span class=\"cap\">Clock Out " + std::to_string(o + 1) + "</span>";
@@ -311,7 +311,7 @@ static esp_err_t root_handler(httpd_req_t *req)
 static esp_err_t status_handler(httpd_req_t *req)
 {
     char buf[128];
-    p4hub_status_json(buf, sizeof(buf),
+    ks_status_json(buf, sizeof(buf),
                       (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
                       wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx());
     httpd_resp_set_type(req, "application/json");
@@ -345,12 +345,12 @@ static esp_err_t save_handler(httpd_req_t *req)
     body[got] = '\0';
 
     // Decode + parse the POST body into a candidate config (pure, host-tested).
-    P4HubConfig cfg;
-    p4hub_form_resolve(body, s_cfg, &cfg);
+    KsConfig cfg;
+    ks_form_resolve(body, s_cfg, &cfg);
 
-    if (!p4hub_config_valid(&cfg)) return send_result(req, "Invalid Config", "Check the values and go back.");
+    if (!ks_config_valid(&cfg)) return send_result(req, "Invalid Config", "Check the values and go back.");
     *s_cfg = cfg;
-    p4hub_config_save(s_cfg);
+    ks_config_save(s_cfg);
     esp_err_t rc = send_result(req, "Saved — Restarting", "Reconnect to WiFi if credentials changed.");
     vTaskDelay(pdMS_TO_TICKS(800));
     esp_restart();
@@ -374,9 +374,9 @@ static esp_err_t live_handler(httpd_req_t *req)
     }
     body[got] = '\0';
 
-    P4HubConfig cand;
-    p4hub_form_apply(body, s_cfg, &cand);   // patch onto the current live config
-    if (!p4hub_config_valid(&cand)) {
+    KsConfig cand;
+    ks_form_apply(body, s_cfg, &cand);   // patch onto the current live config
+    if (!ks_config_valid(&cand)) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "text/plain");
         return httpd_resp_send(req, "invalid", HTTPD_RESP_USE_STRLEN);
@@ -394,7 +394,7 @@ static esp_err_t live_handler(httpd_req_t *req)
     s_cfg->led_fade         = cand.led_fade;
     s_cfg->led_beat_color   = cand.led_beat_color;
     s_cfg->led_accent_color = cand.led_accent_color;
-    for (int o = 0; o < P4HUB_CLOCK_OUTPUTS; o++) s_cfg->clock[o] = cand.clock[o];
+    for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) s_cfg->clock[o] = cand.clock[o];
     if (s_gen) (*s_gen)++;
 
     httpd_resp_set_type(req, "text/plain");
@@ -407,7 +407,7 @@ static esp_err_t live_handler(httpd_req_t *req)
 // touched until esp_ota_set_boot_partition commits.
 static const char UPDATE_PAGE[] = R"HTML(<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>P4&middot;HUB &middot; Firmware Update</title>
+<title>KitchenSync &middot; Firmware Update</title>
 <style>
 body{margin:0;min-height:100vh;background:#070809;color:#e9ece6;font-family:ui-monospace,Menlo,monospace;
 display:flex;align-items:center;justify-content:center;padding:16px}
@@ -508,7 +508,7 @@ static esp_err_t update_handler(httpd_req_t *req)
     return rc;
 }
 
-void p4hub_web_start(P4HubConfig* cfg, volatile uint32_t* gen)
+void ks_web_start(KsConfig* cfg, volatile uint32_t* gen)
 {
     s_cfg = cfg;
     s_gen = gen;

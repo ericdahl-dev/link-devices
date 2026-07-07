@@ -1,11 +1,11 @@
-#include "p4hub_led.h"
+#include "ks_led.h"
 #include "led_strip.h"
 #include "esp_log.h"
 
-static const char *TAG = "p4hub_led";
+static const char *TAG = "ks_led";
 static led_strip_handle_t s_strip = NULL;
 
-void p4hub_led_start(int gpio, int npix) {
+void ks_led_start(int gpio, int npix) {
     led_strip_config_t strip_cfg = {
         .strip_gpio_num   = gpio,
         .max_leds         = npix,
@@ -28,12 +28,12 @@ void p4hub_led_start(int gpio, int npix) {
     ESP_LOGI(TAG, "WS2812 x%d on GPIO%d", npix, gpio);
 }
 
-void p4hub_led_show(const RGB* px, int npix) {
+void ks_led_show(const RGB* px, int npix) {
     if (!s_strip) return;
     for (int i = 0; i < npix; i++) led_strip_set_pixel(s_strip, i, px[i].r, px[i].g, px[i].b);
     led_strip_refresh(s_strip);
 }
 
-void p4hub_led_clear(void) {
+void ks_led_clear(void) {
     if (s_strip) led_strip_clear(s_strip);
 }

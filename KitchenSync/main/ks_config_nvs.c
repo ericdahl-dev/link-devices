@@ -1,14 +1,14 @@
-#include "p4hub_config_nvs.h"
+#include "ks_config_nvs.h"
 #include "sdkconfig.h"
 #include "nvs.h"
 #include <string.h>
 
-#define NS  "p4hub"
+#define NS  "kitchensync"
 #define KEY "cfg"
 
-void p4hub_config_load(P4HubConfig* c)
+void ks_config_load(KsConfig* c)
 {
-    p4hub_config_defaults(c);
+    ks_config_defaults(c);
 
     nvs_handle_t h;
     if (nvs_open(NS, NVS_READONLY, &h) == ESP_OK) {
@@ -18,13 +18,13 @@ void p4hub_config_load(P4HubConfig* c)
     }
 
     // Dev convenience: seed from the compile-time SSID if NVS has none.
-    if (c->wifi_ssid[0] == '\0' && sizeof(CONFIG_P4HUB_WIFI_SSID) > 1) {
-        strncpy(c->wifi_ssid, CONFIG_P4HUB_WIFI_SSID, sizeof(c->wifi_ssid) - 1);
-        strncpy(c->wifi_pass, CONFIG_P4HUB_WIFI_PASSWORD, sizeof(c->wifi_pass) - 1);
+    if (c->wifi_ssid[0] == '\0' && sizeof(CONFIG_KS_WIFI_SSID) > 1) {
+        strncpy(c->wifi_ssid, CONFIG_KS_WIFI_SSID, sizeof(c->wifi_ssid) - 1);
+        strncpy(c->wifi_pass, CONFIG_KS_WIFI_PASSWORD, sizeof(c->wifi_pass) - 1);
     }
 }
 
-esp_err_t p4hub_config_save(const P4HubConfig* c)
+esp_err_t ks_config_save(const KsConfig* c)
 {
     nvs_handle_t h;
     esp_err_t e = nvs_open(NS, NVS_READWRITE, &h);

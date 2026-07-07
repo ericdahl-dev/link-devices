@@ -7,7 +7,7 @@ Status: accepted
 
 ADR-0003 splits the firmware into pure, host-tested C logic + thin per-target
 glue, and ADR-0005 has each target use its own framework: **X32Link** (ESP32-S3)
-builds with **arduino-cli**, **P4Hub** (ESP32-P4) with **ESP-IDF**. The pure C is
+builds with **arduino-cli**, **KitchenSync** (ESP32-P4) with **ESP-IDF**. The pure C is
 meant to be shared across both targets, unchanged.
 
 A recurring instinct — including from the automated architecture review that
@@ -27,7 +27,7 @@ errors, not a warning.
 The existing codebase already encodes the workaround: **X32MidiClock** (a second
 Arduino sketch) consumes the shared modules by **symlinking each file back into
 its own sketch root** (`X32MidiClock/bpm_tracker.c -> ../X32Link/bpm_tracker.c`,
-~16 of them). P4Hub, being ESP-IDF, has no such constraint — it references the
+~16 of them). KitchenSync, being ESP-IDF, has no such constraint — it references the
 files by path from its `CMakeLists.txt`.
 
 So any "clean move" of a shared module is really: move the real file, then
@@ -47,7 +47,7 @@ or a neutral `shared/` root. The navigability gain does not justify a symlink
 farm in front of the firmware we flash. Navigability is instead served by
 documentation (module tables in `AGENTS.md`, header-comment pipelines) and by the
 deep-module refactors that *do* pay off — the pure, host-tested seams from
-ARC-006 (`p4hub_form`) and ARC-007 (`beat_source`).
+ARC-006 (`ks_form`) and ARC-007 (`beat_source`).
 
 ## Consequences
 

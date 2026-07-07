@@ -1,5 +1,5 @@
 #pragma once
-// P4Hub glue: WiFi station (via the C6 hosted stack) + Ableton Link listener.
+// KitchenSync glue: WiFi station (via the C6 hosted stack) + Ableton Link listener.
 // Owns the network side; the gossip parsing is the pure, host-tested
 // link_protocol.c. Exposes the current session timeline to the clock-out task.
 #include <stdbool.h>
@@ -10,7 +10,7 @@ extern "C" {
 
 // Bring up WiFi. With a non-empty ssid: join as a station and, once connected,
 // join the Link multicast group and feed the parser. With an empty ssid: start a
-// SoftAP ("P4Hub-Setup") so the web UI is reachable to enter credentials
+// SoftAP ("KitchenSync-Setup") so the web UI is reachable to enter credentials
 // (first-boot config mode, no Link). Non-blocking beyond association.
 void wifi_link_start(const char* ssid, const char* pass);
 

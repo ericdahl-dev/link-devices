@@ -1,5 +1,5 @@
 #pragma once
-// P4Hub glue: USB-MIDI host on the P4 Type-A OTG port. Enumerates a USB-MIDI
+// KitchenSync glue: USB-MIDI host on the P4 Type-A OTG port. Enumerates a USB-MIDI
 // device, claims its MIDIStreaming interface, and sends 4-byte USB-MIDI event
 // packets out the bulk OUT endpoint. Proven in the scratchpad p4_midi_clock
 // spike (P4-003). Packet encoding is the pure, host-tested usb_midi_pack.c.

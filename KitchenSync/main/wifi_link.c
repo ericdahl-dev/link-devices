@@ -1,5 +1,5 @@
 /*
- * P4Hub glue: WiFi station (C6 hosted stack) + Ableton Link multicast listener.
+ * KitchenSync glue: WiFi station (C6 hosted stack) + Ableton Link multicast listener.
  *
  * The gossip parsing + tempo/timeline math is the pure, host-tested
  * link_protocol.c (reused unchanged). This file is thin I/O: associate to WiFi,
@@ -120,14 +120,14 @@ static void start_ap(void)
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
     wifi_config_t wc = {0};
-    strcpy((char *)wc.ap.ssid, "P4Hub-Setup");
+    strcpy((char *)wc.ap.ssid, "KitchenSync-Setup");
     wc.ap.ssid_len       = 11;
     wc.ap.max_connection = 4;
     wc.ap.authmode       = WIFI_AUTH_OPEN;   // open network for first-boot setup
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGW(TAG, "no WiFi credentials — SoftAP 'P4Hub-Setup' at 192.168.4.1 for config");
+    ESP_LOGW(TAG, "no WiFi credentials — SoftAP 'KitchenSync-Setup' at 192.168.4.1 for config");
 }
 
 void wifi_link_start(const char* ssid, const char* pass)

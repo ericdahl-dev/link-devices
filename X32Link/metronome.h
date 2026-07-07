@@ -8,7 +8,7 @@
 // lockstep (a bar boundary is always an integer beat). A large forward jump
 // (tempo re-origin / stall) re-primes both instead of flooding, and a backward
 // move is silent. The audio tone burst (ES8311/I2S) is the platform glue in
-// P4Hub/main/metronome_audio.c. No Arduino/ESP-IDF dependency —
+// KitchenSync/main/metronome_audio.c. No Arduino/ESP-IDF dependency —
 // host-tested in test/test_metronome.c.
 #include "clock_ticker.h"
 #include <stdbool.h>
