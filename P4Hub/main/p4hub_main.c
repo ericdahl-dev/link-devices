@@ -154,7 +154,12 @@ static void clock_out_task(void *arg)
          * (its own led_enable switch); clears once when disabled or idle. */
         if (now - last_led >= LED_FRAME_US) {
             last_led = now;
-            if (g_cfg.led_enable && bs.active) {
+            /* Off when Link transport is stopped (P4-019): the beat keeps
+             * advancing while stopped and jumps on a re-origin (playhead move),
+             * which flickers the strip. Show only when playing; if the session
+             * never reports transport, fall back to showing whenever locked. */
+            bool tp_playing = !link_proto_start_stop_seen() || link_proto_playing();
+            if (g_cfg.led_enable && bs.active && tp_playing) {
                 MetroStripCfg lc = {
                     .beat   = { (uint8_t)(g_cfg.led_beat_color   >> 16), (uint8_t)(g_cfg.led_beat_color   >> 8), (uint8_t)g_cfg.led_beat_color   },
                     .accent = { (uint8_t)(g_cfg.led_accent_color >> 16), (uint8_t)(g_cfg.led_accent_color >> 8), (uint8_t)g_cfg.led_accent_color },
