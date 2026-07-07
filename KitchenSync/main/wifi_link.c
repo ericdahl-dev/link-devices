@@ -120,10 +120,11 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *dc = (wifi_event_sta_disconnected_t *)data;
         if (wifi_fallback_should_give_up(esp_timer_get_time(), s_connect_start_us)) {
             give_up_and_start_ap();
         } else {
-            ESP_LOGW(TAG, "disconnected, retrying");
+            ESP_LOGW(TAG, "disconnected (reason=%d), retrying", dc ? dc->reason : -1);
             esp_wifi_connect();
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
