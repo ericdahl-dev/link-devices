@@ -96,6 +96,27 @@ void test_led_toggle(void) {
     TEST_ASSERT_FALSE(p4hub_config_set(&c, "led", "2"));         // only 0/1
 }
 
+// Strip customization (P4-019): brightness, mode, fade, and #rrggbb colours.
+void test_led_customization(void) {
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "led_bright", "40"));
+    TEST_ASSERT_EQUAL_INT(40, c.led_brightness);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "led_bright", "101"));   // 0..100
+
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "led_mode", "2"));        // fill
+    TEST_ASSERT_EQUAL_INT(2, c.led_mode);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "led_mode", "3"));       // 0..2
+
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "led_fade", "0"));
+    TEST_ASSERT_EQUAL_INT(0, c.led_fade);
+
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "led_beat", "#0080ff"));  // html color input
+    TEST_ASSERT_EQUAL_INT(0x0080FF, c.led_beat_color);
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "led_accent", "ff00aa")); // bare hex also ok
+    TEST_ASSERT_EQUAL_INT(0xFF00AA, c.led_accent_color);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "led_beat", "#1000000")); // > 0xFFFFFF
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "led_beat", "#zzzzzz"));   // non-hex
+}
+
 void test_metronome_accent_toggle(void) {
     TEST_ASSERT_TRUE(p4hub_config_set(&c, "metro_accent", "0"));
     TEST_ASSERT_EQUAL_INT(0, c.metronome_accent);
@@ -131,6 +152,7 @@ int main(void) {
     RUN_TEST(test_clock_out_toggle);
     RUN_TEST(test_metronome_toggle);
     RUN_TEST(test_led_toggle);
+    RUN_TEST(test_led_customization);
     RUN_TEST(test_metronome_accent_toggle);
     RUN_TEST(test_metronome_volume_and_voice);
     RUN_TEST(test_unknown_key);

@@ -9,7 +9,12 @@ void p4hub_config_defaults(P4HubConfig* c) {
     c->metronome_accent = 1;   // when enabled, accent the bar-1 downbeat
     c->metronome_volume = 80;  // ES8311 codec volume
     c->metronome_voice  = 0;   // Tone (default)
-    c->led_enable       = 0;   // visual metronome on the user LED: default off
+    c->led_enable       = 0;   // visual metronome on the strip: default off
+    c->led_brightness   = 60;  // % (P4-019)
+    c->led_mode         = 0;   // chase
+    c->led_fade         = 55;  // pulse dim across a beat
+    c->led_beat_color   = 0x00B400;   // green
+    c->led_accent_color = 0xDC6E00;   // amber
     // P4-010: output 0 is the default 24-PPQN MIDI clock on cable 0; rest off.
     for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) {
         c->clock[i].enable       = (i == 0) ? 1 : 0;
@@ -27,6 +32,11 @@ bool p4hub_config_valid(const P4HubConfig* c) {
     if (c->metronome_volume < 0 || c->metronome_volume > 100) return false;
     if (c->metronome_voice < 0 || c->metronome_voice > 2) return false;
     if (c->led_enable != 0 && c->led_enable != 1) return false;
+    if (c->led_brightness < 0 || c->led_brightness > 100) return false;
+    if (c->led_mode < 0 || c->led_mode > 2) return false;
+    if (c->led_fade < 0 || c->led_fade > 100) return false;
+    if (c->led_beat_color   < 0 || c->led_beat_color   > 0xFFFFFF) return false;
+    if (c->led_accent_color < 0 || c->led_accent_color > 0xFFFFFF) return false;
     for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) {
         const ClockOutputCfg* o = &c->clock[i];
         if (o->enable != 0 && o->enable != 1) return false;
@@ -87,6 +97,35 @@ bool p4hub_config_set(P4HubConfig* c, const char* key, const char* value) {
         int v = atoi(value);
         if (v != 0 && v != 1) return false;
         c->led_enable = v;
+        return true;
+    }
+    if (strcmp(key, "led_bright") == 0) {
+        int v = atoi(value);
+        if (v < 0 || v > 100) return false;
+        c->led_brightness = v;
+        return true;
+    }
+    if (strcmp(key, "led_mode") == 0) {
+        int v = atoi(value);
+        if (v < 0 || v > 2) return false;
+        c->led_mode = v;
+        return true;
+    }
+    if (strcmp(key, "led_fade") == 0) {
+        int v = atoi(value);
+        if (v < 0 || v > 100) return false;
+        c->led_fade = v;
+        return true;
+    }
+    // Colours arrive from an HTML <input type="color"> as "#rrggbb" (the '#' is
+    // url-decoded before we see it); accept with or without the leading '#'.
+    if (strcmp(key, "led_beat") == 0 || strcmp(key, "led_accent") == 0) {
+        const char* hex = (value[0] == '#') ? value + 1 : value;
+        char* end = NULL;
+        long v = strtol(hex, &end, 16);
+        if (end == hex || *end != '\0' || v < 0 || v > 0xFFFFFF) return false;
+        if (key[4] == 'b') c->led_beat_color   = (int)v;   // "led_beat"
+        else               c->led_accent_color = (int)v;   // "led_accent"
         return true;
     }
     // P4-010 per-output fields: "clk<N>_en|cable|ppqn|phase" (N = 0..3).

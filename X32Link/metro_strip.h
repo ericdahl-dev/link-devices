@@ -1,14 +1,20 @@
 #pragma once
-// Pure WS2812 "bar-position chase" renderer for the visual metronome (P4-018).
-// Given the continuous beat position, it lights one contiguous block of pixels
-// per beat that walks across the strip (npix/quantum pixels per beat), colouring
-// the bar-1 downbeat differently (amber) from the other beats (green) and dimming
-// the block across each beat so it pulses. No I/O — the caller renders into an RGB
-// array and hands it to the led_strip glue. Host-tested in test/test_metro_strip.c.
-// No Arduino/ESP-IDF dependency.
+// Pure WS2812 visual-metronome renderer (P4-018, customizable P4-019). Given the
+// continuous beat position and a config (colors, brightness, pattern, fade), it
+// fills an RGB array; the led_strip glue pushes it to the strip. Three patterns:
+//   CHASE — one block per beat walks across the strip (npix/quantum px per beat)
+//   FLASH — every pixel pulses together on each beat
+//   FILL  — pixels fill across the bar like a progress bar, resetting each downbeat
+// The bar-1 downbeat uses the accent colour, other beats the beat colour. No I/O.
+// Host-tested in test/test_metro_strip.c. No Arduino/ESP-IDF dependency.
 #include <stdint.h>
 
 #define METRO_STRIP_PIXELS 8   // the attached strip length
+
+// Pattern modes (config led_mode).
+#define METRO_STRIP_CHASE 0
+#define METRO_STRIP_FLASH 1
+#define METRO_STRIP_FILL  2
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,10 +22,19 @@ extern "C" {
 
 typedef struct { uint8_t r, g, b; } RGB;
 
-// Render the chase for beat position `beats` into out[0..npix). `quantum` is beats
-// per bar (e.g. 4). Pixels outside the current beat's block are set to {0,0,0}.
-// Safe for negative beats and for npix not a multiple of quantum.
-void metro_strip_render(double beats, int quantum, int npix, RGB out[]);
+typedef struct {
+    RGB     beat;    // colour for beats 2..N
+    RGB     accent;  // colour for the bar-1 downbeat
+    uint8_t bright;  // master brightness, 0..100 %
+    uint8_t mode;    // METRO_STRIP_CHASE / FLASH / FILL
+    uint8_t fade;    // dim across a beat, 0..100 % (0 = steady, 100 = dark by next beat)
+} MetroStripCfg;
+
+// Render the pattern for beat position `beats` into out[0..npix). `quantum` is
+// beats per bar (e.g. 4). Safe for negative beats and npix not a multiple of
+// quantum. Pixels not lit are set to {0,0,0}.
+void metro_strip_render(double beats, int quantum, int npix,
+                        const MetroStripCfg* cfg, RGB out[]);
 
 #ifdef __cplusplus
 }

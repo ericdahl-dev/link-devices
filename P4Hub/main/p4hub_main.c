@@ -155,8 +155,15 @@ static void clock_out_task(void *arg)
         if (now - last_led >= LED_FRAME_US) {
             last_led = now;
             if (g_cfg.led_enable && bs.active) {
+                MetroStripCfg lc = {
+                    .beat   = { (uint8_t)(g_cfg.led_beat_color   >> 16), (uint8_t)(g_cfg.led_beat_color   >> 8), (uint8_t)g_cfg.led_beat_color   },
+                    .accent = { (uint8_t)(g_cfg.led_accent_color >> 16), (uint8_t)(g_cfg.led_accent_color >> 8), (uint8_t)g_cfg.led_accent_color },
+                    .bright = (uint8_t)g_cfg.led_brightness,
+                    .mode   = (uint8_t)g_cfg.led_mode,
+                    .fade   = (uint8_t)g_cfg.led_fade,
+                };
                 RGB frame[LED_PIXELS];
-                metro_strip_render(bs.beats, (int)METRO_QUANTUM, LED_PIXELS, frame);
+                metro_strip_render(bs.beats, (int)METRO_QUANTUM, LED_PIXELS, &lc, frame);
                 p4hub_led_show(frame, LED_PIXELS);
                 led_showing = true;
             } else if (led_showing) {

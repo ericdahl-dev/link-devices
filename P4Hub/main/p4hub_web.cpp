@@ -6,6 +6,7 @@
  */
 #include <string>
 #include <string.h>
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_http_server.h"
@@ -90,6 +91,9 @@ background:linear-gradient(180deg,#1a1f25,#12161b);color:var(--ink);font-family:
 font-weight:800;font-size:24px;line-height:1;cursor:pointer;display:flex;align-items:center;
 justify-content:center;user-select:none;-webkit-user-select:none;touch-action:manipulation}
 .stp:active{background:#0d1014;transform:translateY(1px);border-color:#4a5a2c}
+.fld input[type=color]{-webkit-appearance:none;appearance:none;flex:none;width:52px;height:30px;padding:0;border:1px solid var(--line);border-radius:7px;background:transparent;cursor:pointer}
+.fld input[type=color]::-webkit-color-swatch-wrapper{padding:2px}
+.fld input[type=color]::-webkit-color-swatch{border:0;border-radius:5px}
 .sw{display:flex;align-items:center;gap:13px;cursor:pointer;user-select:none}
 .sw input{position:absolute;opacity:0;width:0;height:0}
 .sw .track{position:relative;flex:none;width:52px;height:28px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);transition:.2s}
@@ -132,6 +136,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <label class="sw"><input type="checkbox" class="live" name="metro_accent" value="1" %MTACHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="frow"><span class="cap">LED Strip &middot; Visual Metronome</span>
 <label class="sw"><input type="checkbox" class="live" name="led" value="1" %LEDCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
+%LEDCTL%
 <div class="frow"><span class="cap">Metronome Sound</span>
 <div class="fld"><span class="pre">VOL</span><input type="number" name="metro_vol" value="%MVOL%" min="0" max="100" step="5"></div>
 <div class="fld"><span class="pre">VOICE</span><select name="metro_voice" id="mvoice"><option value="0">Tone</option><option value="1">Click</option><option value="2">Wood</option></select></div></div>
@@ -223,6 +228,33 @@ static std::string build_outputs()
     return s;
 }
 
+// LED-strip customization controls (P4-019): brightness, pattern, fade, colours —
+// all on the /live path so they apply instantly with no reboot.
+static std::string build_led()
+{
+    if (!s_cfg) return "";
+    char col[8];
+    static const char* MODES[3] = { "Chase", "Flash", "Fill" };
+    std::string s = "<div class=\"frow\"><span class=\"cap\">Strip Look</span>";
+    s += "<div class=\"fld\"><span class=\"pre\">BRIGHT</span><input type=\"number\" class=\"live\" name=\"led_bright\" value=\""
+         + std::to_string(s_cfg->led_brightness) + "\" min=\"0\" max=\"100\" step=\"5\"></div>";
+    s += "<div class=\"fld\"><span class=\"pre\">MODE</span><select class=\"live\" name=\"led_mode\">";
+    for (int m = 0; m < 3; m++)
+        s += "<option value=\"" + std::to_string(m) + "\"" + (s_cfg->led_mode == m ? " selected" : "")
+             + ">" + MODES[m] + "</option>";
+    s += "</select></div>";
+    s += "<div class=\"fld\"><span class=\"pre\">FADE</span><input type=\"number\" class=\"live\" name=\"led_fade\" value=\""
+         + std::to_string(s_cfg->led_fade) + "\" min=\"0\" max=\"100\" step=\"5\"></div>";
+    snprintf(col, sizeof(col), "#%06X", s_cfg->led_beat_color & 0xFFFFFF);
+    s += std::string("<div class=\"fld\"><span class=\"pre\">BEAT</span><input type=\"color\" class=\"live\" name=\"led_beat\" value=\"")
+         + col + "\"></div>";
+    snprintf(col, sizeof(col), "#%06X", s_cfg->led_accent_color & 0xFFFFFF);
+    s += std::string("<div class=\"fld\"><span class=\"pre\">ACCENT</span><input type=\"color\" class=\"live\" name=\"led_accent\" value=\"")
+         + col + "\"></div>";
+    s += "</div>";
+    return s;
+}
+
 static std::string build_page()
 {
     std::string h(PAGE);
@@ -231,6 +263,7 @@ static std::string build_page()
     subst(h, "%MTOCHK%",  (s_cfg && s_cfg->metronome_enable) ? "checked" : "");
     subst(h, "%MTACHK%",  (s_cfg && s_cfg->metronome_accent) ? "checked" : "");
     subst(h, "%LEDCHK%",  (s_cfg && s_cfg->led_enable) ? "checked" : "");
+    subst(h, "%LEDCTL%",  build_led());
     subst(h, "%MVOL%",    std::to_string(s_cfg ? s_cfg->metronome_volume : 80));
     subst(h, "%MVOICE%",  std::to_string(s_cfg ? s_cfg->metronome_voice : 0));
     subst(h, "%OUTPUTS%", build_outputs());
@@ -325,6 +358,11 @@ static esp_err_t live_handler(httpd_req_t *req)
     s_cfg->clock_out_enable = cand.clock_out_enable;
     s_cfg->metronome_accent = cand.metronome_accent;
     s_cfg->led_enable       = cand.led_enable;
+    s_cfg->led_brightness   = cand.led_brightness;
+    s_cfg->led_mode         = cand.led_mode;
+    s_cfg->led_fade         = cand.led_fade;
+    s_cfg->led_beat_color   = cand.led_beat_color;
+    s_cfg->led_accent_color = cand.led_accent_color;
     for (int o = 0; o < P4HUB_CLOCK_OUTPUTS; o++) s_cfg->clock[o] = cand.clock[o];
     if (s_gen) (*s_gen)++;
 
