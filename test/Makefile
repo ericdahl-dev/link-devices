@@ -28,10 +28,10 @@ SESSION = ../X32Link/link_measurement_session.c
 USBMIDIPACK = ../X32Link/usb_midi_pack.c
 BEATCLOCK = ../X32Link/beat_clock.c
 BEATSOURCE = ../X32Link/beat_source.c
-P4STATUS = ../P4Hub/main/p4hub_status.c
-P4CONFIG = ../P4Hub/main/p4hub_config.c
-P4FORM  = ../P4Hub/main/p4hub_form.c
-MIDICLOCKIN = ../P4Hub/main/midi_clock_in.c
+P4STATUS = ../KitchenSync/main/ks_status.c
+P4CONFIG = ../KitchenSync/main/ks_config.c
+P4FORM  = ../KitchenSync/main/ks_form.c
+MIDICLOCKIN = ../KitchenSync/main/midi_clock_in.c
 TRANSPORT = ../X32Link/transport.c
 CLOCKOUTPUT = ../X32Link/clock_output.c
 MVOICE = ../X32Link/metronome_voice.c
@@ -40,7 +40,7 @@ METROSTRIP = ../X32Link/metro_strip.c
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_usb_midi_pack test_beat_clock test_p4hub_status test_p4hub_config test_p4hub_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -63,9 +63,9 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_usb_midi_pack
 	./test_beat_clock
 	./test_beat_source
-	./test_p4hub_status
-	./test_p4hub_config
-	./test_p4hub_form
+	./test_ks_status
+	./test_ks_config
+	./test_ks_form
 	./test_transport
 	./test_clock_output
 	./test_metronome_voice
@@ -144,20 +144,20 @@ test_beat_clock: test_beat_clock.c $(BEATCLOCK) $(UNITY)
 test_beat_source: test_beat_source.c $(BEATSOURCE) $(BEATCLOCK) $(PHASE) $(PROTO) $(MEAS) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
-test_p4hub_status: test_p4hub_status.c $(P4STATUS) $(UNITY)
-	$(CC) $(CFLAGS) -I../P4Hub/main $^ -o $@
+test_ks_status: test_ks_status.c $(P4STATUS) $(UNITY)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@
 
 clean:
 	rm -f test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_axs5106l test_touch_ui test_tempo_snapshot test_bar
 
-test_p4hub_config: test_p4hub_config.c $(P4CONFIG) $(UNITY)
-	$(CC) $(CFLAGS) -I../P4Hub/main $^ -o $@
+test_ks_config: test_ks_config.c $(P4CONFIG) $(UNITY)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@
 
-test_p4hub_form: test_p4hub_form.c $(P4FORM) $(P4CONFIG) $(UNITY)
-	$(CC) $(CFLAGS) -I../P4Hub/main $^ -o $@
+test_ks_form: test_ks_form.c $(P4FORM) $(P4CONFIG) $(UNITY)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@
 
 test_midi_clock_in: test_midi_clock_in.c $(MIDICLOCKIN) $(MIDICALC) $(UNITY)
-	$(CC) $(CFLAGS) -I../P4Hub/main $^ -o $@ -lm
+	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@ -lm
 
 test_metronome: test_metronome.c $(METRO) $(CLOCKTICK) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm

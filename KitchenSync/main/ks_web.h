@@ -1,9 +1,9 @@
 #pragma once
-// P4Hub web UI (P4-007): rack-panel status + config page styled like X32Link,
+// KitchenSync web UI (P4-007): rack-panel status + config page styled like X32Link,
 // served over esp_http_server. Thin glue; the /status JSON is pure
-// p4hub_status.c and the config model is pure p4hub_config.c.
+// ks_status.c and the config model is pure ks_config.c.
 #include <stdint.h>
-#include "p4hub_config.h"
+#include "ks_config.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -13,7 +13,7 @@ extern "C" {
 // counter bumped on every /live change so the clock task re-primes its grids;
 // pass the address of a counter the clock task watches. Both must outlive the
 // server.
-void p4hub_web_start(P4HubConfig* cfg, volatile uint32_t* gen);
+void ks_web_start(KsConfig* cfg, volatile uint32_t* gen);
 #ifdef __cplusplus
 }
 #endif

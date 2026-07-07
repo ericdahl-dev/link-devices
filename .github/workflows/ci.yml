@@ -3,7 +3,7 @@ name: CI
 # Host-side Unity tests (pure logic, no hardware) + firmware compiles so a change
 # that passes host tests but breaks a real build is caught before merge:
 #   - X32Link  (ESP32-S3, arduino-cli): headless + Waveshare touch variants
-#   - P4Hub    (ESP32-P4, ESP-IDF): the hub-tier target (see ADR-0005)
+#   - KitchenSync    (ESP32-P4, ESP-IDF): the hub-tier target (see ADR-0005)
 on:
   push:
     branches: [master]
@@ -56,17 +56,17 @@ jobs:
           arduino-cli compile --fqbn "$FQBN" X32Link
           git checkout -- X32Link/build_opt.h
 
-  p4hub-compile:
-    name: Firmware compile (P4Hub, ESP-IDF)
+  kitchensync-compile:
+    name: Firmware compile (KitchenSync, ESP-IDF)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Builds P4Hub for the ESP32-P4 via the official ESP-IDF Docker action.
+      # Builds KitchenSync for the ESP32-P4 via the official ESP-IDF Docker action.
       # idf.py auto-downloads any managed components (esp_hosted / esp_wifi_remote
       # once the P4-004/005 glue lands). release-v5.5 has the esp32p4 min-rev gate.
-      - name: Compile P4Hub for esp32p4
+      - name: Compile KitchenSync for esp32p4
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: release-v5.5
           target: esp32p4
-          path: 'P4Hub'
+          path: 'KitchenSync'

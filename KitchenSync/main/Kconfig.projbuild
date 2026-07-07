@@ -1,6 +1,6 @@
-menu "P4Hub Configuration"
+menu "KitchenSync Configuration"
 
-    config P4HUB_WIFI_SSID
+    config KS_WIFI_SSID
         string "WiFi SSID"
         default ""
         help
@@ -8,7 +8,7 @@ menu "P4Hub Configuration"
             session). Left empty in the repo — set it locally (menuconfig or a
             gitignored sdkconfig); do not commit credentials.
 
-    config P4HUB_WIFI_PASSWORD
+    config KS_WIFI_PASSWORD
         string "WiFi Password"
         default ""
         help

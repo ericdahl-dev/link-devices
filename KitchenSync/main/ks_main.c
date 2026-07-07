@@ -1,5 +1,5 @@
 /*
- * P4Hub — ESP32-P4 hub-tier firmware. P4-005: a live Ableton Link tempo drives
+ * KitchenSync — ESP32-P4 hub-tier firmware. P4-005: a live Ableton Link tempo drives
  * 24-PPQN MIDI clock out the USB-MIDI host to attached gear (e.g. a Blokas
  * Midihub). The spine of the full-featured MIDI-clock / Link device.
  *
@@ -26,15 +26,15 @@
 
 #include "wifi_link.h"
 #include "usb_midi_host.h"
-#include "p4hub_web.h"
-#include "p4hub_config.h"
-#include "p4hub_config_nvs.h"
+#include "ks_web.h"
+#include "ks_config.h"
+#include "ks_config_nvs.h"
 #include "beat_source.h"      /* basis selector: session phase vs free-run (ARC-007) */
 #include "clock_ticker.h"
 #include "metronome.h"
 #include "metronome_audio.h"
 #include "metro_strip.h"     /* pure WS2812 bar-position chase (P4-018) */
-#include "p4hub_led.h"       /* WS2812 strip glue (RMT) */
+#include "ks_led.h"       /* WS2812 strip glue (RMT) */
 #include "usb_midi_pack.h"
 #include "transport.h"        /* Link play/stop -> MIDI Start/Stop (P4-008) */
 #include "link_protocol.h"
@@ -42,7 +42,7 @@
 #include "link_measure_io.h"    /* unicast ping/pong measurement client */
 #include "clock_output.h"       /* per-output division + phase-nudge (P4-010) */
 
-static const char *TAG = "p4hub";
+static const char *TAG = "kitchensync";
 
 #define MAX_BURST       96   /* re-prime instead of flooding past this backlog */
 #define METRO_QUANTUM   4.0  /* beats/bar for the bar-1 accent — Link timeline
@@ -52,14 +52,14 @@ static const char *TAG = "p4hub";
 #define LED_PIXELS      METRO_STRIP_PIXELS
 #define LED_FRAME_US    20000 /* ~50 fps strip refresh, decoupled from the 1 ms clock */
 
-static P4HubConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
+static KsConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
 static volatile uint32_t g_cfg_gen = 0;   /* bumped by web POST /live; clock task re-primes on change (P4-015) */
 
 static void clock_out_task(void *arg)
 {
     BeatSource  src;  beat_source_reset(&src);
-    ClockTicker cts[P4HUB_CLOCK_OUTPUTS];   /* one grid per output (P4-010) */
-    for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
+    ClockTicker cts[KS_CLOCK_OUTPUTS];   /* one grid per output (P4-010) */
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
     Metronome   mt;   metronome_reset(&mt);
     Transport   tr;   transport_reset(&tr);
     uint32_t    pulses = 0;
@@ -102,7 +102,7 @@ static void clock_out_task(void *arg)
         bool reprime = bs.reprime;
         if (g_cfg_gen != seen_gen) { reprime = true; seen_gen = g_cfg_gen; }
         if (reprime) {
-            for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
+            for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
             metronome_reset(&mt);
             if (!bs.active) transport_reset(&tr);
         }
@@ -113,7 +113,7 @@ static void clock_out_task(void *arg)
             if (usb_midi_host_ready() && g_cfg.clock_out_enable) {
                 /* Fan the shared beat out to each enabled output at its own
                  * division (ppqn) + phase nudge, onto its own cable (P4-010). */
-                for (int o = 0; o < P4HUB_CLOCK_OUTPUTS; o++) {
+                for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
                     const ClockOutputCfg* oc = &g_cfg.clock[o];
                     if (!oc->enable) continue;
                     int due = clock_output_due(&cts[o], beats, oc->ppqn, oc->phase_mbeats, oc->swing_mbeats, MAX_BURST);
@@ -132,7 +132,7 @@ static void clock_out_task(void *arg)
                                                       link_proto_playing());
                 if (ta != TRANSPORT_NONE) {
                     uint8_t status = (ta == TRANSPORT_START) ? 0xFA : 0xFC;
-                    for (int o = 0; o < P4HUB_CLOCK_OUTPUTS; o++) {
+                    for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
                         if (!g_cfg.clock[o].enable) continue;
                         uint8_t pkt[4];
                         usb_midi_pack_single(g_cfg.clock[o].cable, status, pkt);
@@ -176,10 +176,10 @@ static void clock_out_task(void *arg)
                 };
                 RGB frame[LED_PIXELS];
                 metro_strip_render(bs.beats, (int)METRO_QUANTUM, LED_PIXELS, &lc, frame);
-                p4hub_led_show(frame, LED_PIXELS);
+                ks_led_show(frame, LED_PIXELS);
                 led_showing = true;
             } else if (led_showing) {
-                p4hub_led_clear();
+                ks_led_clear();
                 led_showing = false;
             }
         }
@@ -205,13 +205,13 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    p4hub_config_load(&g_cfg);
-    ESP_LOGI(TAG, "P4Hub — Link tempo -> USB-MIDI host clock out (P4-005/007)");
+    ks_config_load(&g_cfg);
+    ESP_LOGI(TAG, "KitchenSync — Link tempo -> USB-MIDI host clock out (P4-005/007)");
     usb_midi_host_start();
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
-    p4hub_web_start(&g_cfg, &g_cfg_gen);
+    ks_web_start(&g_cfg, &g_cfg_gen);
     if (g_cfg.metronome_enable)
         metronome_audio_start(g_cfg.metronome_volume, g_cfg.metronome_voice);   /* codec/I2S only when used */
-    p4hub_led_start(LED_GPIO, LED_PIXELS);   /* WS2812 visual metronome; harmless if nothing wired (P4-018) */
+    ks_led_start(LED_GPIO, LED_PIXELS);   /* WS2812 visual metronome; harmless if nothing wired (P4-018) */
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
 }

@@ -1,8 +1,8 @@
-#include "p4hub_config.h"
+#include "ks_config.h"
 #include <string.h>
 #include <stdlib.h>
 
-void p4hub_config_defaults(P4HubConfig* c) {
+void ks_config_defaults(KsConfig* c) {
     memset(c, 0, sizeof(*c));
     c->clock_out_enable = 1;
     c->metronome_enable = 0;   // audible: default off so a fresh board is silent
@@ -16,7 +16,7 @@ void p4hub_config_defaults(P4HubConfig* c) {
     c->led_beat_color   = 0x00B400;   // green
     c->led_accent_color = 0xDC6E00;   // amber
     // P4-010: output 0 is the default 24-PPQN MIDI clock on cable 0; rest off.
-    for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) {
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) {
         c->clock[i].enable       = (i == 0) ? 1 : 0;
         c->clock[i].cable        = i;
         c->clock[i].ppqn         = 24;
@@ -25,7 +25,7 @@ void p4hub_config_defaults(P4HubConfig* c) {
     }
 }
 
-bool p4hub_config_valid(const P4HubConfig* c) {
+bool ks_config_valid(const KsConfig* c) {
     if (c->clock_out_enable != 0 && c->clock_out_enable != 1) return false;
     if (c->metronome_enable != 0 && c->metronome_enable != 1) return false;
     if (c->metronome_accent != 0 && c->metronome_accent != 1) return false;
@@ -37,7 +37,7 @@ bool p4hub_config_valid(const P4HubConfig* c) {
     if (c->led_fade < 0 || c->led_fade > 100) return false;
     if (c->led_beat_color   < 0 || c->led_beat_color   > 0xFFFFFF) return false;
     if (c->led_accent_color < 0 || c->led_accent_color > 0xFFFFFF) return false;
-    for (int i = 0; i < P4HUB_CLOCK_OUTPUTS; i++) {
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) {
         const ClockOutputCfg* o = &c->clock[i];
         if (o->enable != 0 && o->enable != 1) return false;
         if (o->cable < 0 || o->cable > 3) return false;
@@ -55,7 +55,7 @@ static bool copy_field(char* dst, size_t cap, const char* src) {
     return true;
 }
 
-bool p4hub_config_set(P4HubConfig* c, const char* key, const char* value) {
+bool ks_config_set(KsConfig* c, const char* key, const char* value) {
     if (strcmp(key, "wifi_ssid") == 0) {
         return copy_field(c->wifi_ssid, sizeof(c->wifi_ssid), value);
     }
@@ -131,7 +131,7 @@ bool p4hub_config_set(P4HubConfig* c, const char* key, const char* value) {
     // P4-010 per-output fields: "clk<N>_en|cable|ppqn|phase" (N = 0..3).
     if (strncmp(key, "clk", 3) == 0 && key[3] >= '0' && key[3] <= '9' && key[4] == '_') {
         int idx = key[3] - '0';
-        if (idx < 0 || idx >= P4HUB_CLOCK_OUTPUTS) return false;
+        if (idx < 0 || idx >= KS_CLOCK_OUTPUTS) return false;
         const char* f = key + 5;
         int v = atoi(value);
         ClockOutputCfg* o = &c->clock[idx];

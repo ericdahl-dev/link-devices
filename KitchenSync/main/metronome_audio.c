@@ -1,5 +1,5 @@
 /*
- * P4Hub metronome audio glue (P4-006) — ES8311 codec + I2S tone bursts out the
+ * KitchenSync metronome audio glue (P4-006) — ES8311 codec + I2S tone bursts out the
  * ESP32-P4-NANO onboard speaker. The click/accent DECISION is pure and
  * host-tested (X32Link/metronome.c); this file only makes sound.
  *

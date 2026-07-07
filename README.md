@@ -12,7 +12,7 @@ preserved; recovery tag `pre-split-2026-07-04` on the old repo).
   (Waveshare board), **USB-MIDI clock OUT** (LNK-027), a planned analog
   Eurorack sync (LNK-028), and **web-based OTA updates** (LNK-034, upload a
   .bin at `/update`). Runtime source is chosen from the web/touch config UI.
-- **P4Hub** (`P4Hub/`) — the "pro" hub tier, in active development
+- **KitchenSync** (`KitchenSync/`) — the "pro" hub tier, in active development
   (ESP32-P4-NANO, native ESP-IDF). Turns a Link session into phase-accurate MIDI
   for real hardware: **USB-MIDI host** clock + transport out (drive gear like a
   Blokas Midihub directly), **phase-locked downbeat** sync, four Multiclock-style
@@ -20,7 +20,7 @@ preserved; recovery tag `pre-split-2026-07-04` on the old repo).
   metronome, a rack-panel web UI with **live (no-reboot) timing config**,
   **web-based OTA updates** (P4-017, dual-slot), and **MIDI clock IN** detection
   (publishing it back into Link is next). Reuses this repo's pure modules
-  unchanged. See [`P4Hub/README.md`](P4Hub/README.md).
+  unchanged. See [`KitchenSync/README.md`](KitchenSync/README.md).
 - **X32MidiClock** (`X32MidiClock/`) — legacy standalone MIDI-clock sketch;
   superseded by X32Link (retirement tracked in LNK-024). Shares C files with
   X32Link via symlinks.
@@ -45,7 +45,7 @@ CI (`.github/workflows/ci.yml`) runs the host suite + compiles X32Link (headless
 
 ## Tasks
 
-Own Ordna tracker in `tasks/` (prefixes: `LNK-` X32Link, `P4-` P4Hub, `ARC-`
+Own Ordna tracker in `tasks/` (prefixes: `LNK-` X32Link, `P4-` KitchenSync, `ARC-`
 cross-cutting firmware architecture, `ESP-` emulator, `MCK-` X32MidiClock;
 `.ordna/config.yaml`). The `behringer` monorepo keeps its `T-*` CLI tracker
 separately.

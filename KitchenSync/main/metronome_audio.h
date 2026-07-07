@@ -1,5 +1,5 @@
 #pragma once
-// P4Hub audio glue (P4-006): the ES8311 codec + I2S tone-burst side of the
+// KitchenSync audio glue (P4-006): the ES8311 codec + I2S tone-burst side of the
 // metronome. Pure scheduling (when to click / accent) lives in the host-tested
 // X32Link/metronome.c; this file is the platform-specific sound. Thin per
 // ADR-0003. See metronome_audio.c for the ES8311/I2S pin assumptions (logged at

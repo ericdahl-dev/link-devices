@@ -1,6 +1,6 @@
 #pragma once
 // Pure beat-source selector (ARC-007). Owns the policy that used to sit inline in
-// P4Hub's clock_out_task: given the current Link session state, decide whether the
+// KitchenSync's clock_out_task: given the current Link session state, decide whether the
 // beat position comes from the phase-locked session (a committed GhostXForm ->
 // link_phase_beats_now, true downbeat) or the free-running local accumulator
 // (beat_clock, correct rate / arbitrary phase), and tell the caller when a basis

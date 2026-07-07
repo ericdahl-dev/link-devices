@@ -12,9 +12,9 @@ respective copyright holders.
 
 ## Pulled at build time (not stored here)
 
-### ESP-IDF managed components — P4Hub (ESP-IDF)
+### ESP-IDF managed components — KitchenSync (ESP-IDF)
 
-Fetched by the IDF component manager per `P4Hub/main/idf_component.yml`; each is
+Fetched by the IDF component manager per `KitchenSync/main/idf_component.yml`; each is
 by **Espressif Systems**, **Apache-2.0**.
 
 | Component | Purpose |
@@ -27,13 +27,13 @@ by **Espressif Systems**, **Apache-2.0**.
 
 | Component | Author(s) | License |
 |---|---|---|
-| **ESP-IDF** (P4Hub) | Espressif Systems | Apache-2.0 |
+| **ESP-IDF** (KitchenSync) | Espressif Systems | Apache-2.0 |
 | **Arduino-ESP32** core (X32Link, X32MidiClock) | Espressif Systems | LGPL-2.1-or-later |
 | **LovyanGFX** — touch-LCD graphics ([`X32Link/touch_display.*`](X32Link/)) | lovyan03 (Kenji Ono) | BSD-2-Clause (FreeBSD) |
 
 ### Web fonts — loaded at runtime by the config UI (CDN, not redistributed here)
 
-The rack-panel web UI (`P4Hub/main/p4hub_web.cpp`, `X32Link/web_config.cpp`)
+The rack-panel web UI (`KitchenSync/main/ks_web.cpp`, `X32Link/web_config.cpp`)
 references these over Google Fonts / jsDelivr. All **SIL Open Font License 1.1**.
 
 | Font | Author | Source |

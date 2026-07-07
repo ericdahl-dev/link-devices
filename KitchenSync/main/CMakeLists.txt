@@ -1,22 +1,22 @@
-# P4Hub reuses the pure, host-tested engines from X32Link UNCHANGED (ADR-0003),
+# KitchenSync reuses the pure, host-tested engines from X32Link UNCHANGED (ADR-0003),
 # compiled in by relative path — single source, no copies/forks. Their Unity
 # suites in ../test keep covering them.
 set(X32LINK_DIR "${CMAKE_CURRENT_LIST_DIR}/../../X32Link")
 
 idf_component_register(
-    SRCS "p4hub_main.c"
+    SRCS "ks_main.c"
          "wifi_link.c"
          "link_measure_io.c"
          "usb_midi_host.c"
          "midi_clock_in.c"
          "${X32LINK_DIR}/midi_bpm_calc.c"
-         "p4hub_web.cpp"
-         "p4hub_status.c"
-         "p4hub_config.c"
-         "p4hub_form.c"
-         "p4hub_config_nvs.c"
+         "ks_web.cpp"
+         "ks_status.c"
+         "ks_config.c"
+         "ks_form.c"
+         "ks_config_nvs.c"
          "metronome_audio.c"
-         "p4hub_led.c"
+         "ks_led.c"
          "${X32LINK_DIR}/metro_strip.c"
          "${X32LINK_DIR}/clock_ticker.c"
          "${X32LINK_DIR}/clock_output.c"

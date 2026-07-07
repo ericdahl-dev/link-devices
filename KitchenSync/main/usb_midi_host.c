@@ -1,5 +1,5 @@
 /*
- * P4Hub glue: USB-MIDI host (P4-003/005). Enumerates a USB-MIDI device on the
+ * KitchenSync glue: USB-MIDI host (P4-003/005). Enumerates a USB-MIDI device on the
  * Type-A OTG port, claims its MIDIStreaming interface (Audio class / subclass
  * 0x03), and sends 4-byte USB-MIDI event packets out the bulk OUT endpoint.
  * Proven in the scratchpad p4_midi_clock spike. Packet *encoding* lives in the

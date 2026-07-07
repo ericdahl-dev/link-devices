@@ -17,7 +17,7 @@ CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE=1024
 # up to 10 ms of MIDI-clock jitter. 1 kHz gives ≤1 ms clock granularity (P4-006).
 CONFIG_FREERTOS_HZ=1000
 
-# WiFi credentials (CONFIG_P4HUB_WIFI_*) are intentionally NOT set here — set them
+# WiFi credentials (CONFIG_KS_WIFI_*) are intentionally NOT set here — set them
 # locally (menuconfig or a gitignored sdkconfig); never commit credentials.
 
 # OTA firmware updates (P4-017): the built-in two-slot table (otadata + ota_0 +

@@ -1,14 +1,14 @@
-// Host tests for the pure P4Hub POST-body resolver (ARC-006).
-// p4hub_form_resolve owns URL-decode + pair-split + checkbox-absence -> off,
-// replaying each pair through the tested p4hub_config_set grammar. These are
+// Host tests for the pure KitchenSync POST-body resolver (ARC-006).
+// ks_form_resolve owns URL-decode + pair-split + checkbox-absence -> off,
+// replaying each pair through the tested ks_config_set grammar. These are
 // the bits that used to live untested inside save_handler.
 #include "unity.h"
-#include "p4hub_form.h"
-#include "p4hub_config.h"
+#include "ks_form.h"
+#include "ks_config.h"
 #include <string.h>
 
-static P4HubConfig base, out;
-void setUp(void)    { p4hub_config_defaults(&base); }
+static KsConfig base, out;
+void setUp(void)    { ks_config_defaults(&base); }
 void tearDown(void) {}
 
 // resolve() takes a MUTABLE body (it decodes + tokenizes in place), so every
@@ -17,7 +17,7 @@ static void resolve(const char *body) {
     char buf[1024];
     strncpy(buf, body, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
-    p4hub_form_resolve(buf, &base, &out);
+    ks_form_resolve(buf, &base, &out);
 }
 
 // Tracer: a single value field lands, everything else copied from base.
@@ -80,13 +80,13 @@ void test_encoded_ampersand_survives_split(void) {
     TEST_ASSERT_EQUAL_STRING("a&b", out.wifi_pass);
 }
 
-// --- p4hub_form_apply: PATCH semantics for POST /live ---------------------
+// --- ks_form_apply: PATCH semantics for POST /live ---------------------
 
 static void apply(const char *body) {
     char buf[1024];
     strncpy(buf, body, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
-    p4hub_form_apply(buf, &base, &out);
+    ks_form_apply(buf, &base, &out);
 }
 
 // A present field is applied; an absent CHECKBOX is left alone (not cleared).
