@@ -1,10 +1,12 @@
-# P4Hub — ESP32-P4 hub-tier firmware
+# KitchenSync — ESP32-P4 hub-tier firmware
+
+*everything and the kitchen sync*
 
 The "pro" tier of the `link-devices` family: an **ESP32-P4-NANO** that turns an
 Ableton Link session into phase-accurate MIDI for real hardware, and drives an
 onboard metronome — the ambitious I/O the small S3 `X32Link` box can't reach.
 
-Where `X32Link` reads a tempo and nudges one mixer FX delay, **P4Hub is a clock
+Where `X32Link` reads a tempo and nudges one mixer FX delay, **KitchenSync is a clock
 hub**: it hosts USB-MIDI gear directly (no computer), locks to the Link session's
 actual downbeat, fans out up to four independently-configured clock outputs, and
 is configured live from a phone — no reboot to dial in timing.
@@ -75,7 +77,7 @@ beat for swing, applies its phase nudge, and quantizes to its division before
 Per [ADR-0003](../docs/adr/0003-firmware-pure-c-glue-split.md), all the
 interesting logic is **pure C with no framework dependency**, host-tested with
 Unity in `../test`, and **shared unchanged** with the S3 `X32Link` firmware. The
-pure engine physically lives in `../X32Link/` and is compiled into P4Hub by
+pure engine physically lives in `../X32Link/` and is compiled into KitchenSync by
 relative path from `main/CMakeLists.txt` — single source, no forks
 ([ADR-0006](../docs/adr/0006-shared-pure-c-lives-in-arduino-sketch-root.md)
 explains why it lives in the sketch root rather than a neutral `shared/`).
@@ -84,17 +86,17 @@ explains why it lives in the sketch root rather than a neutral `shared/`).
   `clock_ticker`, `clock_output`, `swing`, `transport`, `metronome`,
   `metronome_voice`, `usb_midi_pack`, `midi_bpm_calc`, and the Link stack
   (`link_protocol`, `link_measurement`, `link_measurement_session`, `link_phase`).
-- **P4Hub-local pure** (`main/`): `p4hub_config`, `p4hub_form` (POST-body
-  decode/patch), `p4hub_status` (JSON), `midi_clock_in`.
-- **P4Hub glue** (`main/`): `p4hub_main` (the 1 ms clock task), `wifi_link` +
+- **KitchenSync-local pure** (`main/`): `ks_config`, `ks_form` (POST-body
+  decode/patch), `ks_status` (JSON), `midi_clock_in`.
+- **KitchenSync glue** (`main/`): `ks_main` (the 1 ms clock task), `wifi_link` +
   `link_measure_io` (sockets), `usb_midi_host` (USB), `metronome_audio`
-  (ES8311/I2S), `p4hub_web` (HTTP server), `p4hub_config_nvs`.
+  (ES8311/I2S), `ks_web` (HTTP server), `ks_config_nvs`.
 
 ### Why ESP-IDF (not Arduino like X32Link)
 
 The hub features need ESP-IDF components the Arduino core doesn't expose — the
 `usb_host` stack (USB-MIDI host) and `esp_hosted` / `esp_wifi_remote` (WiFi via
-the C6 co-processor). So P4Hub is a native ESP-IDF app while `X32Link` stays an
+the C6 co-processor). So KitchenSync is a native ESP-IDF app while `X32Link` stays an
 arduino-cli sketch ([ADR-0005](../docs/adr/0005-per-target-firmware-framework.md)).
 
 ## Hardware
@@ -111,7 +113,7 @@ arduino-cli sketch ([ADR-0005](../docs/adr/0005-per-target-firmware-framework.md
 Requires ESP-IDF v5.5+ (`. $IDF_PATH/export.sh`).
 
 ```sh
-cd P4Hub
+cd KitchenSync
 idf.py set-target esp32p4          # first time only
 idf.py build
 idf.py -p <port> flash monitor
@@ -120,7 +122,7 @@ idf.py -p <port> flash monitor
 Host-test the pure logic (fast, runs on the dev box — no hardware):
 
 ```sh
-make -C ../test                    # Unity suites, incl. every P4Hub pure module
+make -C ../test                    # Unity suites, incl. every KitchenSync pure module
 ```
 
 WiFi credentials live in `sdkconfig` (gitignored — never committed);
@@ -147,11 +149,11 @@ Two write paths:
 ### Firmware update (OTA, P4-017)
 
 `/update` uploads a compiled `.bin` (`idf.py build`'s
-`build/p4hub.bin`) straight into the inactive OTA slot and boots into it — no
+`build/kitchensync.bin`) straight into the inactive OTA slot and boots into it — no
 USB cable needed once the device is on WiFi. The partition table
 (`CONFIG_PARTITION_TABLE_TWO_OTA`) is two equal-purpose app slots + `otadata`,
 no factory partition, so every push targets whichever slot isn't currently
-running. From the CLI: `curl --data-binary @build/p4hub.bin http://<device-ip>/update`.
+running. From the CLI: `curl --data-binary @build/kitchensync.bin http://<device-ip>/update`.
 
 ## Status & roadmap
 

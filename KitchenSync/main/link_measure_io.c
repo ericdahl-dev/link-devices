@@ -1,5 +1,5 @@
 /*
- * P4Hub glue: ESP-IDF/lwip port of X32Link/link_measurement_io.cpp (P4-009).
+ * KitchenSync glue: ESP-IDF/lwip port of X32Link/link_measurement_io.cpp (P4-009).
  *
  * Unicast ping/pong exchange against a Link peer's mep4 endpoint (discovered by
  * link_protocol.c's gossip parse) to derive this device's GhostXForm. All

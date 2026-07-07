@@ -1,7 +1,7 @@
 #pragma once
 // Pure USB-MIDI 1.0 event-packet encoding (P4-005). A USB-MIDI endpoint carries
 // 4-byte event packets, not raw MIDI bytes: byte0 = (cable << 4) | CIN, then up
-// to 3 MIDI data bytes. This is shared by every USB-MIDI-host message the P4Hub
+// to 3 MIDI data bytes. This is shared by every USB-MIDI-host message the KitchenSync
 // sends (clock 0xF8, start 0xFA, stop 0xFC, continue 0xFB) and is host-tested in
 // test/test_usb_midi_pack.c. No Arduino/ESP-IDF dependency.
 #include <stdint.h>

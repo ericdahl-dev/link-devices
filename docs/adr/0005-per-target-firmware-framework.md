@@ -8,7 +8,7 @@ Status: accepted
 The product line now spans two SoCs. The shipped **ESP32-S3 `X32Link`** is an
 Arduino sketch (arduino-cli, `adafruit_qtpy_esp32s3` FQBN) — WiFiUDP for Link, a
 LovyanGFX touch LCD, a web config server, TinyUSB-device MIDI. The new **ESP32-P4
-`P4Hub`** hub tier (P4-001..006) grows I/O the S3 physically can't: USB-MIDI
+`KitchenSync`** hub tier (P4-001..006) grows I/O the S3 physically can't: USB-MIDI
 **host**, WiFi via the onboard **ESP32-C6** co-processor, later audio.
 
 The 2026-07-04 hardware spikes established a hard constraint: the P4 hub features
@@ -29,11 +29,11 @@ working S3 `X32Link` in ESP-IDF to match?
   leans on Arduino-native libraries (LovyanGFX, the web server, TinyUSB-device).
   There is no user-facing gain in rewriting it, and its limits (no USB host, no
   second radio) are *hardware* — ESP-IDF would not unlock them.
-- **P4 `P4Hub` is a native ESP-IDF app.** Its headline features need ESP-IDF
+- **P4 `KitchenSync` is a native ESP-IDF app.** Its headline features need ESP-IDF
   components, so this is not a preference but a requirement.
 - **The pure, host-tested C modules are shared unchanged across both**, compiled
   into each app by relative-path `SRCS` (single source, no copies/forks) and
-  still covered by their Unity suites in `test/`. P4Hub's scaffold already
+  still covered by their Unity suites in `test/`. KitchenSync's scaffold already
   compiles `X32Link/clock_ticker.c` as-is.
 
 This does **not** weaken [ADR-0003](0003-firmware-pure-c-glue-split.md): that ADR

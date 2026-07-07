@@ -1,5 +1,5 @@
 #pragma once
-// P4Hub glue: ESP-IDF/lwip port of X32Link/link_measurement_io.cpp — the
+// KitchenSync glue: ESP-IDF/lwip port of X32Link/link_measurement_io.cpp — the
 // unicast ping/pong measurement client that derives this device's GhostXForm
 // (host->ghost clock offset) from a Link peer's mep4 endpoint. All protocol
 // logic (TLV build/parse, sample math, GhostXForm derivation) and all decision
