@@ -18,7 +18,7 @@
  * downbeat. Until the first measurement commits (or after a transport re-origin
  * invalidates it), we fall back to the free-running local-tempo accumulator.
  */
-#include <math.h>
+#include <math.h>   /* fmod, for the PHASE_DEBUG trace */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -58,7 +58,7 @@ static const char *TAG = "kitchensync";
  * reference (Ableton Live metronome / Link SDK on the Mac). At Live's downbeat the
  * P4's `phase` should read ~0; if it reads ~2, that's the static offset, and the
  * intercept / beat_origin / ghost_now fields show where it enters. Set 0 to silence. */
-#define PHASE_DEBUG     1
+#define PHASE_DEBUG     0   /* LNK-026 phase-offset trace; flip to 1 to re-run (see P4-028) */
 #define PHASE_DEBUG_US  250000   /* ~4 Hz */
 
 static KsConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
@@ -74,7 +74,9 @@ static void clock_out_task(void *arg)
     uint32_t    pulses = 0;
     uint32_t    clicks = 0;
     int64_t     last_log = 0;
+#if PHASE_DEBUG
     int64_t     last_phase_dbg = 0;     /* throttle the LNK-026 phase-debug log */
+#endif
     uint32_t    seen_gen = g_cfg_gen;   /* re-prime when the web UI live-edits timing (P4-015) */
     int64_t     last_led = 0;           /* throttle the WS2812 refresh (P4-018) */
     bool        led_showing = false;    /* is the strip currently lit (to clear once when off) */
