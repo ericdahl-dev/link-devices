@@ -18,6 +18,7 @@
  * downbeat. Until the first measurement commits (or after a transport re-origin
  * invalidates it), we fall back to the free-running local-tempo accumulator.
  */
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -52,6 +53,14 @@ static const char *TAG = "kitchensync";
 #define LED_PIXELS      METRO_STRIP_PIXELS
 #define LED_FRAME_US    20000 /* ~50 fps strip refresh, decoupled from the 1 ms clock */
 
+/* Phase debug (LNK-026 offset hunt): log the P4's computed session phase + the raw
+ * ghost-xform/timeline ingredients so it can be diffed against a ground-truth Link
+ * reference (Ableton Live metronome / Link SDK on the Mac). At Live's downbeat the
+ * P4's `phase` should read ~0; if it reads ~2, that's the static offset, and the
+ * intercept / beat_origin / ghost_now fields show where it enters. Set 0 to silence. */
+#define PHASE_DEBUG     1
+#define PHASE_DEBUG_US  250000   /* ~4 Hz */
+
 static KsConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
 static volatile uint32_t g_cfg_gen = 0;   /* bumped by web POST /live; clock task re-primes on change (P4-015) */
 
@@ -65,6 +74,7 @@ static void clock_out_task(void *arg)
     uint32_t    pulses = 0;
     uint32_t    clicks = 0;
     int64_t     last_log = 0;
+    int64_t     last_phase_dbg = 0;     /* throttle the LNK-026 phase-debug log */
     uint32_t    seen_gen = g_cfg_gen;   /* re-prime when the web UI live-edits timing (P4-015) */
     int64_t     last_led = 0;           /* throttle the WS2812 refresh (P4-018) */
     bool        led_showing = false;    /* is the strip currently lit (to clear once when off) */
@@ -82,9 +92,9 @@ static void clock_out_task(void *arg)
          * running local accumulator (P4-005, correct rate / arbitrary phase), plus
          * the re-prime signal on any basis switch or session loss. One shared beat
          * drives clock-out AND the self-contained metronome. */
-        BeatSourceOut bs = beat_source_step(&src, have_session,
-                                            link_measurement_current_xform(),
-                                            tl, esp_timer_get_time());
+        LinkGhostXForm xform = link_measurement_current_xform();
+        int64_t        t_now = esp_timer_get_time();
+        BeatSourceOut bs = beat_source_step(&src, have_session, xform, tl, t_now);
 
         /* Link transport gates the audible + visual metronome (P4-019): both go
          * quiet when stopped, since the beat keeps advancing (and jumps on a
@@ -192,6 +202,25 @@ static void clock_out_task(void *arg)
                      usb_midi_host_ready() ? "ready" : "-", pulses,
                      link_proto_playing());
         }
+
+#if PHASE_DEBUG
+        /* LNK-026 offset hunt: P4's computed session phase + raw ingredients, for
+         * diffing against a ground-truth Link reference. `phase` in [0,quantum);
+         * at the reference downbeat it should read ~0. */
+        if (bs.active && now - last_phase_dbg >= PHASE_DEBUG_US) {
+            last_phase_dbg = now;
+            double phase = fmod(bs.beats, METRO_QUANTUM);
+            if (phase < 0) phase += METRO_QUANTUM;
+            int64_t ghost_now = xform.valid ? link_ghost_xform_host_to_ghost(xform, t_now) : 0;
+            ESP_LOGI(TAG,
+                "PHASE lock=%d phase=%.3f beats=%.3f | xform=%d intercept=%lld ghost_now=%lld"
+                " | mpb=%lld beat0=%lld t0=%lld play=%d",
+                bs.locked, phase, bs.beats,
+                xform.valid, (long long)xform.intercept_us, (long long)ghost_now,
+                (long long)tl.micros_per_beat, (long long)tl.beat_origin_micro,
+                (long long)tl.time_origin_us, link_proto_playing());
+        }
+#endif
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
