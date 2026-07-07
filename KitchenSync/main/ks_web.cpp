@@ -24,6 +24,7 @@
 #include "ks_config_nvs.h"
 #include "ks_form.h"
 #include "ks_web.h"
+#include "metronome_audio.h"   // P4-029: live vol/voice re-apply
 
 static const char *TAG = "ks_web";
 static KsConfig *s_cfg = nullptr;
@@ -186,8 +187,8 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <label class="sw"><input type="checkbox" class="live" name="metro_accent" value="1" %MTACHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="frow"><span class="cap">Metronome Sound</span>
 <div class="grid2">
-<div class="fld"><span class="pre">VOL</span><input type="number" name="metro_vol" value="%MVOL%" min="0" max="100" step="5"></div>
-<div class="fld"><span class="pre">VOICE</span><select name="metro_voice" id="mvoice"><option value="0">Tone</option><option value="1">Click</option><option value="2">Wood</option></select></div></div></div>
+<div class="fld"><span class="pre">VOL</span><input type="number" class="live" name="metro_vol" value="%MVOL%" min="0" max="100" step="5"></div>
+<div class="fld"><span class="pre">VOICE</span><select class="live" name="metro_voice" id="mvoice"><option value="0">Tone</option><option value="1">Click</option><option value="2">Wood</option></select></div></div></div>
 </div></div>
 <div class="grp"><div class="frow head"><span class="cap">LED Strip &middot; Visual Metronome</span>
 <label class="sw"><input type="checkbox" class="live" name="led" value="1" %LEDCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
@@ -428,8 +429,14 @@ static esp_err_t live_handler(httpd_req_t *req)
     s_cfg->led_fade         = cand.led_fade;
     s_cfg->led_beat_color   = cand.led_beat_color;
     s_cfg->led_accent_color = cand.led_accent_color;
+    s_cfg->metronome_volume = cand.metronome_volume;   // P4-029: live vol/voice
+    s_cfg->metronome_voice  = cand.metronome_voice;
     for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) s_cfg->clock[o] = cand.clock[o];
     if (s_gen) (*s_gen)++;
+
+    // P4-029: re-render the tone bursts + re-set codec volume now, no reboot (no-op
+    // if the metronome was off at boot — the codec isn't up until then).
+    metronome_audio_set(s_cfg->metronome_volume, s_cfg->metronome_voice);
 
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_send(req, "ok", HTTPD_RESP_USE_STRLEN);
