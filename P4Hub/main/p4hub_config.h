@@ -29,8 +29,13 @@ typedef struct {
     int  metronome_volume;  // 0..100 — ES8311 codec volume (P4-012)
     int  metronome_voice;   // 0..2 — click voice preset Tone/Click/Wood (P4-012)
     ClockOutputCfg clock[P4HUB_CLOCK_OUTPUTS];   // P4-010 per-output clocks
-    int  led_enable;        // 0/1 — pulse the user LED on each metronome beat (P4-018);
-                            // independent of metronome_enable (visual metronome)
+    int  led_enable;        // 0/1 — visual metronome on the WS2812 strip (P4-018);
+                            // independent of metronome_enable
+    int  led_brightness;    // 0..100 — master strip brightness % (P4-019)
+    int  led_mode;          // 0..2 — pattern: 0 chase, 1 flash, 2 fill
+    int  led_fade;          // 0..100 — dim across a beat % (0 steady .. 100 dark by next)
+    int  led_beat_color;    // 0xRRGGBB — colour for beats 2..N
+    int  led_accent_color;  // 0xRRGGBB — colour for the bar-1 downbeat
 } P4HubConfig;
 
 void p4hub_config_defaults(P4HubConfig* c);

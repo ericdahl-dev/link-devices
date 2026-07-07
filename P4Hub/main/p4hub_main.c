@@ -86,6 +86,14 @@ static void clock_out_task(void *arg)
                                             link_measurement_current_xform(),
                                             tl, esp_timer_get_time());
 
+        /* Link transport gates the audible + visual metronome (P4-019): both go
+         * quiet when stopped, since the beat keeps advancing (and jumps on a
+         * re-origin / playhead move) while stopped, which flickers the strip and
+         * clicks off-grid. The 0xF8 clock keeps running regardless (MIDI clock is
+         * continuous; Start/Stop are separate transport messages). Falls back to
+         * "playing" when the session never reports transport. */
+        bool tp_playing = !link_proto_start_stop_seen() || link_proto_playing();
+
         /* A basis switch, session loss, or a live config edit (P4-015: phase /
          * division / swing changed via POST /live) shifts the beat grid; re-prime
          * the tick + click grids so the boundary realigns instead of dumping a
@@ -135,13 +143,17 @@ static void clock_out_task(void *arg)
             }
 
             if (g_cfg.metronome_enable) {
-                MetroClick mc = metronome_update(&mt, beats, METRO_QUANTUM, METRO_BURST);
-                if (mc != METRO_NONE) {
-                    bool accent = (mc == METRO_ACCENT) && g_cfg.metronome_accent;
-                    metronome_audio_click(accent);
-                    clicks++;
-                    ESP_LOGI(TAG, "metronome %-6s beat %.2f  clicks %lu",
-                             accent ? "ACCENT" : "click", beats, (unsigned long)clicks);
+                if (tp_playing) {
+                    MetroClick mc = metronome_update(&mt, beats, METRO_QUANTUM, METRO_BURST);
+                    if (mc != METRO_NONE) {
+                        bool accent = (mc == METRO_ACCENT) && g_cfg.metronome_accent;
+                        metronome_audio_click(accent);
+                        clicks++;
+                        ESP_LOGI(TAG, "metronome %-6s beat %.2f  clicks %lu",
+                                 accent ? "ACCENT" : "click", beats, (unsigned long)clicks);
+                    }
+                } else {
+                    metronome_reset(&mt);   /* stopped: re-prime on resume, no catch-up burst */
                 }
             }
         }
@@ -154,9 +166,16 @@ static void clock_out_task(void *arg)
          * (its own led_enable switch); clears once when disabled or idle. */
         if (now - last_led >= LED_FRAME_US) {
             last_led = now;
-            if (g_cfg.led_enable && bs.active) {
+            if (g_cfg.led_enable && bs.active && tp_playing) {   /* off when stopped (see tp_playing above) */
+                MetroStripCfg lc = {
+                    .beat   = { (uint8_t)(g_cfg.led_beat_color   >> 16), (uint8_t)(g_cfg.led_beat_color   >> 8), (uint8_t)g_cfg.led_beat_color   },
+                    .accent = { (uint8_t)(g_cfg.led_accent_color >> 16), (uint8_t)(g_cfg.led_accent_color >> 8), (uint8_t)g_cfg.led_accent_color },
+                    .bright = (uint8_t)g_cfg.led_brightness,
+                    .mode   = (uint8_t)g_cfg.led_mode,
+                    .fade   = (uint8_t)g_cfg.led_fade,
+                };
                 RGB frame[LED_PIXELS];
-                metro_strip_render(bs.beats, (int)METRO_QUANTUM, LED_PIXELS, frame);
+                metro_strip_render(bs.beats, (int)METRO_QUANTUM, LED_PIXELS, &lc, frame);
                 p4hub_led_show(frame, LED_PIXELS);
                 led_showing = true;
             } else if (led_showing) {
