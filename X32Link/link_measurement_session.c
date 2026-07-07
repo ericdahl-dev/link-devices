@@ -9,18 +9,41 @@ void link_session_reset(LinkSession* s) {
 }
 
 int link_session_on_timeline(LinkSession* s, bool tl_valid, int64_t time_origin_us,
-                             LinkSessionAct* out, int max) {
+                             int64_t now_us, LinkSessionAct* out, int max) {
     if (!tl_valid) return 0;   // no timeline yet — don't touch epoch tracking
     int n = 0;
-    if (s->have_last_origin &&
-        link_phase_timeline_epoch_reset(s->last_time_origin_us, time_origin_us)) {
-        // A transport re-origin: the committed xform was measured against the old
-        // ghost epoch and now reads garbage. Drop it, forget the ref, and arm an
-        // immediate re-measure (LNK-026 bug 1).
-        if (n < max) out[n++].type = LS_RESET_XFORM;
-        s->have_ref        = false;
-        s->next_measure_us = 0;
+
+    bool backward = s->have_last_origin &&
+                    link_phase_timeline_epoch_reset(s->last_time_origin_us, time_origin_us);
+
+    if (backward) {
+        // A backward time_origin jump is either a genuine transport re-origin (the
+        // committed xform now reads garbage against the new ghost epoch — LNK-026
+        // bug 1) OR a joining peer briefly gossiping its own un-synced timeline
+        // (P4-028), which last-writer-wins in link_protocol.c makes indistinguishable
+        // here. Debounce: only act once the jump PERSISTS past the settle window; a
+        // corrective gossip (origin back to the session's) clears the candidate in
+        // the branch below. A real re-origin persists and confirms; a transient join
+        // is corrected within a gossip cycle so it never fires.
+        if (!s->epoch_pending) {
+            s->epoch_pending          = true;
+            s->epoch_pending_since_us = now_us;
+        }
+        if (now_us - s->epoch_pending_since_us >= LINK_SESSION_EPOCH_SETTLE_US) {
+            if (n < max) out[n++].type = LS_RESET_XFORM;
+            s->have_ref            = false;
+            s->next_measure_us     = 0;
+            s->last_time_origin_us = time_origin_us;   // adopt the confirmed epoch
+            s->epoch_pending       = false;
+        }
+        // else: pending — keep last_time_origin_us at the last good value so the jump
+        // keeps measuring against it until it confirms or a correction clears it.
+        return n;
     }
+
+    // Not a backward jump: a normal forward/small step, or a correction that undid a
+    // transient junk timeline. Clear any pending candidate and track normally.
+    s->epoch_pending       = false;
     s->last_time_origin_us = time_origin_us;
     s->have_last_origin    = true;
     return n;

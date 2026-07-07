@@ -66,37 +66,77 @@ void test_trigger_gated_by_active(void) {
     TEST_ASSERT_EQUAL_INT(0, n);                 // due but an attempt is already running
 }
 
-/* ---- epoch reset (LNK-026 bug 1) --------------------------------------- */
+/* ---- epoch reset (LNK-026 bug 1) + debounce (P4-028) ------------------- */
 
-void test_epoch_reset_on_backward_jump(void) {
-    // prime with a timeline, then a big backward time_origin jump = re-origin.
-    link_session_on_timeline(&s, true, 510000000, acts, 8);     // prime
-    int n = link_session_on_timeline(&s, true, 200000, acts, 8); // jumps back ~510s
-    TEST_ASSERT_EQUAL_INT(1, n);
+void test_epoch_reset_confirmed_after_settle(void) {
+    // A genuine re-origin: the backward time_origin jump PERSISTS past the settle
+    // window, so it confirms and fires LS_RESET_XFORM (LNK-026 bug 1).
+    link_session_on_timeline(&s, true, 510000000, 0, acts, 8);          // prime
+    // First sight of the jump is debounced — pending, not yet a reset.
+    int n1 = link_session_on_timeline(&s, true, 200000, 1000, acts, 8); // jumps back ~510s
+    TEST_ASSERT_EQUAL_INT(0, n1);
+    TEST_ASSERT_TRUE(s.epoch_pending);
+    // Still backward once the window elapses -> confirmed re-origin.
+    int n2 = link_session_on_timeline(&s, true, 200000,
+                                      1000 + LINK_SESSION_EPOCH_SETTLE_US, acts, 8);
+    TEST_ASSERT_EQUAL_INT(1, n2);
     TEST_ASSERT_EQUAL_INT(LS_RESET_XFORM, acts[0].type);
     TEST_ASSERT_FALSE(s.have_ref);                              // forces re-target
     TEST_ASSERT_EQUAL_INT64(0, s.next_measure_us);             // re-measure now
+    TEST_ASSERT_FALSE(s.epoch_pending);
     // ...and the next trigger immediately starts a fresh attempt (due, now >= 0)
     int m = link_session_on_trigger(&s, true, 0xC0A80105, 20808, 100, false, acts, 8);
     TEST_ASSERT_EQUAL_INT(3, m);
 }
 
+void test_epoch_transient_join_no_reset(void) {
+    // P4-028: a joining peer briefly gossips its own un-synced timeline (tiny
+    // origin). It must NOT trigger an epoch reset when the real session origin
+    // returns within the settle window. (Old immediate-reset logic reset here.)
+    link_session_on_timeline(&s, true, 67000000, 0, acts, 8);           // good session origin
+    int n1 = link_session_on_timeline(&s, true, 544860, 1000, acts, 8); // junk from a joiner
+    TEST_ASSERT_EQUAL_INT(0, n1);                                       // pending, no reset
+    TEST_ASSERT_TRUE(s.epoch_pending);
+    // Correction: the real origin returns well within the window -> candidate cleared.
+    int n2 = link_session_on_timeline(&s, true, 67000000, 1000 + 100000, acts, 8);
+    TEST_ASSERT_EQUAL_INT(0, n2);
+    TEST_ASSERT_FALSE(s.epoch_pending);
+    // Long after, still no lingering reset even past what would have been the window.
+    int n3 = link_session_on_timeline(&s, true, 67500000, 1000 + 2000000, acts, 8);
+    TEST_ASSERT_EQUAL_INT(0, n3);
+}
+
+void test_epoch_intermittent_junk_never_confirms(void) {
+    // P4-028 hardening: junk that flip-flops with the real origin keeps resetting the
+    // candidate window, so it never confirms even across a long span.
+    link_session_on_timeline(&s, true, 67000000, 0, acts, 8);           // good
+    for (int i = 0; i < 10; i++) {
+        int64_t t = 1000 + (int64_t)i * 400000;                        // 400 ms apart
+        TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 544860, t, acts, 8));       // junk
+        TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 67000000, t + 50000, acts, 8)); // corrected
+    }
+}
+
 void test_no_reset_on_small_or_forward_step(void) {
-    link_session_on_timeline(&s, true, 1000000, acts, 8);          // prime
-    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 1500000, acts, 8)); // forward
-    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 1400000, acts, 8)); // small back (<1s)
+    link_session_on_timeline(&s, true, 1000000, 0, acts, 8);          // prime
+    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 1500000, 100, acts, 8)); // forward
+    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 1400000, 200, acts, 8)); // small back (<1s)
+    TEST_ASSERT_FALSE(s.epoch_pending);
 }
 
 void test_first_timeline_primes_no_reset(void) {
-    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 5, acts, 8)); // no last_origin yet
+    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 5, 0, acts, 8)); // no last_origin yet
     TEST_ASSERT_TRUE(s.have_last_origin);
 }
 
 void test_invalid_timeline_is_noop(void) {
-    link_session_on_timeline(&s, true, 5000000, acts, 8);   // prime (5 s)
-    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, false, 0, acts, 8));
-    // a real >1s backward jump after the no-op still fires (last_origin untouched)
-    TEST_ASSERT_EQUAL_INT(1, link_session_on_timeline(&s, true, 5, acts, 8));
+    link_session_on_timeline(&s, true, 5000000, 0, acts, 8);   // prime (5 s)
+    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, false, 0, 100, acts, 8));
+    // a real >1s backward jump after the no-op is debounced: pending, then confirms
+    // past the window (last_origin untouched by the no-op).
+    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 5, 200, acts, 8));
+    TEST_ASSERT_EQUAL_INT(1, link_session_on_timeline(&s, true, 5,
+                                 200 + LINK_SESSION_EPOCH_SETTLE_US, acts, 8));
 }
 
 /* ---- pong -------------------------------------------------------------- */
@@ -159,7 +199,9 @@ int main(void) {
     RUN_TEST(test_due_timer_retriggers);
     RUN_TEST(test_different_peer_retriggers);
     RUN_TEST(test_trigger_gated_by_active);
-    RUN_TEST(test_epoch_reset_on_backward_jump);
+    RUN_TEST(test_epoch_reset_confirmed_after_settle);
+    RUN_TEST(test_epoch_transient_join_no_reset);
+    RUN_TEST(test_epoch_intermittent_junk_never_confirms);
     RUN_TEST(test_no_reset_on_small_or_forward_step);
     RUN_TEST(test_first_timeline_primes_no_reset);
     RUN_TEST(test_invalid_timeline_is_noop);

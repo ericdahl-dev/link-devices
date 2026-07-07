@@ -23,6 +23,12 @@ extern "C" {
 #define LINK_SESSION_WATCHDOG_US    50000     // 50 ms silence watchdog
 #define LINK_SESSION_MAX_TIMEOUTS   5         // 5 * 50 ms = 250 ms -> abandon attempt
 #define LINK_SESSION_REMEASURE_US   2000000   // 2 s periodic re-measure
+// P4-028: a backward time_origin jump must PERSIST this long before it counts as a
+// genuine re-origin. A joining peer briefly gossips its own un-synced timeline
+// (last-writer-wins in link_protocol.c makes it look like a re-origin here); the
+// real session origin returns within a gossip cycle and clears the candidate. Tuned
+// to the observed ~500 ms peer-join transient; validate/tune on hardware.
+#define LINK_SESSION_EPOCH_SETTLE_US 500000   // 500 ms
 
 typedef enum {
     LS_FLUSH_RX = 1,     // discard any buffered pongs before a fresh attempt
@@ -53,17 +59,21 @@ typedef struct {
     int64_t  next_measure_us;      // when the periodic re-measure is due
     bool     have_last_origin;     // seen a timeline yet (for epoch-reset detection)?
     int64_t  last_time_origin_us;
+    bool     epoch_pending;        // P4-028: a backward jump is being debounced
+    int64_t  epoch_pending_since_us; // when the pending jump was first seen
 } LinkSession;
 
 // Reset all session state (call from the glue's begin()).
 void link_session_reset(LinkSession* s);
 
 // Timeline gossip observed this poll. tl_valid=false is a no-op (no timeline
-// yet). On a genuine re-origin (time_origin jumps backward past the threshold)
-// emits LS_RESET_XFORM and arms an immediate re-measure (forgets the ref, zeroes
-// next_measure). Returns the number of actions written to out[0..max).
+// yet). A backward time_origin jump past the threshold is DEBOUNCED (P4-028): it
+// must persist LINK_SESSION_EPOCH_SETTLE_US before it counts as a genuine re-origin
+// and emits LS_RESET_XFORM (forgetting the ref, zeroing next_measure). A transient
+// junk timeline from a joining peer is cleared when the real origin returns within
+// the window. now_us is the caller's monotonic clock. Returns action count.
 int link_session_on_timeline(LinkSession* s, bool tl_valid, int64_t time_origin_us,
-                             LinkSessionAct* out, int max);
+                             int64_t now_us, LinkSessionAct* out, int max);
 
 // Trigger check each poll. peer_found + {ip,port} come from
 // link_proto_peer_endpoint(); active mirrors link_measurement_active(). Starts a

@@ -79,7 +79,7 @@ void link_measurement_io_poll() {
     LinkTimeline tl;
     bool tl_valid = link_proto_timeline(&tl);
     n = link_session_on_timeline(&s_session, tl_valid, tl_valid ? tl.time_origin_us : 0,
-                                 acts, 4);
+                                 now_us(), acts, 4);
     run_all(acts, n);
 
     // 2. Trigger: pick the first peer with an advertised endpoint, let the
