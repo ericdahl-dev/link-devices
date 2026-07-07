@@ -80,6 +80,8 @@ static void link_task(void *arg)
 #define AP_SSID "KitchenSync-Setup"
 
 static bool    s_ap_mode          = false;
+static bool    s_got_ip_once      = false;  /* creds proven good once we DHCP; then retry forever, never fall to AP */
+static bool    s_link_started     = false;  /* spawn the Link listener task exactly once, not per-reconnect */
 static int64_t s_connect_start_us = 0;   /* when STA association began (P4-027) */
 
 /* SoftAP config fallback — reached either from a first-boot empty ssid, or from
@@ -117,23 +119,43 @@ static void give_up_and_start_ap(void)
 
 static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
+    /* Once parked in the config AP, ignore stray STA events. A DISCONNECTED still
+     * queued in the event loop when give_up_and_start_ap() ran must not re-enter it
+     * and double-init the AP netif (ESP_ERROR_CHECK would abort the firmware). */
+    if (s_ap_mode) return;
+
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *dc = (wifi_event_sta_disconnected_t *)data;
-        if (wifi_fallback_should_give_up(esp_timer_get_time(), s_connect_start_us)) {
+        /* The connect budget governs INITIAL association only. Once we've ever held
+         * an IP the credentials are known-good, so retry forever instead of falling
+         * to the setup AP on a transient mid-session drop (a router blip at a gig). */
+        if (!s_got_ip_once &&
+            wifi_fallback_should_give_up(esp_timer_get_time(), s_connect_start_us)) {
             give_up_and_start_ap();
         } else {
             ESP_LOGW(TAG, "disconnected (reason=%d), retrying", dc ? dc->reason : -1);
+            /* Backoff before reconnecting: without it the C6 posts DISCONNECTED as
+             * fast as it fails (reason 201 while a hotspot wakes), spinning the
+             * hosted RPC and starving the event loop. Runs in the event-loop task,
+             * not an ISR, so a short delay here is safe. */
+            vTaskDelay(pdMS_TO_TICKS(500));
             esp_wifi_connect();
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "got ip " IPSTR, IP2STR(&e->ip_info.ip));
+        s_got_ip_once = true;
         /* Multicast must not be dropped by modem sleep (the P4 equivalent of the
          * S3's WiFi.setSleep(false)). */
         esp_wifi_set_ps(WIFI_PS_NONE);
-        xTaskCreate(link_task, "link", 4096, NULL, 5, NULL);
+        /* GOT_IP repeats on every reassociation / DHCP renew; spawn the listener
+         * (a 4 KB task + its multicast socket) exactly once, not per reconnect. */
+        if (!s_link_started) {
+            s_link_started = true;
+            xTaskCreate(link_task, "link", 4096, NULL, 5, NULL);
+        }
     }
 }
 
