@@ -19,6 +19,9 @@ typedef struct {
     int  fdr_chan_count;// X32FaderDisp: 16 (XR18) or 32 (X32)
     int  quantum_beats; // bar-quantized phase: beats per bar, 1-16 (LNK-019)
     int  midi_clock_out_enable; // LNK-027: 0/1 — emit 24-PPQN USB-MIDI clock while following Link
+    int  phase_display_mode; // LNK-036: 0 = sweep wheel, 1 = beat-flash dot
+    int  dot_beat_color;     // LNK-036: 0xRRGGBB — beats 2..N (parity w/ P4 led_beat_color)
+    int  dot_accent_color;   // LNK-036: 0xRRGGBB — bar-1 downbeat (parity w/ P4 led_accent_color)
 } AppConfig;
 
 void config_defaults(AppConfig* cfg);

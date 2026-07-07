@@ -25,6 +25,9 @@
 #define DEFAULT_FDR_CHAN_COUNT 32
 #define DEFAULT_QUANTUM_BEATS  4    // bar-quantized phase: beats per bar
 #define DEFAULT_MIDI_CLOCK_OUT_ENABLE 0  // LNK-027: MIDI clock OUT off by default
+#define DEFAULT_PHASE_DISPLAY_MODE 0     // LNK-036: 0 = sweep wheel, 1 = beat-flash dot
+#define DEFAULT_DOT_BEAT_COLOR   0xB6FF36 // beats 2..N (P4 led_beat_color parity)
+#define DEFAULT_DOT_ACCENT_COLOR 0xFF9D3B // bar-1 downbeat (P4 led_accent_color parity)
 
 // Board profile (LNK-025) — the Waveshare ESP32-S3-Touch-LCD-1.47 carries the
 // 1.47" LCD, so its single board flag implies the on-device display UI: one

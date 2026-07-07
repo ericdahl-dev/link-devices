@@ -179,8 +179,38 @@ void test_set_model_ignores_invalid_model(void) {
     TEST_ASSERT_EQUAL_INT(7, cfg.fx_slot);
 }
 
+// LNK-036: phase display mode + dot colours.
+void test_defaults_phase_display_is_sweep(void) {
+    AppConfig cfg; config_defaults(&cfg);
+    TEST_ASSERT_EQUAL_INT(0, cfg.phase_display_mode);          // 0 = sweep wheel
+    TEST_ASSERT_EQUAL_HEX32(0xB6FF36, cfg.dot_beat_color);     // P4 parity
+    TEST_ASSERT_EQUAL_HEX32(0xFF9D3B, cfg.dot_accent_color);
+}
+
+void test_validate_accepts_flash_mode(void) {
+    AppConfig cfg; config_defaults(&cfg);
+    cfg.phase_display_mode = 1;                                // beat-flash dot
+    TEST_ASSERT_TRUE(config_validate(&cfg));
+}
+
+void test_validate_rejects_bad_phase_mode(void) {
+    AppConfig cfg; config_defaults(&cfg);
+    cfg.phase_display_mode = 2;
+    TEST_ASSERT_FALSE(config_validate(&cfg));
+}
+
+void test_validate_rejects_out_of_range_dot_color(void) {
+    AppConfig cfg; config_defaults(&cfg);
+    cfg.dot_beat_color = 0x1000000;                            // > 0xFFFFFF
+    TEST_ASSERT_FALSE(config_validate(&cfg));
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_defaults_phase_display_is_sweep);
+    RUN_TEST(test_validate_accepts_flash_mode);
+    RUN_TEST(test_validate_rejects_bad_phase_mode);
+    RUN_TEST(test_validate_rejects_out_of_range_dot_color);
     RUN_TEST(test_set_model_x32_keeps_valid_high_slot);
     RUN_TEST(test_set_model_xr18_clamps_slot_to_max);
     RUN_TEST(test_set_model_ignores_invalid_model);
