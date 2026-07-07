@@ -33,6 +33,8 @@
 #include "clock_ticker.h"
 #include "metronome.h"
 #include "metronome_audio.h"
+#include "metro_strip.h"     /* pure WS2812 bar-position chase (P4-018) */
+#include "p4hub_led.h"       /* WS2812 strip glue (RMT) */
 #include "usb_midi_pack.h"
 #include "transport.h"        /* Link play/stop -> MIDI Start/Stop (P4-008) */
 #include "link_protocol.h"
@@ -46,6 +48,9 @@ static const char *TAG = "p4hub";
 #define METRO_QUANTUM   4.0  /* beats/bar for the bar-1 accent — Link timeline
                               * carries no meter, so assume 4/4 (P4-006) */
 #define METRO_BURST     8    /* re-prime the click grid past this beat backlog */
+#define LED_GPIO        2    /* WS2812 data pin (P4-018); external strip + 5V/GND */
+#define LED_PIXELS      METRO_STRIP_PIXELS
+#define LED_FRAME_US    20000 /* ~50 fps strip refresh, decoupled from the 1 ms clock */
 
 static P4HubConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
 static volatile uint32_t g_cfg_gen = 0;   /* bumped by web POST /live; clock task re-primes on change (P4-015) */
@@ -61,6 +66,8 @@ static void clock_out_task(void *arg)
     uint32_t    clicks = 0;
     int64_t     last_log = 0;
     uint32_t    seen_gen = g_cfg_gen;   /* re-prime when the web UI live-edits timing (P4-015) */
+    int64_t     last_led = 0;           /* throttle the WS2812 refresh (P4-018) */
+    bool        led_showing = false;    /* is the strip currently lit (to clear once when off) */
 
     while (1) {
         /* Drive the measurement client (ping/pong -> GhostXForm). Opens its own
@@ -140,6 +147,24 @@ static void clock_out_task(void *arg)
         }
 
         int64_t now = esp_timer_get_time();
+
+        /* Visual metronome (P4-018): render the pure bar-position chase from the
+         * shared beat onto the WS2812 strip, throttled to ~50 fps so it doesn't
+         * steal time from the 1 ms clock loop. Independent of the audio metronome
+         * (its own led_enable switch); clears once when disabled or idle. */
+        if (now - last_led >= LED_FRAME_US) {
+            last_led = now;
+            if (g_cfg.led_enable && bs.active) {
+                RGB frame[LED_PIXELS];
+                metro_strip_render(bs.beats, (int)METRO_QUANTUM, LED_PIXELS, frame);
+                p4hub_led_show(frame, LED_PIXELS);
+                led_showing = true;
+            } else if (led_showing) {
+                p4hub_led_clear();
+                led_showing = false;
+            }
+        }
+
         if (now - last_log >= 1000000) {
             last_log = now;
             ESP_LOGI(TAG, "link peers %d  bpm %.2f  phase %s  usb %s  clock TX %lu  play %d",
@@ -168,5 +193,6 @@ void app_main(void)
     p4hub_web_start(&g_cfg, &g_cfg_gen);
     if (g_cfg.metronome_enable)
         metronome_audio_start(g_cfg.metronome_volume, g_cfg.metronome_voice);   /* codec/I2S only when used */
+    p4hub_led_start(LED_GPIO, LED_PIXELS);   /* WS2812 visual metronome; harmless if nothing wired (P4-018) */
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
 }

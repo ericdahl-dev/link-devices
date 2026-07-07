@@ -85,6 +85,17 @@ void test_metronome_toggle(void) {
     TEST_ASSERT_FALSE(p4hub_config_set(&c, "metronome", "2"));   // only 0/1
 }
 
+// The user-LED visual metronome has its own on/off switch (P4-018), independent
+// of the audio metronome; default off.
+void test_led_toggle(void) {
+    TEST_ASSERT_EQUAL_INT(0, c.led_enable);                      // default off
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "led", "1"));
+    TEST_ASSERT_EQUAL_INT(1, c.led_enable);
+    TEST_ASSERT_TRUE(p4hub_config_set(&c, "led", "0"));
+    TEST_ASSERT_EQUAL_INT(0, c.led_enable);
+    TEST_ASSERT_FALSE(p4hub_config_set(&c, "led", "2"));         // only 0/1
+}
+
 void test_metronome_accent_toggle(void) {
     TEST_ASSERT_TRUE(p4hub_config_set(&c, "metro_accent", "0"));
     TEST_ASSERT_EQUAL_INT(0, c.metronome_accent);
@@ -119,6 +130,7 @@ int main(void) {
     RUN_TEST(test_output_bad_index_and_field);
     RUN_TEST(test_clock_out_toggle);
     RUN_TEST(test_metronome_toggle);
+    RUN_TEST(test_led_toggle);
     RUN_TEST(test_metronome_accent_toggle);
     RUN_TEST(test_metronome_volume_and_voice);
     RUN_TEST(test_unknown_key);

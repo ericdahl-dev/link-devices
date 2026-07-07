@@ -6,3 +6,5 @@ dependencies:
   # ES8311 codec driver for the onboard-speaker metronome (P4-006). Target-
   # agnostic I2C driver; the Waveshare P4-NANO uses ES8311 + NS4150B amp.
   espressif/es8311: "^1.0.0"
+  # WS2812 driver (RMT backend) for the external visual-metronome strip (P4-018).
+  espressif/led_strip: "^2.5.5"
