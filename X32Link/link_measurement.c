@@ -236,3 +236,9 @@ void link_measurement_attempt_end(bool success) {
 
 LinkGhostXForm link_measurement_current_xform(void) { return s_xform; }
 bool           link_measurement_active(void)        { return s_active; }
+
+// A committed xform is our phase estimate. Deliberately independent of
+// s_active: an attempt in flight never makes phase valid, and a committed
+// estimate stays trustworthy across the next attempt (which leaves it
+// untouched on failure). See ARC-002.
+bool link_measurement_have_phase_estimate(void) { return s_xform.valid; }
