@@ -326,7 +326,10 @@ static void handle_status() {
 }
 
 // Minimal dark result page matching the panel aesthetic.
-static void send_result(int code, const char* title, const char* body) {
+// reboot=true adds a script that waits for the device to come back after the restart
+// and then loads the config homepage — so Write & Reboot / OTA return to '/' on their
+// own instead of leaving the browser stranded on the result page.
+static void send_result(int code, const char* title, const char* body, bool reboot) {
     String p =
         "<!doctype html><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -339,7 +342,12 @@ static void send_result(int code, const char* title, const char* body) {
     p += title;
     p += "</h2><p style='color:#717a82;letter-spacing:.04em'>";
     p += body;
-    p += "</p></div></body>";
+    p += "</p>";
+    if (reboot)
+        p += "<p style='color:#4b535b;font-size:12px'>returning to config&hellip;</p>"
+             "<script>setTimeout(function r(){fetch('/',{cache:'no-store'})"
+             ".then(function(){location.href='/'}).catch(function(){setTimeout(r,1500)})},6000)</script>";
+    p += "</div></body>";
     server.send(code, "text/html; charset=utf-8", p);
 }
 
@@ -348,7 +356,7 @@ static void handle_update_result() {
     send_result(ok ? 200 : 500,
                 ok ? "Updated — Restarting" : "Update Failed",
                 ok ? "New firmware written. The device restarts now."
-                   : "Upload was interrupted or the image was rejected. Try again.");
+                   : "Upload was interrupted or the image was rejected. Try again.", ok);
     if (ok) {
         delay(1000);
         ESP.restart();
@@ -393,11 +401,11 @@ static void handle_save() {
     if (config_validate(&cfg)) {
         g_config = cfg;
         config_save(&g_config);
-        send_result(200, "Saved — Restarting", "Reconnect to WiFi if credentials changed.");
+        send_result(200, "Saved — Restarting", "Reconnect to WiFi if credentials changed.", true);
         delay(1000);
         ESP.restart();
     } else {
-        send_result(400, "Invalid Config", "Check the mixer IP and FX slot, then go back.");
+        send_result(400, "Invalid Config", "Check the mixer IP and FX slot, then go back.", false);
     }
 }
 

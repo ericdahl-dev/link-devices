@@ -355,7 +355,10 @@ static esp_err_t status_handler(httpd_req_t *req)
 }
 
 // Minimal result page in the panel palette.
-static esp_err_t send_result(httpd_req_t *req, const char *title, const char *msg)
+// reboot=true adds a script that waits for the device to come back after the restart
+// and then loads the config homepage — so a Write & Reboot returns to '/' on its own
+// instead of leaving the browser stranded on /save.
+static esp_err_t send_result(httpd_req_t *req, const char *title, const char *msg, bool reboot)
 {
     std::string p =
         "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -363,7 +366,12 @@ static esp_err_t send_result(httpd_req_t *req, const char *title, const char *ms
         "background:#070809;color:#e9ece6;font-family:ui-monospace,Menlo,monospace;text-align:center'>"
         "<div style='padding:2rem'><div style='width:10px;height:10px;border-radius:50%;margin:0 auto 1.2rem;"
         "background:#b6ff36;box-shadow:0 0 14px 2px #b6ff36'></div><h2 style='font-weight:600'>";
-    p += title; p += "</h2><p style='color:#717a82'>"; p += msg; p += "</p></div></body>";
+    p += title; p += "</h2><p style='color:#717a82'>"; p += msg; p += "</p>";
+    if (reboot)
+        p += "<p style='color:#4b535b;font-size:12px'>returning to config&hellip;</p>"
+             "<script>setTimeout(function r(){fetch('/',{cache:'no-store'})"
+             ".then(function(){location.href='/'}).catch(function(){setTimeout(r,1500)})},6000)</script>";
+    p += "</div></body>";
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, p.c_str(), p.size());
 }
@@ -384,10 +392,10 @@ static esp_err_t save_handler(httpd_req_t *req)
     KsConfig cfg;
     ks_form_resolve(body, s_cfg, &cfg);
 
-    if (!ks_config_valid(&cfg)) return send_result(req, "Invalid Config", "Check the values and go back.");
+    if (!ks_config_valid(&cfg)) return send_result(req, "Invalid Config", "Check the values and go back.", false);
     *s_cfg = cfg;
     ks_config_save(s_cfg);
-    esp_err_t rc = send_result(req, "Saved — Restarting", "Reconnect to WiFi if credentials changed.");
+    esp_err_t rc = send_result(req, "Saved — Restarting", "Reconnect to WiFi if credentials changed.", true);
     vTaskDelay(pdMS_TO_TICKS(800));
     esp_restart();
     return rc;
