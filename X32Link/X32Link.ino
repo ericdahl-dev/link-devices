@@ -8,6 +8,7 @@
 #include "bpm_publisher.h"
 #include "osc_sender.h"
 #include "web_config.h"
+#include "wifi_conn_policy.h"  // ARC-013: shared WiFi connection lifecycle
 #include "tempo_snapshot.h"  // ARC-001: atomic {bpm,phase,valid,quantum} read path
 #ifdef HAS_TOUCH_DISPLAY     // LNK-025: implied by the board flag in config.h (included above)
 #include "touch_display.h"   // LNK-014: 1.47" JD9853 LCD + AXS5106L touch
@@ -29,11 +30,11 @@ AppConfig g_config;
 // g_current_bpm / g_current_phase / g_phase_valid globals + g_bpm_mutex are
 // gone; bpm_task publishes a coherent snapshot readers take atomically.
 
-// True once start_config_ap() has parked us in AP fallback (terminal until
-// the user reconfigures via the captive portal — handle_save() reboots).
-// Checked by loop() so its STA-reconnect block doesn't fight AP mode. See
-// LNK-023.
-static bool s_ap_mode = false;
+// ARC-013: the WiFi connection lifecycle (initial-connect budget → AP fallback,
+// retry-forever-after-IP) is the pure wifi_conn_policy, shared with the P4. AP is
+// its terminal state (loop() checks it so the STA-reconnect block doesn't fight AP
+// mode; terminal until handle_save() reboots — LNK-023).
+static WifiConnPolicy g_wifi_pol;
 
 // Beat LED. ESP32-S3 Super Mini: a plain LED on GPIO48, active-HIGH (proven by
 // the original MIDI firmware). Define LED_ACTIVE_LOW for an active-low board
@@ -177,40 +178,31 @@ static void bpm_task(void*) {
     }
 }
 
-// Returns true if connected within 30 s, false on timeout.
+static int64_t now_us_ms() { return (int64_t)millis() * 1000; }
+
+// Cold-start connect. The give-up budget lives in the shared wifi_conn_policy now,
+// not an inline `> 30000`. Returns true once connected, false when the policy trips
+// the budget (caller starts the config AP).
 static bool wifi_try_connect() {
     Serial.printf("[X32Link] connecting to %s\n", g_config.wifi_ssid);
     WiFi.mode(WIFI_STA);
     WiFi.begin(g_config.wifi_ssid, g_config.wifi_pass);
-    unsigned long start = millis();
+    wifi_conn_policy_reset(&g_wifi_pol, now_us_ms());
     while (WiFi.status() != WL_CONNECTED) {
-        if (millis() - start > 30000) {
+        // WCA_CONNECT here is a no-op — WiFi.begin() is already in flight; we only
+        // act on the budget's WCA_GIVE_UP_TO_AP.
+        if (wifi_conn_policy_step(&g_wifi_pol, WCE_DISCONNECTED, now_us_ms()) == WCA_GIVE_UP_TO_AP) {
             WiFi.disconnect(true);
             return false;
         }
         delay(500);
         Serial.print(".");
     }
+    wifi_conn_policy_step(&g_wifi_pol, WCE_GOT_IP, now_us_ms());
     WiFi.setSleep(false);  // modem power-save drops buffered multicast — keep radio awake
     Serial.println();
     Serial.printf("[X32Link] IP: %s\n", WiFi.localIP().toString().c_str());
     return true;
-}
-
-// Blocking reconnect used by loop() — no timeout (we have nowhere else to go).
-static void wifi_connect() {
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    // Already connected (called right after status check fails then recovers),
-    // or fall through from try_connect. Reinit if truly disconnected:
-    if (WiFi.status() != WL_CONNECTED) {
-        WiFi.begin(g_config.wifi_ssid, g_config.wifi_pass);
-        while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
-    }
-    Serial.println();
-    Serial.printf("[X32Link] IP: %s\n", WiFi.localIP().toString().c_str());
 }
 
 // Non-blocking (LNK-023): configures AP + starts the captive-portal web
@@ -225,7 +217,7 @@ static void wifi_connect() {
 static void start_config_ap() {
     WiFi.mode(WIFI_AP);
     WiFi.softAP("X32Link-Config");
-    s_ap_mode = true;
+    g_wifi_pol.state = WCS_AP;   // policy terminal (the failed try_connect already set it)
     Serial.printf("[X32Link] WiFi failed — AP started\n");
     Serial.printf("[X32Link] join 'X32Link-Config' → http://%s\n",
                   WiFi.softAPIP().toString().c_str());
@@ -296,11 +288,17 @@ void loop() {
     // iteration and fight the AP radio config. AP mode is terminal until a
     // reboot (handle_save()), so this intentionally never re-enters STA on
     // its own — see start_config_ap()'s comment / ticket Notes.
-    if (!s_ap_mode && WiFi.status() != WL_CONNECTED) {
-        Serial.println("[X32Sync] WiFi lost — reconnecting");
-        wifi_connect();
-        tempo_source_begin();
-        osc_sender_begin();
+    if (g_wifi_pol.state != WCS_AP && WiFi.status() != WL_CONNECTED) {
+        // Creds are proven (we had an IP), so the policy retries forever — never AP.
+        if (wifi_conn_policy_step(&g_wifi_pol, WCE_DISCONNECTED, now_us_ms()) == WCA_CONNECT) {
+            Serial.println("[X32Sync] WiFi lost — reconnecting");
+            WiFi.reconnect();
+            while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+            wifi_conn_policy_step(&g_wifi_pol, WCE_GOT_IP, now_us_ms());
+            Serial.println();
+            tempo_source_begin();
+            osc_sender_begin();
+        }
     }
     web_config_handle();  // service the web server every ~20 ms so /status polling is live
 
