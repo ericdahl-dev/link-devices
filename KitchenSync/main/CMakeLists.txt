@@ -14,6 +14,7 @@ idf_component_register(
          "ks_web.cpp"
          "ks_status.c"
          "ks_config.c"
+         "ks_tick.c"
          "ks_form.c"
          "ks_config_nvs.c"
          "metronome_audio.c"
