@@ -29,6 +29,7 @@
 static const char *TAG = "ks_web";
 static KsConfig *s_cfg = nullptr;
 static volatile uint32_t *s_gen = nullptr;   // bumped on /live so the clock task re-primes
+static SemaphoreHandle_t s_cfg_mutex = nullptr;  // ARC-016: guards the /live patch
 
 // %SSID% / %MCKCHK% / %CABLE% are filled per-request from the live config.
 static const char PAGE[] = R"HTML(<!doctype html>
@@ -417,22 +418,15 @@ static esp_err_t live_handler(httpd_req_t *req)
         return httpd_resp_send(req, "invalid", HTTPD_RESP_USE_STRLEN);
     }
 
-    // Copy only the live-safe fields into the running config the clock task reads
-    // each tick. Single-field int writes are atomic on the P4; the generation bump
-    // makes the task re-prime its grids so a phase/rate change realigns cleanly
-    // instead of dumping a catch-up burst.
-    s_cfg->clock_out_enable = cand.clock_out_enable;
-    s_cfg->metronome_accent = cand.metronome_accent;
-    s_cfg->led_enable       = cand.led_enable;
-    s_cfg->led_brightness   = cand.led_brightness;
-    s_cfg->led_mode         = cand.led_mode;
-    s_cfg->led_fade         = cand.led_fade;
-    s_cfg->led_beat_color   = cand.led_beat_color;
-    s_cfg->led_accent_color = cand.led_accent_color;
-    s_cfg->metronome_volume = cand.metronome_volume;   // P4-029: live vol/voice
-    s_cfg->metronome_voice  = cand.metronome_voice;
-    for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) s_cfg->clock[o] = cand.clock[o];
+    // ARC-016: patch the live-safe fields into the running config under the mutex so
+    // the clock task never reads a torn multi-field update (the clock[] array copy
+    // was the widest window). ks_config_live_safe_copy owns the field set; the
+    // generation bump makes the task re-prime its grids so a phase/rate change
+    // realigns cleanly instead of dumping a catch-up burst.
+    if (s_cfg_mutex) xSemaphoreTake(s_cfg_mutex, portMAX_DELAY);
+    ks_config_live_safe_copy(s_cfg, &cand);
     if (s_gen) (*s_gen)++;
+    if (s_cfg_mutex) xSemaphoreGive(s_cfg_mutex);
 
     // P4-029: re-render the tone bursts + re-set codec volume now, no reboot (no-op
     // if the metronome was off at boot — the codec isn't up until then).
@@ -549,10 +543,11 @@ static esp_err_t update_handler(httpd_req_t *req)
     return rc;
 }
 
-void ks_web_start(KsConfig* cfg, volatile uint32_t* gen)
+void ks_web_start(KsConfig* cfg, volatile uint32_t* gen, SemaphoreHandle_t cfg_mutex)
 {
     s_cfg = cfg;
     s_gen = gen;
+    s_cfg_mutex = cfg_mutex;
     httpd_handle_t server = NULL;
     httpd_config_t hcfg = HTTPD_DEFAULT_CONFIG();
     if (httpd_start(&server, &hcfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }

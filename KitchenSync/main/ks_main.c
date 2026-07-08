@@ -21,6 +21,7 @@
 #include <math.h>   /* fmod, for the PHASE_DEBUG trace */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
@@ -61,6 +62,7 @@ static const char *TAG = "kitchensync";
 
 static KsConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
 static volatile uint32_t g_cfg_gen = 0;   /* bumped by web POST /live; clock task re-primes on change (P4-015) */
+static SemaphoreHandle_t g_cfg_mutex;     /* ARC-016: guards g_cfg/g_cfg_gen vs the /live writer */
 
 static void clock_out_task(void *arg)
 {
@@ -89,12 +91,22 @@ static void clock_out_task(void *arg)
          * Falls back to "playing" when the session never reports transport. */
         bool tp_playing = !link_proto_start_stop_seen() || link_proto_playing();
 
+        /* ARC-016: take a coherent snapshot of the live config under the mutex so a
+         * concurrent /live patch can't tear a multi-field read; the whole tick then
+         * uses cfg (never the shared g_cfg). Held only for the copy — microseconds. */
+        KsConfig cfg;
+        uint32_t cfg_gen;
+        xSemaphoreTake(g_cfg_mutex, portMAX_DELAY);
+        cfg     = g_cfg;
+        cfg_gen = g_cfg_gen;
+        xSemaphoreGive(g_cfg_mutex);
+
         /* ARC-015: all the decisions (beat basis, the reprime fold, the per-output
          * clock fan-out, the transport action, the metronome-click gating) are the
          * pure ks_tick_step; the loop just executes the returned plan. */
         KsTickInputs in = {
             .have_session = have_session, .xform = xform, .tl = tl, .t_now = t_now,
-            .cfg = &g_cfg, .cfg_gen = g_cfg_gen, .tp_playing = tp_playing,
+            .cfg = &cfg, .cfg_gen = cfg_gen, .tp_playing = tp_playing,
             .start_stop_seen = link_proto_start_stop_seen(),
             .playing = link_proto_playing(), .usb_ready = usb_midi_host_ready(),
         };
@@ -104,7 +116,7 @@ static void clock_out_task(void *arg)
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
             for (int i = 0; i < plan.pulses[o]; i++) {
                 uint8_t pkt[4];
-                usb_midi_pack_single(g_cfg.clock[o].cable, 0xF8, pkt);
+                usb_midi_pack_single(cfg.clock[o].cable, 0xF8, pkt);
                 usb_midi_host_send(pkt, 4);
                 pulses++;
             }
@@ -113,9 +125,9 @@ static void clock_out_task(void *arg)
         if (plan.transport != TRANSPORT_NONE) {
             uint8_t status = (plan.transport == TRANSPORT_START) ? 0xFA : 0xFC;
             for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
-                if (!g_cfg.clock[o].enable) continue;
+                if (!cfg.clock[o].enable) continue;
                 uint8_t pkt[4];
-                usb_midi_pack_single(g_cfg.clock[o].cable, status, pkt);
+                usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
                 usb_midi_host_send(pkt, 4);
             }
             ESP_LOGI(TAG, "transport %s", plan.transport == TRANSPORT_START ? "START" : "STOP");
@@ -136,13 +148,13 @@ static void clock_out_task(void *arg)
          * (its own led_enable switch); clears once when disabled or idle. */
         if (now - last_led >= LED_FRAME_US) {
             last_led = now;
-            if (g_cfg.led_enable && plan.active && tp_playing) {   /* off when stopped (see tp_playing above) */
+            if (cfg.led_enable && plan.active && tp_playing) {   /* off when stopped (see tp_playing above) */
                 MetroStripCfg lc = {
-                    .beat   = { (uint8_t)(g_cfg.led_beat_color   >> 16), (uint8_t)(g_cfg.led_beat_color   >> 8), (uint8_t)g_cfg.led_beat_color   },
-                    .accent = { (uint8_t)(g_cfg.led_accent_color >> 16), (uint8_t)(g_cfg.led_accent_color >> 8), (uint8_t)g_cfg.led_accent_color },
-                    .bright = (uint8_t)g_cfg.led_brightness,
-                    .mode   = (uint8_t)g_cfg.led_mode,
-                    .fade   = (uint8_t)g_cfg.led_fade,
+                    .beat   = { (uint8_t)(cfg.led_beat_color   >> 16), (uint8_t)(cfg.led_beat_color   >> 8), (uint8_t)cfg.led_beat_color   },
+                    .accent = { (uint8_t)(cfg.led_accent_color >> 16), (uint8_t)(cfg.led_accent_color >> 8), (uint8_t)cfg.led_accent_color },
+                    .bright = (uint8_t)cfg.led_brightness,
+                    .mode   = (uint8_t)cfg.led_mode,
+                    .fade   = (uint8_t)cfg.led_fade,
                 };
                 RGB frame[LED_PIXELS];
                 metro_strip_render(plan.beats, (int)KS_TICK_METRO_QUANTUM, LED_PIXELS, &lc, frame);
@@ -196,9 +208,10 @@ void app_main(void)
 
     ks_config_load(&g_cfg);
     ESP_LOGI(TAG, "KitchenSync — Link tempo -> USB-MIDI host clock out (P4-005/007)");
+    g_cfg_mutex = xSemaphoreCreateMutex();   /* ARC-016: before the web server / clock task */
     usb_midi_host_start();
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
-    ks_web_start(&g_cfg, &g_cfg_gen);
+    ks_web_start(&g_cfg, &g_cfg_gen, g_cfg_mutex);
     if (g_cfg.metronome_enable)
         metronome_audio_start(g_cfg.metronome_volume, g_cfg.metronome_voice);   /* codec/I2S only when used */
     ks_led_start(LED_GPIO, LED_PIXELS);   /* WS2812 visual metronome; harmless if nothing wired (P4-018) */
