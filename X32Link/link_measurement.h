@@ -147,7 +147,19 @@ void link_measurement_attempt_begin(void);
 void link_measurement_attempt_end(bool success);
 
 LinkGhostXForm link_measurement_current_xform(void);
-bool           link_measurement_active(void);
+
+// The one honest question for phase validity: does a committed, trustworthy
+// GhostXForm exist? Gate phase output on THIS, never on active() (ARC-002).
+// Gating on active() was the "flashing dot" bug: active is true only while an
+// attempt is in flight and drops the instant it commits, so phase flickered
+// valid-then-invalid at exactly the moment the estimate became good.
+bool link_measurement_have_phase_estimate(void);
+
+// Lifecycle only — true while a measurement attempt is in flight. For the
+// measurement pump's attempt orchestration; NOT a phase-validity signal.
+// Callers deciding whether phase can be trusted must use
+// link_measurement_have_phase_estimate() instead.
+bool link_measurement_active(void);
 
 #ifdef __cplusplus
 }
