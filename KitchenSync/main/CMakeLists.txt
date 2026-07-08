@@ -6,7 +6,7 @@ set(X32LINK_DIR "${CMAKE_CURRENT_LIST_DIR}/../../X32Link")
 idf_component_register(
     SRCS "ks_main.c"
          "wifi_link.c"
-         "wifi_fallback.c"
+         "${X32LINK_DIR}/wifi_conn_policy.c"
          "link_measure_io.c"
          "usb_midi_host.c"
          "midi_clock_in.c"
