@@ -85,10 +85,13 @@ explains why it lives in the sketch root rather than a neutral `shared/`).
 - **Shared pure engine** (`../X32Link/`): `beat_clock`, `beat_source`,
   `clock_ticker`, `clock_output`, `swing`, `transport`, `metronome`,
   `metronome_voice`, `usb_midi_pack`, `midi_bpm_calc`, and the Link stack
-  (`link_protocol`, `link_measurement`, `link_measurement_session`, `link_phase`).
+  (`link_protocol`, `link_measurement`, `link_measurement_session`,
+  `link_measure_pump`, `session_timeline`, `link_phase`).
 - **KitchenSync-local pure** (`main/`): `ks_config`, `ks_form` (POST-body
-  decode/patch), `ks_status` (JSON), `midi_clock_in`.
-- **KitchenSync glue** (`main/`): `ks_main` (the 1 ms clock task), `wifi_link` +
+  decode/patch), `ks_status` (JSON), `ks_tick` (clock-tick orchestration —
+  ARC-015, pulled out of the `ks_main` loop), `midi_clock_in`.
+- **KitchenSync glue** (`main/`): `ks_main` (the 1 ms clock task driving `ks_tick`),
+  `wifi_link` +
   `link_measure_io` (sockets), `usb_midi_host` (USB), `metronome_audio`
   (ES8311/I2S), `ks_web` (HTTP server), `ks_config_nvs`.
 
@@ -136,11 +139,12 @@ tempo, peers, USB device, **MIDI Clock In**, pulses out) plus the config form.
 Two write paths:
 
 - **`POST /live`** — timing controls (per-output enable / cable / division /
-  **NUDGE** / **SWING**, clock-out, metronome accent) apply **in place on the next
-  tick, no reboot**. The `+`/`−` steppers post here, so you dial timing by ear.
+  **NUDGE** / **SWING**, clock-out, metronome accent) plus **metronome VOL / VOICE**
+  apply **in place on the next tick, no reboot** (P4-029 moved vol/voice off the
+  reboot path). The `+`/`−` steppers post here, so you dial timing and the click by ear.
 - **Write & Reboot (`POST /save`)** — persists everything to NVS and restarts.
-  Required for **WiFi credentials** and **metronome enable / volume / voice** (a
-  reconnect / codec re-init), which `/live` never touches.
+  Required for **WiFi credentials** and **enabling a metronome that was off** (the
+  ES8311 codec / I2S only come up at boot), which `/live` never touches.
 
 > ⚠️ After flashing a build that changed the config struct layout, do **one**
 > Write & Reboot to rewrite NVS cleanly — otherwise old blobs misload. P4-014
