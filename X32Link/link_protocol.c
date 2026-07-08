@@ -12,6 +12,7 @@
 //   BPM = 60e6 / microsPerBeat
 
 #include "link_protocol.h"
+#include "session_timeline.h"   // ARC-011: settled-timeline owner + epoch debounce
 #include <string.h>
 
 static const uint8_t  MAGIC[8]     = {'_','a','s','d','p','_','v', 1};
@@ -35,8 +36,10 @@ typedef struct {
 static double       s_bpm        = 0.0;
 static Peer         s_peers[8];
 static int          s_peer_count = 0;
-static LinkTimeline s_timeline;
+static LinkTimeline s_timeline;                 // raw gossip (last-writer-wins)
 static bool         s_timeline_seen = false;
+static SessionTimeline s_stl;                   // ARC-011: settled view served to consumers
+static volatile bool   s_epoch_reset_pending = false;  // latched on a confirmed re-origin
 static bool         s_playing       = false;  // Link StartStopState isPlaying
 static bool         s_stst_seen     = false;  // have we parsed a StartStopState yet
 
@@ -91,6 +94,8 @@ void link_proto_reset(void) {
     s_playing    = false;
     s_stst_seen  = false;
     memset(&s_timeline, 0, sizeof(s_timeline));
+    session_timeline_reset(&s_stl);
+    s_epoch_reset_pending = false;
 }
 
 // Drop peers whose TTL elapsed without a refreshing Alive/Response.
@@ -134,6 +139,11 @@ bool link_proto_parse(const uint8_t* buf, int len) {
                 s_timeline.time_origin_us    = be64(p + 16);
             }
             s_timeline_seen = true;
+            // ARC-011: debounce the epoch here so BOTH the beat math (settled read)
+            // and the measurement glue (the pending latch) see one settled timeline.
+            if (session_timeline_observe(&s_stl, true, s_timeline,
+                                         (int64_t)link_proto_millis() * 1000))
+                s_epoch_reset_pending = true;
         }
         if (key == MEP4_KEY && size >= 6) {
             int idx = find_peer(nodeId);
@@ -161,9 +171,17 @@ bool link_proto_start_stop_seen(void) { return s_stst_seen; }
 int    link_proto_peers(void) { return s_peer_count; }
 
 bool link_proto_timeline(LinkTimeline* out) {
-    if (!s_timeline_seen) return false;
-    if (out) *out = s_timeline;
-    return true;
+    // ARC-011: serve the settled (held-last-good, epoch-debounced) timeline, not the
+    // raw store — so a joining peer's un-synced gossip never reaches the beat math.
+    return session_timeline_settled(&s_stl, out);
+}
+
+// ARC-011: true once (then clears) when the settled-timeline debounce confirms a
+// genuine re-origin; the measurement glue polls this to reset the committed xform.
+bool link_proto_epoch_reset_pending(void) {
+    bool p = s_epoch_reset_pending;
+    s_epoch_reset_pending = false;
+    return p;
 }
 
 bool link_proto_peer_endpoint(int index, uint32_t* ip, uint16_t* port) {

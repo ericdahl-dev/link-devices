@@ -137,11 +137,17 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 </div>
 <div class="row">
 <div class="cap"><label>Bar Quantum</label><span class="hint">beats per bar &middot; 1&ndash;16</span></div>
-<div class="fld"><span class="pre">BEATS</span><input type="number" name="quantum_beats" value="%QUANTUM%" min="1" max="16" step="1" inputmode="numeric"></div>
+<div class="fld"><span class="pre">BEATS</span><input type="number" class="live" name="quantum_beats" value="%QUANTUM%" min="1" max="16" step="1" inputmode="numeric"></div>
 </div>
 <div class="row">
 <div class="cap"><label>MIDI Clock Out</label><span class="hint">Link&rarr;USB 24PPQN 0xF8 &middot; restart to apply</span></div>
 <label class="sw"><input type="checkbox" name="midi_clock_out" value="1" %MCKCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
+</div>
+<div class="row">
+<div class="cap"><label>Phase Display</label><span class="hint">beat-flash dot vs sweep wheel &middot; restart to apply</span></div>
+<label class="sw"><input type="checkbox" class="live" name="phase_flash" value="1" %PHFLASHCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
+<div class="fld" style="margin-top:6px"><span class="pre">BEAT</span><input type="color" class="live" name="dot_beat" value="%DOTBEAT%"></div>
+<div class="fld" style="margin-top:6px"><span class="pre">BAR1</span><input type="color" class="live" name="dot_acc" value="%DOTACC%"></div>
 </div>
 <div class="row">
 <div class="cap"><label>Mixer IP</label><span class="hint">on this network</span></div>
@@ -221,6 +227,12 @@ setBeat(shownBpm);
 }).catch(function(){})}
 var t=0,boot=setInterval(function(){bpmEl.textContent=(Math.random()*200+40).toFixed(1);
 if(++t>6){clearInterval(boot);showBpm(seedBpm);poll();setInterval(poll,1000)}},70);
+// LNK-037: live preview — POST each changed live-safe field to /live (no reboot).
+function postLive(el){var v=el.type==='checkbox'?(el.checked?'1':'0'):el.value;
+fetch('/live',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+body:encodeURIComponent(el.name)+'='+encodeURIComponent(v)});}
+[].forEach.call(document.querySelectorAll('.live'),function(el){
+el.addEventListener(el.type==='color'||el.type==='number'?'input':'change',function(){postLive(el)});});
 </script></body></html>)HTML";
 
 static String build_html() {
@@ -233,6 +245,12 @@ static String build_html() {
     h.replace("%SLOT%",  String(g_config.fx_slot));
     h.replace("%QUANTUM%", String(g_config.quantum_beats));
     h.replace("%MCKCHK%", g_config.midi_clock_out_enable ? "checked" : "");
+    h.replace("%PHFLASHCHK%", g_config.phase_display_mode == 1 ? "checked" : "");
+    char dotbuf[8];
+    snprintf(dotbuf, sizeof(dotbuf), "#%06X", g_config.dot_beat_color & 0xFFFFFF);
+    h.replace("%DOTBEAT%", dotbuf);
+    snprintf(dotbuf, sizeof(dotbuf), "#%06X", g_config.dot_accent_color & 0xFFFFFF);
+    h.replace("%DOTACC%", dotbuf);
     h.replace("%SRC%",   String(g_config.input_source));
     h.replace("%SSID%",  g_config.wifi_ssid);
     h.replace("%BPM%",   bpm);
@@ -308,7 +326,10 @@ static void handle_status() {
 }
 
 // Minimal dark result page matching the panel aesthetic.
-static void send_result(int code, const char* title, const char* body) {
+// reboot=true adds a script that waits for the device to come back after the restart
+// and then loads the config homepage — so Write & Reboot / OTA return to '/' on their
+// own instead of leaving the browser stranded on the result page.
+static void send_result(int code, const char* title, const char* body, bool reboot) {
     String p =
         "<!doctype html><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -321,7 +342,12 @@ static void send_result(int code, const char* title, const char* body) {
     p += title;
     p += "</h2><p style='color:#717a82;letter-spacing:.04em'>";
     p += body;
-    p += "</p></div></body>";
+    p += "</p>";
+    if (reboot)
+        p += "<p style='color:#4b535b;font-size:12px'>returning to config&hellip;</p>"
+             "<script>setTimeout(function r(){fetch('/',{cache:'no-store'})"
+             ".then(function(){location.href='/'}).catch(function(){setTimeout(r,1500)})},6000)</script>";
+    p += "</div></body>";
     server.send(code, "text/html; charset=utf-8", p);
 }
 
@@ -330,7 +356,7 @@ static void handle_update_result() {
     send_result(ok ? 200 : 500,
                 ok ? "Updated — Restarting" : "Update Failed",
                 ok ? "New firmware written. The device restarts now."
-                   : "Upload was interrupted or the image was rejected. Try again.");
+                   : "Upload was interrupted or the image was rejected. Try again.", ok);
     if (ok) {
         delay(1000);
         ESP.restart();
@@ -340,22 +366,17 @@ static void handle_update_result() {
 static void handle_save() {
     AppConfig cfg = g_config;
 
-    // LNK-032: model + the model→slot clamp go through the shared pure helper,
-    // so a stale fx_slot can't outlive a model change (same rule as the touch UI).
-    config_set_model(&cfg, server.arg("model").toInt());
+    // ARC-012: int fields go through app_config_set — one range owner
+    // (config_validate); out-of-range posts are ignored (old value kept) rather than
+    // 400-ing. Model first so fx_slot validates against the new model's slot max.
+    app_config_set(&cfg, ACF_MODEL,     server.arg("model").toInt());
 
     String ip = server.arg("mixer_ip");
     if (ip.length() > 0 && ip.length() < (int)sizeof(cfg.mixer_ip))
         ip.toCharArray(cfg.mixer_ip, sizeof(cfg.mixer_ip));
 
-    int slot = server.arg("fx_slot").toInt();
-    if (slot >= 1 && slot <= config_model_slot_max(cfg.model)) cfg.fx_slot = slot;
-
-    // No 1-16 pre-check here — config_validate() (LNK-019) already enforces
-    // that range as the single source of truth; an out-of-range post just
-    // fails validation below (400, config untouched) same as a bad
-    // mixer_ip, rather than silently clamping or duplicating the check.
-    cfg.quantum_beats = server.arg("quantum_beats").toInt();
+    app_config_set(&cfg, ACF_FX_SLOT,       server.arg("fx_slot").toInt());
+    app_config_set(&cfg, ACF_QUANTUM_BEATS, server.arg("quantum_beats").toInt());
 
     String ssid = server.arg("wifi_ssid");
     if (ssid.length() > 0 && ssid.length() < (int)sizeof(cfg.wifi_ssid))
@@ -365,21 +386,49 @@ static void handle_save() {
     if (pass.length() > 0 && pass.length() < (int)sizeof(cfg.wifi_pass))
         pass.toCharArray(cfg.wifi_pass, sizeof(cfg.wifi_pass));
 
-    int src = server.arg("input_source").toInt();
-    if (src == 0 || src == 1) cfg.input_source = src;
+    app_config_set(&cfg, ACF_INPUT_SOURCE,   server.arg("input_source").toInt());
+    app_config_set(&cfg, ACF_MIDI_CLOCK_OUT, server.arg("midi_clock_out").toInt());  // LNK-027
 
-    int mck = server.arg("midi_clock_out").toInt();  // LNK-027
-    if (mck == 0 || mck == 1) cfg.midi_clock_out_enable = mck;
+    // LNK-036: phase display mode + dot colours (unchecked box -> "" -> 0 -> sweep).
+    app_config_set(&cfg, ACF_PHASE_DISPLAY_MODE, server.arg("phase_flash").toInt() == 1 ? 1 : 0);
+    String cb = server.arg("dot_beat");              // "#RRGGBB" from <input type=color>
+    if (cb.length() == 7 && cb[0] == '#')
+        app_config_set(&cfg, ACF_DOT_BEAT_COLOR, (int)strtol(cb.c_str() + 1, NULL, 16));
+    String ca = server.arg("dot_acc");
+    if (ca.length() == 7 && ca[0] == '#')
+        app_config_set(&cfg, ACF_DOT_ACCENT_COLOR, (int)strtol(ca.c_str() + 1, NULL, 16));
 
     if (config_validate(&cfg)) {
         g_config = cfg;
         config_save(&g_config);
-        send_result(200, "Saved — Restarting", "Reconnect to WiFi if credentials changed.");
+        send_result(200, "Saved — Restarting", "Reconnect to WiFi if credentials changed.", true);
         delay(1000);
         ESP.restart();
     } else {
-        send_result(400, "Invalid Config", "Check the mixer IP and FX slot, then go back.");
+        send_result(400, "Invalid Config", "Check the mixer IP and FX slot, then go back.", false);
     }
+}
+
+// LNK-037: apply live-safe fields to the running config with no reboot and no NVS
+// write (Save persists), mirroring the P4's /live. touch_display reads g_config each
+// render, so the phase dot mode/colours update instantly for preview.
+static void handle_live() {
+    // ARC-012: same validated setter as save; ranges live in config_validate only.
+    if (server.hasArg("phase_flash"))
+        app_config_set(&g_config, ACF_PHASE_DISPLAY_MODE, server.arg("phase_flash").toInt() == 1 ? 1 : 0);
+    if (server.hasArg("dot_beat")) {
+        String cb = server.arg("dot_beat");
+        if (cb.length() == 7 && cb[0] == '#')
+            app_config_set(&g_config, ACF_DOT_BEAT_COLOR, (int)strtol(cb.c_str() + 1, NULL, 16));
+    }
+    if (server.hasArg("dot_acc")) {
+        String ca = server.arg("dot_acc");
+        if (ca.length() == 7 && ca[0] == '#')
+            app_config_set(&g_config, ACF_DOT_ACCENT_COLOR, (int)strtol(ca.c_str() + 1, NULL, 16));
+    }
+    if (server.hasArg("quantum_beats"))
+        app_config_set(&g_config, ACF_QUANTUM_BEATS, server.arg("quantum_beats").toInt());
+    server.send(200, "text/plain", "ok");
 }
 
 static void handle_captive_redirect() {
@@ -394,6 +443,7 @@ void web_config_begin() {
     server.on("/",       HTTP_GET,  handle_root);
     server.on("/status", HTTP_GET,  handle_status);
     server.on("/save",   HTTP_POST, handle_save);
+    server.on("/live",   HTTP_POST, handle_live);   // LNK-037: no-reboot preview
     server.on("/update", HTTP_GET,  handle_update_page);
     server.on("/update", HTTP_POST, handle_update_result, handle_update_upload);
     server.begin();
@@ -409,6 +459,7 @@ void web_config_ap_begin() {
     server.on("/",       HTTP_GET,  handle_root);
     server.on("/status", HTTP_GET,  handle_status);
     server.on("/save",   HTTP_POST, handle_save);
+    server.on("/live",   HTTP_POST, handle_live);   // LNK-037: no-reboot preview
 
     // OS captive-portal detection endpoints → redirect to config page.
     server.on("/hotspot-detect.html",  HTTP_GET, handle_captive_redirect);  // iOS/macOS

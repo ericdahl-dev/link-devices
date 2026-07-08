@@ -24,10 +24,12 @@
 #include "ks_config_nvs.h"
 #include "ks_form.h"
 #include "ks_web.h"
+#include "metronome_audio.h"   // P4-029: live vol/voice re-apply
 
 static const char *TAG = "ks_web";
 static KsConfig *s_cfg = nullptr;
 static volatile uint32_t *s_gen = nullptr;   // bumped on /live so the clock task re-primes
+static SemaphoreHandle_t s_cfg_mutex = nullptr;  // ARC-016: guards the /live patch
 
 // %SSID% / %MCKCHK% / %CABLE% are filled per-request from the live config.
 static const char PAGE[] = R"HTML(<!doctype html>
@@ -38,7 +40,7 @@ static const char PAGE[] = R"HTML(<!doctype html>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/dseg@0.46.0/css/dseg.css" rel="stylesheet">
 <style>
-:root{--bg:#070809;--panel-2:#0f1216;--ink:#e9ece6;--mut:#717a82;--line:#262b31;
+:root{--bg:#070809;--panel-2:#0f1216;--ink:#e9ece6;--mut:#838d95;--line:#262b31;
 --led:#b6ff36;--led-dim:#36431a;--amber:#ff9d3b;
 --mono:'DM Mono',ui-monospace,Menlo,monospace;--disp:'Bricolage Grotesque','Arial Narrow',sans-serif;--seg:'DSEG7 Classic','DM Mono',monospace;}
 *{box-sizing:border-box}html,body{margin:0}
@@ -125,6 +127,38 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 .foot{text-align:center;color:#3c444c;font-size:10.5px;letter-spacing:.18em;margin:8px 0 20px;text-transform:uppercase}
 @keyframes breathe{0%,100%{opacity:1}50%{opacity:.45}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* Let the 2-up grid cells shrink to their track so wide inner controls (the
+   nudge steppers) don't spill past the card edge. Applies at every width. */
+.grid2,.colrow{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.fld input{min-width:0}
+/* Each clock output stacks RATE / NUDGE / SWING as full rows at every width —
+   side-by-side pinches the rate label to "MIDI c" and squeezes the nudge input. */
+.sect[data-when="clock_out"] .grid2{grid-template-columns:minmax(0,1fr)}
+/* Wide viewports (desktop): widen the card and pack the config form into two
+   masonry-flow columns so it isn't a long, skinny strip. Column-flow (not grid)
+   keeps a short group from waiting on a tall neighbour's row height. Status
+   readout stays full-width above. */
+@media (min-width:760px){
+.unit{max-width:900px}
+/* Real grid (not masonry) so the tall MIDI Clock Out group can span both
+   columns as a hero band instead of being dumped into one column. order:-1
+   floats it to the top on desktop while the DOM keeps WiFi first for the
+   phone setup flow (order is ignored in the mobile block layout). */
+.formcols{display:grid;grid-template-columns:1fr 1fr;column-gap:26px;align-items:start}
+.grp{margin-bottom:16px}
+.grp--wide{grid-column:1/-1;order:-1}
+.grp--wide .sect{display:grid;grid-template-columns:1fr 1fr;gap:6px 22px}
+.grp--wide .sect .frow.out{margin-top:0}
+.grp .frow.head:first-child{padding-top:2px}
+/* Status rows become a 4-across meter bridge so they fill the width and read
+   like a rack unit, instead of label/value flung to opposite edges. */
+.rows{display:grid;grid-template-columns:repeat(4,1fr);column-gap:26px;padding-top:4px}
+.row{border-top:0;flex-direction:column;align-items:flex-start;gap:7px;padding:16px 0}
+/* Own the wider tempo glass — scale the segmented readout up (ghost + live
+   share .bignum, so the unlit-segment effect stays intact). */
+.bignum{font-size:74px}
+.foot{max-width:900px}
+}
 </style></head><body>
 <div class="unit">
 <span class="screw tl"></span><span class="screw tr"></span><span class="screw bl"></span><span class="screw br"></span>
@@ -140,25 +174,27 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="row"><label>Clock Out</label><span class="val" id="tx">0 pulses</span></div>
 </div>
 <form method="POST" action="/save">
-<div class="frow head"><span class="cap">WiFi Network</span>
+<div class="formcols">
+<div class="grp"><div class="frow head"><span class="cap">WiFi Network</span>
 <div class="fld"><span class="pre">SSID</span><input name="wifi_ssid" value="%SSID%" autocomplete="off"></div>
-<div class="fld"><span class="pre">PASS</span><input name="wifi_pass" type="password" placeholder="keep current"></div></div>
-<div class="frow head"><span class="cap">MIDI Clock Out</span>
+<div class="fld"><span class="pre">PASS</span><input name="wifi_pass" type="password" placeholder="keep current"></div></div></div>
+<div class="grp grp--wide"><div class="frow head"><span class="cap">MIDI Clock Out</span>
 <label class="sw"><input type="checkbox" class="live" name="clock_out" value="1" %MCKCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
-<div class="sect %CLKSECT%" data-when="clock_out">%OUTPUTS%</div>
-<div class="frow head"><span class="cap">Metronome (Speaker)</span>
+<div class="sect %CLKSECT%" data-when="clock_out">%OUTPUTS%</div></div>
+<div class="grp"><div class="frow head"><span class="cap">Metronome (Speaker)</span>
 <label class="sw"><input type="checkbox" name="metronome" value="1" %MTOCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="sect %METSECT%" data-when="metronome">
 <div class="frow"><span class="cap">Accent Bar 1</span>
 <label class="sw"><input type="checkbox" class="live" name="metro_accent" value="1" %MTACHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="frow"><span class="cap">Metronome Sound</span>
 <div class="grid2">
-<div class="fld"><span class="pre">VOL</span><input type="number" name="metro_vol" value="%MVOL%" min="0" max="100" step="5"></div>
-<div class="fld"><span class="pre">VOICE</span><select name="metro_voice" id="mvoice"><option value="0">Tone</option><option value="1">Click</option><option value="2">Wood</option></select></div></div></div>
-</div>
-<div class="frow head"><span class="cap">LED Strip &middot; Visual Metronome</span>
+<div class="fld"><span class="pre">VOL</span><input type="number" class="live" name="metro_vol" value="%MVOL%" min="0" max="100" step="5"></div>
+<div class="fld"><span class="pre">VOICE</span><select class="live" name="metro_voice" id="mvoice"><option value="0">Tone</option><option value="1">Click</option><option value="2">Wood</option></select></div></div></div>
+</div></div>
+<div class="grp"><div class="frow head"><span class="cap">LED Strip &middot; Visual Metronome</span>
 <label class="sw"><input type="checkbox" class="live" name="led" value="1" %LEDCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
-<div class="sect %LEDSECT%" data-when="led">%LEDCTL%</div>
+<div class="sect %LEDSECT%" data-when="led">%LEDCTL%</div></div>
+</div>
 <button class="write" type="submit">Write &amp; Reboot</button>
 </form>
 <div class="foot">Everything and the kitchen sync &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
@@ -319,7 +355,10 @@ static esp_err_t status_handler(httpd_req_t *req)
 }
 
 // Minimal result page in the panel palette.
-static esp_err_t send_result(httpd_req_t *req, const char *title, const char *msg)
+// reboot=true adds a script that waits for the device to come back after the restart
+// and then loads the config homepage — so a Write & Reboot returns to '/' on its own
+// instead of leaving the browser stranded on /save.
+static esp_err_t send_result(httpd_req_t *req, const char *title, const char *msg, bool reboot)
 {
     std::string p =
         "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -327,7 +366,12 @@ static esp_err_t send_result(httpd_req_t *req, const char *title, const char *ms
         "background:#070809;color:#e9ece6;font-family:ui-monospace,Menlo,monospace;text-align:center'>"
         "<div style='padding:2rem'><div style='width:10px;height:10px;border-radius:50%;margin:0 auto 1.2rem;"
         "background:#b6ff36;box-shadow:0 0 14px 2px #b6ff36'></div><h2 style='font-weight:600'>";
-    p += title; p += "</h2><p style='color:#717a82'>"; p += msg; p += "</p></div></body>";
+    p += title; p += "</h2><p style='color:#717a82'>"; p += msg; p += "</p>";
+    if (reboot)
+        p += "<p style='color:#4b535b;font-size:12px'>returning to config&hellip;</p>"
+             "<script>setTimeout(function r(){fetch('/',{cache:'no-store'})"
+             ".then(function(){location.href='/'}).catch(function(){setTimeout(r,1500)})},6000)</script>";
+    p += "</div></body>";
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, p.c_str(), p.size());
 }
@@ -348,10 +392,10 @@ static esp_err_t save_handler(httpd_req_t *req)
     KsConfig cfg;
     ks_form_resolve(body, s_cfg, &cfg);
 
-    if (!ks_config_valid(&cfg)) return send_result(req, "Invalid Config", "Check the values and go back.");
+    if (!ks_config_valid(&cfg)) return send_result(req, "Invalid Config", "Check the values and go back.", false);
     *s_cfg = cfg;
     ks_config_save(s_cfg);
-    esp_err_t rc = send_result(req, "Saved — Restarting", "Reconnect to WiFi if credentials changed.");
+    esp_err_t rc = send_result(req, "Saved — Restarting", "Reconnect to WiFi if credentials changed.", true);
     vTaskDelay(pdMS_TO_TICKS(800));
     esp_restart();
     return rc;
@@ -382,20 +426,19 @@ static esp_err_t live_handler(httpd_req_t *req)
         return httpd_resp_send(req, "invalid", HTTPD_RESP_USE_STRLEN);
     }
 
-    // Copy only the live-safe fields into the running config the clock task reads
-    // each tick. Single-field int writes are atomic on the P4; the generation bump
-    // makes the task re-prime its grids so a phase/rate change realigns cleanly
-    // instead of dumping a catch-up burst.
-    s_cfg->clock_out_enable = cand.clock_out_enable;
-    s_cfg->metronome_accent = cand.metronome_accent;
-    s_cfg->led_enable       = cand.led_enable;
-    s_cfg->led_brightness   = cand.led_brightness;
-    s_cfg->led_mode         = cand.led_mode;
-    s_cfg->led_fade         = cand.led_fade;
-    s_cfg->led_beat_color   = cand.led_beat_color;
-    s_cfg->led_accent_color = cand.led_accent_color;
-    for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) s_cfg->clock[o] = cand.clock[o];
+    // ARC-016: patch the live-safe fields into the running config under the mutex so
+    // the clock task never reads a torn multi-field update (the clock[] array copy
+    // was the widest window). ks_config_live_safe_copy owns the field set; the
+    // generation bump makes the task re-prime its grids so a phase/rate change
+    // realigns cleanly instead of dumping a catch-up burst.
+    if (s_cfg_mutex) xSemaphoreTake(s_cfg_mutex, portMAX_DELAY);
+    ks_config_live_safe_copy(s_cfg, &cand);
     if (s_gen) (*s_gen)++;
+    if (s_cfg_mutex) xSemaphoreGive(s_cfg_mutex);
+
+    // P4-029: re-render the tone bursts + re-set codec volume now, no reboot (no-op
+    // if the metronome was off at boot — the codec isn't up until then).
+    metronome_audio_set(s_cfg->metronome_volume, s_cfg->metronome_voice);
 
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_send(req, "ok", HTTPD_RESP_USE_STRLEN);
@@ -508,10 +551,11 @@ static esp_err_t update_handler(httpd_req_t *req)
     return rc;
 }
 
-void ks_web_start(KsConfig* cfg, volatile uint32_t* gen)
+void ks_web_start(KsConfig* cfg, volatile uint32_t* gen, SemaphoreHandle_t cfg_mutex)
 {
     s_cfg = cfg;
     s_gen = gen;
+    s_cfg_mutex = cfg_mutex;
     httpd_handle_t server = NULL;
     httpd_config_t hcfg = HTTPD_DEFAULT_CONFIG();
     if (httpd_start(&server, &hcfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }

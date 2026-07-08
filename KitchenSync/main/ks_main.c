@@ -18,8 +18,10 @@
  * downbeat. Until the first measurement commits (or after a transport re-origin
  * invalidates it), we fall back to the free-running local-tempo accumulator.
  */
+#include <math.h>   /* fmod, for the PHASE_DEBUG trace */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
@@ -41,31 +43,36 @@
 #include "link_measurement.h"   /* GhostXForm accessor (link_measurement_current_xform) */
 #include "link_measure_io.h"    /* unicast ping/pong measurement client */
 #include "clock_output.h"       /* per-output division + phase-nudge (P4-010) */
+#include "ks_tick.h"            /* ARC-015: pure clock-tick orchestration */
 
 static const char *TAG = "kitchensync";
 
-#define MAX_BURST       96   /* re-prime instead of flooding past this backlog */
-#define METRO_QUANTUM   4.0  /* beats/bar for the bar-1 accent — Link timeline
-                              * carries no meter, so assume 4/4 (P4-006) */
-#define METRO_BURST     8    /* re-prime the click grid past this beat backlog */
+/* Tick-loop policy constants moved to ks_tick.h (KS_TICK_*, ARC-015). */
 #define LED_GPIO        2    /* WS2812 data pin (P4-018); external strip + 5V/GND */
 #define LED_PIXELS      METRO_STRIP_PIXELS
 #define LED_FRAME_US    20000 /* ~50 fps strip refresh, decoupled from the 1 ms clock */
 
+/* Phase debug (LNK-026 offset hunt): log the P4's computed session phase + the raw
+ * ghost-xform/timeline ingredients so it can be diffed against a ground-truth Link
+ * reference (Ableton Live metronome / Link SDK on the Mac). At Live's downbeat the
+ * P4's `phase` should read ~0; if it reads ~2, that's the static offset, and the
+ * intercept / beat_origin / ghost_now fields show where it enters. Set 0 to silence. */
+#define PHASE_DEBUG     0   /* LNK-026 phase-offset trace; flip to 1 to re-run (see P4-028) */
+#define PHASE_DEBUG_US  250000   /* ~4 Hz */
+
 static KsConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI */
 static volatile uint32_t g_cfg_gen = 0;   /* bumped by web POST /live; clock task re-primes on change (P4-015) */
+static SemaphoreHandle_t g_cfg_mutex;     /* ARC-016: guards g_cfg/g_cfg_gen vs the /live writer */
 
 static void clock_out_task(void *arg)
 {
-    BeatSource  src;  beat_source_reset(&src);
-    ClockTicker cts[KS_CLOCK_OUTPUTS];   /* one grid per output (P4-010) */
-    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
-    Metronome   mt;   metronome_reset(&mt);
-    Transport   tr;   transport_reset(&tr);
+    KsTickState ts;  ks_tick_reset(&ts, g_cfg_gen);
     uint32_t    pulses = 0;
     uint32_t    clicks = 0;
     int64_t     last_log = 0;
-    uint32_t    seen_gen = g_cfg_gen;   /* re-prime when the web UI live-edits timing (P4-015) */
+#if PHASE_DEBUG
+    int64_t     last_phase_dbg = 0;     /* throttle the LNK-026 phase-debug log */
+#endif
     int64_t     last_led = 0;           /* throttle the WS2812 refresh (P4-018) */
     bool        led_showing = false;    /* is the strip currently lit (to clear once when off) */
 
@@ -76,86 +83,61 @@ static void clock_out_task(void *arg)
 
         LinkTimeline tl;
         bool have_session = wifi_link_timeline(&tl) && tl.micros_per_beat > 0;
+        LinkGhostXForm xform = link_measurement_current_xform();
+        int64_t        t_now = esp_timer_get_time();
 
-        /* beat_source (ARC-007) owns the basis policy: phase-locked session beat
-         * once a GhostXForm is committed (P4-009, true downbeat) vs the free-
-         * running local accumulator (P4-005, correct rate / arbitrary phase), plus
-         * the re-prime signal on any basis switch or session loss. One shared beat
-         * drives clock-out AND the self-contained metronome. */
-        BeatSourceOut bs = beat_source_step(&src, have_session,
-                                            link_measurement_current_xform(),
-                                            tl, esp_timer_get_time());
-
-        /* Link transport gates the audible + visual metronome (P4-019): both go
-         * quiet when stopped, since the beat keeps advancing (and jumps on a
-         * re-origin / playhead move) while stopped, which flickers the strip and
-         * clicks off-grid. The 0xF8 clock keeps running regardless (MIDI clock is
-         * continuous; Start/Stop are separate transport messages). Falls back to
-         * "playing" when the session never reports transport. */
+        /* Link transport gates the metronome + strip (P4-019): quiet when stopped
+         * since the beat keeps advancing (and jumps on a re-origin) while stopped.
+         * Falls back to "playing" when the session never reports transport. */
         bool tp_playing = !link_proto_start_stop_seen() || link_proto_playing();
 
-        /* A basis switch, session loss, or a live config edit (P4-015: phase /
-         * division / swing changed via POST /live) shifts the beat grid; re-prime
-         * the tick + click grids so the boundary realigns instead of dumping a
-         * catch-up burst. On the session-loss edge, also reset transport so a later
-         * re-join does not fire a spurious Start. */
-        bool reprime = bs.reprime;
-        if (g_cfg_gen != seen_gen) { reprime = true; seen_gen = g_cfg_gen; }
-        if (reprime) {
-            for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) clock_ticker_reset(&cts[i]);
-            metronome_reset(&mt);
-            if (!bs.active) transport_reset(&tr);
+        /* ARC-016: take a coherent snapshot of the live config under the mutex so a
+         * concurrent /live patch can't tear a multi-field read; the whole tick then
+         * uses cfg (never the shared g_cfg). Held only for the copy — microseconds. */
+        KsConfig cfg;
+        uint32_t cfg_gen;
+        xSemaphoreTake(g_cfg_mutex, portMAX_DELAY);
+        cfg     = g_cfg;
+        cfg_gen = g_cfg_gen;
+        xSemaphoreGive(g_cfg_mutex);
+
+        /* ARC-015: all the decisions (beat basis, the reprime fold, the per-output
+         * clock fan-out, the transport action, the metronome-click gating) are the
+         * pure ks_tick_step; the loop just executes the returned plan. */
+        KsTickInputs in = {
+            .have_session = have_session, .xform = xform, .tl = tl, .t_now = t_now,
+            .cfg = &cfg, .cfg_gen = cfg_gen, .tp_playing = tp_playing,
+            .start_stop_seen = link_proto_start_stop_seen(),
+            .playing = link_proto_playing(), .usb_ready = usb_midi_host_ready(),
+        };
+        KsTickPlan plan = ks_tick_step(&ts, &in);
+
+        /* Execute the clock fan-out: plan.pulses[o] 0xF8 packets on output o's cable. */
+        for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
+            for (int i = 0; i < plan.pulses[o]; i++) {
+                uint8_t pkt[4];
+                usb_midi_pack_single(cfg.clock[o].cable, 0xF8, pkt);
+                usb_midi_host_send(pkt, 4);
+                pulses++;
+            }
         }
-
-        if (bs.active) {
-            double beats = bs.beats;
-
-            if (usb_midi_host_ready() && g_cfg.clock_out_enable) {
-                /* Fan the shared beat out to each enabled output at its own
-                 * division (ppqn) + phase nudge, onto its own cable (P4-010). */
-                for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
-                    const ClockOutputCfg* oc = &g_cfg.clock[o];
-                    if (!oc->enable) continue;
-                    int due = clock_output_due(&cts[o], beats, oc->ppqn, oc->phase_mbeats, oc->swing_mbeats, MAX_BURST);
-                    for (int i = 0; i < due; i++) {
-                        uint8_t pkt[4];
-                        usb_midi_pack_single(oc->cable, 0xF8, pkt);   /* timing clock */
-                        usb_midi_host_send(pkt, 4);
-                        pulses++;
-                    }
-                }
-
-                /* Transport: MIDI Start/Stop on the Link play-state edge (P4-008),
-                 * fanned to every enabled output's cable. Primes on the first real
-                 * StartStopState, so joining mid-play does not fire a spurious Start. */
-                TransportAction ta = transport_update(&tr, link_proto_start_stop_seen(),
-                                                      link_proto_playing());
-                if (ta != TRANSPORT_NONE) {
-                    uint8_t status = (ta == TRANSPORT_START) ? 0xFA : 0xFC;
-                    for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
-                        if (!g_cfg.clock[o].enable) continue;
-                        uint8_t pkt[4];
-                        usb_midi_pack_single(g_cfg.clock[o].cable, status, pkt);
-                        usb_midi_host_send(pkt, 4);
-                    }
-                    ESP_LOGI(TAG, "transport %s", ta == TRANSPORT_START ? "START" : "STOP");
-                }
+        /* Transport: fan Start/Stop to every enabled output's cable (P4-008). */
+        if (plan.transport != TRANSPORT_NONE) {
+            uint8_t status = (plan.transport == TRANSPORT_START) ? 0xFA : 0xFC;
+            for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
+                if (!cfg.clock[o].enable) continue;
+                uint8_t pkt[4];
+                usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
+                usb_midi_host_send(pkt, 4);
             }
-
-            if (g_cfg.metronome_enable) {
-                if (tp_playing) {
-                    MetroClick mc = metronome_update(&mt, beats, METRO_QUANTUM, METRO_BURST);
-                    if (mc != METRO_NONE) {
-                        bool accent = (mc == METRO_ACCENT) && g_cfg.metronome_accent;
-                        metronome_audio_click(accent);
-                        clicks++;
-                        ESP_LOGI(TAG, "metronome %-6s beat %.2f  clicks %lu",
-                                 accent ? "ACCENT" : "click", beats, (unsigned long)clicks);
-                    }
-                } else {
-                    metronome_reset(&mt);   /* stopped: re-prime on resume, no catch-up burst */
-                }
-            }
+            ESP_LOGI(TAG, "transport %s", plan.transport == TRANSPORT_START ? "START" : "STOP");
+        }
+        /* Metronome click on the onboard speaker (P4-006). */
+        if (plan.click) {
+            metronome_audio_click(plan.click_accent);
+            clicks++;
+            ESP_LOGI(TAG, "metronome %-6s beat %.2f  clicks %lu",
+                     plan.click_accent ? "ACCENT" : "click", plan.beats, (unsigned long)clicks);
         }
 
         int64_t now = esp_timer_get_time();
@@ -166,16 +148,16 @@ static void clock_out_task(void *arg)
          * (its own led_enable switch); clears once when disabled or idle. */
         if (now - last_led >= LED_FRAME_US) {
             last_led = now;
-            if (g_cfg.led_enable && bs.active && tp_playing) {   /* off when stopped (see tp_playing above) */
+            if (cfg.led_enable && plan.active && tp_playing) {   /* off when stopped (see tp_playing above) */
                 MetroStripCfg lc = {
-                    .beat   = { (uint8_t)(g_cfg.led_beat_color   >> 16), (uint8_t)(g_cfg.led_beat_color   >> 8), (uint8_t)g_cfg.led_beat_color   },
-                    .accent = { (uint8_t)(g_cfg.led_accent_color >> 16), (uint8_t)(g_cfg.led_accent_color >> 8), (uint8_t)g_cfg.led_accent_color },
-                    .bright = (uint8_t)g_cfg.led_brightness,
-                    .mode   = (uint8_t)g_cfg.led_mode,
-                    .fade   = (uint8_t)g_cfg.led_fade,
+                    .beat   = { (uint8_t)(cfg.led_beat_color   >> 16), (uint8_t)(cfg.led_beat_color   >> 8), (uint8_t)cfg.led_beat_color   },
+                    .accent = { (uint8_t)(cfg.led_accent_color >> 16), (uint8_t)(cfg.led_accent_color >> 8), (uint8_t)cfg.led_accent_color },
+                    .bright = (uint8_t)cfg.led_brightness,
+                    .mode   = (uint8_t)cfg.led_mode,
+                    .fade   = (uint8_t)cfg.led_fade,
                 };
                 RGB frame[LED_PIXELS];
-                metro_strip_render(bs.beats, (int)METRO_QUANTUM, LED_PIXELS, &lc, frame);
+                metro_strip_render(plan.beats, (int)KS_TICK_METRO_QUANTUM, LED_PIXELS, &lc, frame);
                 ks_led_show(frame, LED_PIXELS);
                 led_showing = true;
             } else if (led_showing) {
@@ -188,10 +170,29 @@ static void clock_out_task(void *arg)
             last_log = now;
             ESP_LOGI(TAG, "link peers %d  bpm %.2f  phase %s  usb %s  clock TX %lu  play %d",
                      wifi_link_peers(), link_proto_bpm(),
-                     bs.locked ? "locked" : "free",
+                     plan.locked ? "locked" : "free",
                      usb_midi_host_ready() ? "ready" : "-", pulses,
                      link_proto_playing());
         }
+
+#if PHASE_DEBUG
+        /* LNK-026 offset hunt: P4's computed session phase + raw ingredients, for
+         * diffing against a ground-truth Link reference. `phase` in [0,quantum);
+         * at the reference downbeat it should read ~0. */
+        if (plan.active && now - last_phase_dbg >= PHASE_DEBUG_US) {
+            last_phase_dbg = now;
+            double phase = fmod(plan.beats, KS_TICK_METRO_QUANTUM);
+            if (phase < 0) phase += KS_TICK_METRO_QUANTUM;
+            int64_t ghost_now = xform.valid ? link_ghost_xform_host_to_ghost(xform, t_now) : 0;
+            ESP_LOGI(TAG,
+                "PHASE lock=%d phase=%.3f beats=%.3f | xform=%d intercept=%lld ghost_now=%lld"
+                " | mpb=%lld beat0=%lld t0=%lld play=%d",
+                plan.locked, phase, plan.beats,
+                xform.valid, (long long)xform.intercept_us, (long long)ghost_now,
+                (long long)tl.micros_per_beat, (long long)tl.beat_origin_micro,
+                (long long)tl.time_origin_us, link_proto_playing());
+        }
+#endif
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
@@ -207,9 +208,10 @@ void app_main(void)
 
     ks_config_load(&g_cfg);
     ESP_LOGI(TAG, "KitchenSync — Link tempo -> USB-MIDI host clock out (P4-005/007)");
+    g_cfg_mutex = xSemaphoreCreateMutex();   /* ARC-016: before the web server / clock task */
     usb_midi_host_start();
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
-    ks_web_start(&g_cfg, &g_cfg_gen);
+    ks_web_start(&g_cfg, &g_cfg_gen, g_cfg_mutex);
     if (g_cfg.metronome_enable)
         metronome_audio_start(g_cfg.metronome_volume, g_cfg.metronome_voice);   /* codec/I2S only when used */
     ks_led_start(LED_GPIO, LED_PIXELS);   /* WS2812 visual metronome; harmless if nothing wired (P4-018) */

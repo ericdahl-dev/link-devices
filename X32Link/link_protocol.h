@@ -17,7 +17,10 @@ void   link_proto_tick(void);
 bool   link_proto_parse(const uint8_t* buf, int len);
 double link_proto_bpm(void);
 int    link_proto_peers(void);
-bool   link_proto_timeline(LinkTimeline* out);
+bool   link_proto_timeline(LinkTimeline* out);   // settled (ARC-011): epoch-debounced
+// ARC-011: true once (then clears) when the settled-timeline debounce confirms a
+// genuine transport re-origin — the measurement glue resets the committed xform.
+bool   link_proto_epoch_reset_pending(void);
 bool   link_proto_peer_endpoint(int index, uint32_t* ip, uint16_t* port);
 
 // Link StartStopState (transport). link_proto_playing() is the session's

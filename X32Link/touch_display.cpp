@@ -23,7 +23,7 @@ extern AppConfig g_config;
 // ---- Panel (validated on glass, LNK-014 Progress) --------------------------
 // JD9853 via LovyanGFX Panel_ST7789. Pins: SCK38 MOSI39 DC45 CS21 RST40, BL46.
 // 172x320 visible in 240x320 controller RAM -> offset_x=34. invert=false,
-// setRotation(4). Backlight driven manually (GPIO46 HIGH), not via Light_PWM.
+// setRotation(6) after LNK-035. Backlight driven manually (GPIO46 HIGH), not Light_PWM.
 class LGFX : public lgfx::LGFX_Device {
     lgfx::Panel_ST7789 _panel;
     lgfx::Bus_SPI      _bus;
@@ -73,7 +73,7 @@ static void draw_splash(void) {
 enum ui_screen_t { SCREEN_STATUS, SCREEN_SETTINGS, SCREEN_KEYBOARD };
 static ui_screen_t s_screen = SCREEN_STATUS;
 
-// Status-screen phase wheel geometry (portrait 172x320, setRotation(4)).
+// Status-screen phase wheel geometry (portrait 172x320, setRotation(6) after LNK-035).
 #define WHEEL_CX 86
 #define WHEEL_CY 252
 #define WHEEL_R  44
@@ -82,10 +82,14 @@ static ui_screen_t s_screen = SCREEN_STATUS;
 static char     s_bpm_shown[8] = "";
 static char     s_ip_shown[16] = "";
 static int      s_prev_mx = -1, s_prev_my = -1;
+static int      s_prev_beat = -1;               // LNK-036: last beat index shown (flash mode)
+static bool     s_flash_on  = false;            // LNK-036: dot currently lit (flash mode)
+static uint32_t s_flash_off_at_ms = 0;          // LNK-036: when to blank the flash
+static int      s_prev_mode = -1;               // LNK-037: last phase_display_mode drawn
 static bool     s_wheel_valid_shown = false;
 static uint32_t s_last_update_ms = 0;
 
-// Tap targets (screen coords after the rotation-4 map). Task 9: nav only.
+// Tap targets (screen coords after the rotation-6 map (LNK-035)). Task 9: nav only.
 static const ui_rect_t STATUS_SET_RECT     = {116, 4, 52, 28};   // "SET" on status
 static const ui_rect_t SETTINGS_BACK_RECT  = {8, 4, 40, 28};     // "<" top-left
 static const ui_rect_t SETTINGS_WRITE_RECT = {8, 272, 156, 40};  // Write & Reboot
@@ -143,6 +147,7 @@ static void draw_status(void) {
     s_bpm_shown[0] = '\0';
     s_ip_shown[0]  = '\0';
     s_prev_mx = -1;
+    s_prev_beat = -1;
     s_wheel_valid_shown = false;
 }
 
@@ -310,14 +315,77 @@ static void enter_keyboard(void) {
     draw_keyboard();
 }
 
+// LNK-036: paint the phase indicator. Called every loop (not the 10 Hz text throttle)
+// so the beat flash lands on the beat instead of up to a throttle-length behind it.
+// Mode 0 = sweeping marker; mode 1 = beat-flash dot: light on each beat (accent colour
+// on the bar-1 downbeat, beat colour otherwise) then blank to black between beats so
+// each beat reads as a distinct flash.
+#define DOT_FLASH_ON_MS 70
+static void render_phase_indicator(const TempoSnapshot &ts, uint32_t now) {
+    bool valid = ts.valid;                          // snapshot: valid ⇒ phase >= 0
+    if (g_config.phase_display_mode != s_prev_mode) {  // LNK-037: /live mode switch — clear
+        s_lcd.fillCircle(WHEEL_CX, WHEEL_CY, WHEEL_R - 1, TFT_BLACK);
+        s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);
+        s_prev_mx = -1; s_prev_beat = -1; s_flash_on = false;
+        s_prev_mode = g_config.phase_display_mode;
+    }
+    if (valid != s_wheel_valid_shown) {            // state change: clear interior once
+        s_lcd.fillCircle(WHEEL_CX, WHEEL_CY, WHEEL_R - 1, TFT_BLACK);
+        s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);
+        s_prev_mx = -1; s_prev_beat = -1; s_flash_on = false;
+        if (!valid) {                               // "syncing" once on entering invalid
+            s_lcd.setTextColor(TFT_ORANGE, TFT_BLACK);
+            s_lcd.setTextSize(1);
+            s_lcd.setCursor(WHEEL_CX - 21, WHEEL_CY - 3);
+            s_lcd.print("syncing");
+        }
+        s_wheel_valid_shown = valid;
+    }
+    if (!valid) return;
+
+    if (g_config.phase_display_mode == 1) {
+        int beat = (int)ts.phase;                   // 0..quantum-1; 0 = downbeat
+        if (beat != s_prev_beat) {                  // beat onset: light the dot
+            uint32_t c = (beat == 0) ? (uint32_t)g_config.dot_accent_color
+                                     : (uint32_t)g_config.dot_beat_color;
+            uint16_t c565 = s_lcd.color565((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+            s_lcd.fillCircle(WHEEL_CX, WHEEL_CY, WHEEL_R - 4, c565);
+            s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);  // repair outline
+            s_prev_beat = beat;
+            s_flash_on = true;
+            s_flash_off_at_ms = now + DOT_FLASH_ON_MS;
+        } else if (s_flash_on && (int32_t)(now - s_flash_off_at_ms) >= 0) {
+            s_lcd.fillCircle(WHEEL_CX, WHEEL_CY, WHEEL_R - 1, TFT_BLACK);  // blank between beats
+            s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);
+            s_flash_on = false;
+        }
+    } else {
+        float ang = ui_phase_angle(ts.phase, (float)ts.quantum);
+        float rad = (ang - 90.0f) * 0.01745329f;   // deg->rad; 0deg at top
+        int mx = WHEEL_CX + (int)(cosf(rad) * (WHEEL_R - 8));
+        int my = WHEEL_CY + (int)(sinf(rad) * (WHEEL_R - 8));
+        if (mx != s_prev_mx || my != s_prev_my) {
+            if (s_prev_mx >= 0) s_lcd.fillCircle(s_prev_mx, s_prev_my, 7, TFT_BLACK);
+            s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);  // repair outline
+            s_lcd.fillCircle(mx, my, 6, TFT_GREEN);
+            s_prev_mx = mx; s_prev_my = my;
+        }
+    }
+}
+
 void touch_display_update(void) {
     if (s_screen != SCREEN_STATUS) return;
     uint32_t now = millis();
-    if (now - s_last_update_ms < 100) return;   // ~10 Hz is plenty for status
-    s_last_update_ms = now;
 
     bool active = tempo_source_active();
     TempoSnapshot ts; tempo_snapshot_read(&ts);
+
+    // Phase indicator every call (LNK-036) so the beat flash tracks the beat; the
+    // text below stays at ~10 Hz.
+    render_phase_indicator(ts, now);
+
+    if (now - s_last_update_ms < 100) return;   // ~10 Hz is plenty for the text
+    s_last_update_ms = now;
 
     // BPM number — repaint only when the shown text changes (no flicker).
     char bpm[8];
@@ -346,32 +414,6 @@ void touch_display_update(void) {
         strncpy(s_ip_shown, ipstr, sizeof s_ip_shown - 1);
         s_ip_shown[sizeof s_ip_shown - 1] = '\0';
     }
-
-    // Phase wheel: sweeping marker once phase is valid, else "syncing".
-    bool valid = ts.valid;                          // snapshot: valid ⇒ phase >= 0
-    if (valid != s_wheel_valid_shown) {            // state change: clear interior
-        s_lcd.fillCircle(WHEEL_CX, WHEEL_CY, WHEEL_R - 1, TFT_BLACK);
-        s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);
-        s_prev_mx = -1;
-        s_wheel_valid_shown = valid;
-    }
-    if (valid) {
-        float ang = ui_phase_angle(ts.phase, (float)ts.quantum);
-        float rad = (ang - 90.0f) * 0.01745329f;   // deg->rad; 0deg at top
-        int mx = WHEEL_CX + (int)(cosf(rad) * (WHEEL_R - 8));
-        int my = WHEEL_CY + (int)(sinf(rad) * (WHEEL_R - 8));
-        if (mx != s_prev_mx || my != s_prev_my) {
-            if (s_prev_mx >= 0) s_lcd.fillCircle(s_prev_mx, s_prev_my, 7, TFT_BLACK);
-            s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);  // repair outline
-            s_lcd.fillCircle(mx, my, 6, TFT_GREEN);
-            s_prev_mx = mx; s_prev_my = my;
-        }
-    } else {
-        s_lcd.setTextColor(TFT_ORANGE, TFT_BLACK);
-        s_lcd.setTextSize(1);
-        s_lcd.setCursor(WHEEL_CX - 21, WHEEL_CY - 3);
-        s_lcd.print("syncing");
-    }
 }
 
 static bool axs_read(axs_touch_t *t) {
@@ -387,7 +429,10 @@ static bool axs_read(axs_touch_t *t) {
 
 void touch_display_begin(void) {
     s_lcd.init();
-    s_lcd.setRotation(4);
+    s_lcd.setRotation(6);      // LNK-035: 180deg from rotation 4 so the USB cable
+                               // exits downward when the unit is hand-held. Drawing
+                               // is in screen space (LovyanGFX remaps); only the
+                               // touch transform below flips to match.
     backlight_on();            // manual GPIO46 HIGH — LovyanGFX Light_PWM/LEDC
                                // failed to drive the backlight in the full build
     draw_splash();
@@ -403,9 +448,10 @@ void touch_display_begin(void) {
 }
 
 void touch_display_tick(void) {
-    // Poll the AXS5106L and dispatch taps. Coordinates are mapped to screen
-    // space with LNK-014's rotation-4 transform (X direct, Y inverted). One tap
-    // per press: act on the touch-down edge, rearm on release.
+    // Poll the AXS5106L and dispatch taps. Coordinates are mapped to screen space
+    // with the rotation-6 transform (LNK-035, 180deg from LNK-014's rotation 4): both
+    // axes flip vs rotation 4, so X is inverted and Y maps direct. One tap per press:
+    // act on the touch-down edge, rearm on release.
     static bool s_touch_down = false;
 
     axs_touch_t t;
@@ -414,8 +460,8 @@ void touch_display_tick(void) {
 
     if (touched && !s_touch_down) {
         s_touch_down = true;
-        int x = t.points[0].x;                 // rotation-4: X maps direct,
-        int y = 319 - t.points[0].y;           //             Y is inverted
+        int x = 171 - t.points[0].x;           // rotation-6: X inverted (panel w=172),
+        int y = t.points[0].y;                 //             Y maps direct
         if (s_screen == SCREEN_STATUS) {
             if (ui_hit(&STATUS_SET_RECT, 1, x, y) >= 0) enter_settings();
         } else if (s_screen == SCREEN_SETTINGS) {

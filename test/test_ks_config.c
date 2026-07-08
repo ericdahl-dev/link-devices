@@ -141,8 +141,29 @@ void test_metronome_volume_and_voice(void) {
     TEST_ASSERT_FALSE(ks_config_set(&c, "metro_voice", "3"));  // 0..2
 }
 
+// ARC-016: the live-safe copy carries the no-reboot fields but never WiFi creds.
+void test_live_safe_copy_carries_live_fields_not_wifi(void) {
+    KsConfig live; ks_config_defaults(&live);
+    strcpy(live.wifi_ssid, "home");        // dst keeps its own creds
+    KsConfig cand; ks_config_defaults(&cand);
+    strcpy(cand.wifi_ssid, "SHOULD_NOT_COPY");
+    cand.led_enable = 1; cand.led_brightness = 42; cand.metronome_voice = 2;
+    cand.clock[1].enable = 1; cand.clock[1].cable = 3; cand.clock[1].ppqn = 24;
+
+    ks_config_live_safe_copy(&live, &cand);
+
+    TEST_ASSERT_EQUAL_STRING("home", live.wifi_ssid);   // creds untouched (reboot-only)
+    TEST_ASSERT_EQUAL_INT(1, live.led_enable);          // live fields carried
+    TEST_ASSERT_EQUAL_INT(42, live.led_brightness);
+    TEST_ASSERT_EQUAL_INT(2, live.metronome_voice);
+    TEST_ASSERT_EQUAL_INT(1, live.clock[1].enable);
+    TEST_ASSERT_EQUAL_INT(3, live.clock[1].cable);
+    TEST_ASSERT_EQUAL_INT(24, live.clock[1].ppqn);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_live_safe_copy_carries_live_fields_not_wifi);
     RUN_TEST(test_defaults);
     RUN_TEST(test_output_defaults);
     RUN_TEST(test_set_ssid_and_pass);

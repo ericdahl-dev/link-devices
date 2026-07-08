@@ -67,36 +67,19 @@ void test_trigger_gated_by_active(void) {
 }
 
 /* ---- epoch reset (LNK-026 bug 1) --------------------------------------- */
+// ARC-011: the epoch DETECTION + debounce moved to session_timeline
+// (test_session_timeline.c). The session just executes a confirmed reset.
 
-void test_epoch_reset_on_backward_jump(void) {
-    // prime with a timeline, then a big backward time_origin jump = re-origin.
-    link_session_on_timeline(&s, true, 510000000, acts, 8);     // prime
-    int n = link_session_on_timeline(&s, true, 200000, acts, 8); // jumps back ~510s
+void test_epoch_reset_drops_xform_and_rearms(void) {
+    start(0xC0A80105, 20808, 1000);                         // have a ref + a schedule
+    int n = link_session_on_epoch_reset(&s, acts, 8);
     TEST_ASSERT_EQUAL_INT(1, n);
     TEST_ASSERT_EQUAL_INT(LS_RESET_XFORM, acts[0].type);
-    TEST_ASSERT_FALSE(s.have_ref);                              // forces re-target
-    TEST_ASSERT_EQUAL_INT64(0, s.next_measure_us);             // re-measure now
+    TEST_ASSERT_FALSE(s.have_ref);                          // forces re-target
+    TEST_ASSERT_EQUAL_INT64(0, s.next_measure_us);         // re-measure now
     // ...and the next trigger immediately starts a fresh attempt (due, now >= 0)
     int m = link_session_on_trigger(&s, true, 0xC0A80105, 20808, 100, false, acts, 8);
     TEST_ASSERT_EQUAL_INT(3, m);
-}
-
-void test_no_reset_on_small_or_forward_step(void) {
-    link_session_on_timeline(&s, true, 1000000, acts, 8);          // prime
-    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 1500000, acts, 8)); // forward
-    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 1400000, acts, 8)); // small back (<1s)
-}
-
-void test_first_timeline_primes_no_reset(void) {
-    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, true, 5, acts, 8)); // no last_origin yet
-    TEST_ASSERT_TRUE(s.have_last_origin);
-}
-
-void test_invalid_timeline_is_noop(void) {
-    link_session_on_timeline(&s, true, 5000000, acts, 8);   // prime (5 s)
-    TEST_ASSERT_EQUAL_INT(0, link_session_on_timeline(&s, false, 0, acts, 8));
-    // a real >1s backward jump after the no-op still fires (last_origin untouched)
-    TEST_ASSERT_EQUAL_INT(1, link_session_on_timeline(&s, true, 5, acts, 8));
 }
 
 /* ---- pong -------------------------------------------------------------- */
@@ -159,10 +142,7 @@ int main(void) {
     RUN_TEST(test_due_timer_retriggers);
     RUN_TEST(test_different_peer_retriggers);
     RUN_TEST(test_trigger_gated_by_active);
-    RUN_TEST(test_epoch_reset_on_backward_jump);
-    RUN_TEST(test_no_reset_on_small_or_forward_step);
-    RUN_TEST(test_first_timeline_primes_no_reset);
-    RUN_TEST(test_invalid_timeline_is_noop);
+    RUN_TEST(test_epoch_reset_drops_xform_and_rearms);
     RUN_TEST(test_pong_not_ready_repings_with_prev_ghost);
     RUN_TEST(test_pong_ready_commits);
     RUN_TEST(test_watchdog_silent_below_threshold);

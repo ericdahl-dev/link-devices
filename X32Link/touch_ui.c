@@ -59,31 +59,20 @@ void ui_ip_apply(char *buf, size_t cap, char key) {
 
 void ui_apply_settings_tap(AppConfig *cfg, int field_id) {
     if (!cfg) return;
+    // ARC-012: every field goes through app_config_set — the ranges (quantum 1-16,
+    // slot <= model max via config_set_model, input_source 0/1) live only in
+    // config_validate now, not inline here. Out-of-range taps (inc past 16, an
+    // unavailable slot) are simply rejected and leave cfg unchanged.
     switch (field_id) {
-        case UI_F_SRC_LINK:
-            cfg->input_source = 0;
-            break;
-        case UI_F_SRC_MIDI:
-            cfg->input_source = 1;
-            break;
-        case UI_F_MODEL_XR:
-        case UI_F_MODEL_X32:
-            // LNK-032: model→slot clamp lives in the shared pure helper.
-            config_set_model(cfg, (field_id == UI_F_MODEL_X32) ? MODEL_X32 : MODEL_XR18);
-            break;
-        case UI_F_QUANTUM_INC:
-            if (cfg->quantum_beats < 16) cfg->quantum_beats++;
-            break;
-        case UI_F_QUANTUM_DEC:
-            if (cfg->quantum_beats > 1) cfg->quantum_beats--;
-            break;
+        case UI_F_SRC_LINK:  app_config_set(cfg, ACF_INPUT_SOURCE, 0); break;
+        case UI_F_SRC_MIDI:  app_config_set(cfg, ACF_INPUT_SOURCE, 1); break;
+        case UI_F_MODEL_XR:  app_config_set(cfg, ACF_MODEL, MODEL_XR18); break;
+        case UI_F_MODEL_X32: app_config_set(cfg, ACF_MODEL, MODEL_X32);  break;
+        case UI_F_QUANTUM_INC: app_config_set(cfg, ACF_QUANTUM_BEATS, cfg->quantum_beats + 1); break;
+        case UI_F_QUANTUM_DEC: app_config_set(cfg, ACF_QUANTUM_BEATS, cfg->quantum_beats - 1); break;
         default:
-            if (field_id >= UI_F_SLOT_1 && field_id <= UI_F_SLOT_8) {
-                int slot = field_id - UI_F_SLOT_1 + 1;
-                if (slot <= config_model_slot_max(cfg->model)) {
-                    cfg->fx_slot = slot;
-                }
-            }
+            if (field_id >= UI_F_SLOT_1 && field_id <= UI_F_SLOT_8)
+                app_config_set(cfg, ACF_FX_SLOT, field_id - UI_F_SLOT_1 + 1);
             break;
     }
 }

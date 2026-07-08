@@ -51,19 +51,17 @@ typedef struct {
     int64_t  last_send_us;         // last ping send time (drives the watchdog)
     int      consecutive_timeouts; // silence watchdog fires this many times -> abandon
     int64_t  next_measure_us;      // when the periodic re-measure is due
-    bool     have_last_origin;     // seen a timeline yet (for epoch-reset detection)?
-    int64_t  last_time_origin_us;
 } LinkSession;
 
 // Reset all session state (call from the glue's begin()).
 void link_session_reset(LinkSession* s);
 
-// Timeline gossip observed this poll. tl_valid=false is a no-op (no timeline
-// yet). On a genuine re-origin (time_origin jumps backward past the threshold)
-// emits LS_RESET_XFORM and arms an immediate re-measure (forgets the ref, zeroes
-// next_measure). Returns the number of actions written to out[0..max).
-int link_session_on_timeline(LinkSession* s, bool tl_valid, int64_t time_origin_us,
-                             LinkSessionAct* out, int max);
+// ARC-011: a genuine transport re-origin has been confirmed upstream (the settled-
+// timeline debounce in session_timeline, driven by link_protocol). Emit LS_RESET_XFORM
+// and arm an immediate re-measure (forget the ref, zero next_measure). The epoch
+// detection + debounce no longer live here — link_proto_epoch_reset_pending() gates
+// this call. Returns action count.
+int link_session_on_epoch_reset(LinkSession* s, LinkSessionAct* out, int max);
 
 // Trigger check each poll. peer_found + {ip,port} come from
 // link_proto_peer_endpoint(); active mirrors link_measurement_active(). Starts a
