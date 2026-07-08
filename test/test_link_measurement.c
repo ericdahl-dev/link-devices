@@ -406,6 +406,61 @@ void test_attempt_end_success_with_no_samples_leaves_xform_invalid(void) {
     TEST_ASSERT_FALSE(link_measurement_current_xform().valid);
 }
 
+/* ---------------------------------------------------------------------- */
+/* have_phase_estimate — the honest phase-validity seam (ARC-002).         */
+/* A committed, trustworthy xform exists. NOT gated on active().           */
+/* ---------------------------------------------------------------------- */
+
+void test_have_phase_estimate_false_initially(void) {
+    TEST_ASSERT_FALSE(link_measurement_have_phase_estimate());
+}
+
+// The bug guard: an attempt in flight (active) with nothing committed yet is
+// NOT a phase estimate. This is exactly the state the old active()-gating got
+// wrong (the "flashing dot").
+void test_have_phase_estimate_false_while_attempt_in_flight(void) {
+    link_measurement_attempt_begin();
+    TEST_ASSERT_TRUE(link_measurement_active());            // attempt is live
+    TEST_ASSERT_FALSE(link_measurement_have_phase_estimate());  // but no estimate
+}
+
+void test_have_phase_estimate_true_after_successful_commit(void) {
+    link_measurement_attempt_begin();
+    LinkPongFields f = {0};
+    f.has_ghost_time = true; f.has_host_time = true; f.ghost_time_us = 42;
+    link_measurement_add_pong_samples(0, &f);
+    link_measurement_attempt_end(true);
+    TEST_ASSERT_TRUE(link_measurement_have_phase_estimate());
+}
+
+// A committed estimate stays trustworthy across a later failed attempt, and
+// the in-flight retry never flips the estimate off.
+void test_have_phase_estimate_survives_failed_reattempt(void) {
+    link_measurement_attempt_begin();
+    LinkPongFields f = {0};
+    f.has_ghost_time = true; f.has_host_time = true; f.ghost_time_us = 42;
+    link_measurement_add_pong_samples(0, &f);
+    link_measurement_attempt_end(true);
+    TEST_ASSERT_TRUE(link_measurement_have_phase_estimate());
+
+    link_measurement_attempt_begin();                          // retry starts
+    TEST_ASSERT_TRUE(link_measurement_have_phase_estimate());   // estimate holds
+    link_measurement_attempt_end(false);                       // retry fails
+    TEST_ASSERT_TRUE(link_measurement_have_phase_estimate());   // still holds
+}
+
+void test_have_phase_estimate_false_after_reset(void) {
+    link_measurement_attempt_begin();
+    LinkPongFields f = {0};
+    f.has_ghost_time = true; f.has_host_time = true; f.ghost_time_us = 42;
+    link_measurement_add_pong_samples(0, &f);
+    link_measurement_attempt_end(true);
+    TEST_ASSERT_TRUE(link_measurement_have_phase_estimate());
+
+    link_measurement_reset();
+    TEST_ASSERT_FALSE(link_measurement_have_phase_estimate());
+}
+
 void test_reset_clears_everything(void) {
     link_measurement_attempt_begin();
     LinkPongFields f = {0};
@@ -456,6 +511,11 @@ int main(void) {
     RUN_TEST(test_attempt_end_success_commits_median_as_xform);
     RUN_TEST(test_attempt_end_failure_leaves_existing_xform_untouched);
     RUN_TEST(test_attempt_end_success_with_no_samples_leaves_xform_invalid);
+    RUN_TEST(test_have_phase_estimate_false_initially);
+    RUN_TEST(test_have_phase_estimate_false_while_attempt_in_flight);
+    RUN_TEST(test_have_phase_estimate_true_after_successful_commit);
+    RUN_TEST(test_have_phase_estimate_survives_failed_reattempt);
+    RUN_TEST(test_have_phase_estimate_false_after_reset);
     RUN_TEST(test_reset_clears_everything);
     return UNITY_END();
 }
