@@ -51,6 +51,12 @@ bool ks_config_valid(const KsConfig* c);
 // saved one.
 bool ks_config_set(KsConfig* c, const char* key, const char* value);
 
+// ARC-016: the one owner of "which fields apply live" (no reboot). Copies exactly the
+// live-safe fields from a validated candidate into the running config; the /live
+// handler calls this instead of an inline field list. WiFi creds and any reboot-only
+// field are deliberately excluded (those go through Save + reboot).
+void ks_config_live_safe_copy(KsConfig* dst, const KsConfig* src);
+
 #ifdef __cplusplus
 }
 #endif
