@@ -25,14 +25,17 @@ CLOCKTICK = ../X32Link/clock_ticker.c
 METRO   = ../X32Link/metronome.c
 BEATSYNTH = ../X32Link/beat_synth.c
 SESSION = ../X32Link/link_measurement_session.c
+SESSIONTL = ../X32Link/session_timeline.c
+PUMP = ../X32Link/link_measure_pump.c
 USBMIDIPACK = ../X32Link/usb_midi_pack.c
 BEATCLOCK = ../X32Link/beat_clock.c
 BEATSOURCE = ../X32Link/beat_source.c
 P4STATUS = ../KitchenSync/main/ks_status.c
 P4CONFIG = ../KitchenSync/main/ks_config.c
 P4FORM  = ../KitchenSync/main/ks_form.c
+KSTICK  = ../KitchenSync/main/ks_tick.c
 MIDICLOCKIN = ../KitchenSync/main/midi_clock_in.c
-WIFIFALLBACK = ../KitchenSync/main/wifi_fallback.c
+WIFICONNPOLICY = ../X32Link/wifi_conn_policy.c
 TRANSPORT = ../X32Link/transport.c
 CLOCKOUTPUT = ../X32Link/clock_output.c
 MVOICE = ../X32Link/metronome_voice.c
@@ -41,7 +44,7 @@ METROSTRIP = ../X32Link/metro_strip.c
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_fallback
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -61,6 +64,9 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_clock_ticker
 	./test_beat_synth
 	./test_link_measurement_session
+	./test_session_timeline
+	./test_link_measure_pump
+	./test_ks_tick
 	./test_usb_midi_pack
 	./test_beat_clock
 	./test_beat_source
@@ -73,20 +79,20 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_swing
 	./test_midi_clock_in
 	./test_metro_strip
-	./test_wifi_fallback
+	./test_wifi_conn_policy
 	./test_metronome
 	./check_docs.sh
 
 test_bpm_tracker: test_bpm_tracker.c $(TRACKER) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
-test_link_protocol: test_link_protocol.c $(PROTO) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_link_protocol: test_link_protocol.c $(PROTO) $(SESSIONTL) $(PHASE) $(UNITY)
+	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 test_link_measurement: test_link_measurement.c $(MEAS) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
-test_link_phase: test_link_phase.c $(PHASE) $(PROTO) $(UNITY)
+test_link_phase: test_link_phase.c $(PHASE) $(PROTO) $(SESSIONTL) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 test_led_phase: test_led_phase.c $(LEDPHASE) $(UNITY)
@@ -134,7 +140,13 @@ test_clock_ticker: test_clock_ticker.c $(CLOCKTICK) $(UNITY)
 test_beat_synth: test_beat_synth.c $(BEATSYNTH) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
-test_link_measurement_session: test_link_measurement_session.c $(SESSION) $(PHASE) $(PROTO) $(UNITY)
+test_link_measurement_session: test_link_measurement_session.c $(SESSION) $(PHASE) $(PROTO) $(SESSIONTL) $(UNITY)
+	$(CC) $(CFLAGS) $^ -o $@ -lm
+
+test_session_timeline: test_session_timeline.c $(SESSIONTL) $(PHASE) $(PROTO) $(UNITY)
+	$(CC) $(CFLAGS) $^ -o $@ -lm
+
+test_link_measure_pump: test_link_measure_pump.c $(PUMP) $(MEAS) $(SESSION) $(SESSIONTL) $(PHASE) $(PROTO) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 test_usb_midi_pack: test_usb_midi_pack.c $(USBMIDIPACK) $(UNITY)
@@ -143,7 +155,7 @@ test_usb_midi_pack: test_usb_midi_pack.c $(USBMIDIPACK) $(UNITY)
 test_beat_clock: test_beat_clock.c $(BEATCLOCK) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
-test_beat_source: test_beat_source.c $(BEATSOURCE) $(BEATCLOCK) $(PHASE) $(PROTO) $(MEAS) $(UNITY)
+test_beat_source: test_beat_source.c $(BEATSOURCE) $(BEATCLOCK) $(PHASE) $(PROTO) $(MEAS) $(SESSIONTL) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 test_ks_status: test_ks_status.c $(P4STATUS) $(UNITY)
@@ -179,5 +191,8 @@ test_swing: test_swing.c $(SWING) $(UNITY)
 test_metro_strip: test_metro_strip.c $(METROSTRIP) $(UNITY)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
-test_wifi_fallback: test_wifi_fallback.c $(WIFIFALLBACK) $(UNITY)
-	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@
+test_wifi_conn_policy: test_wifi_conn_policy.c $(WIFICONNPOLICY) $(UNITY)
+	$(CC) $(CFLAGS) $^ -o $@
+
+test_ks_tick: test_ks_tick.c $(KSTICK) $(BEATSOURCE) $(BEATCLOCK) $(CLOCKOUTPUT) $(CLOCKTICK) $(SWING) $(METRO) $(TRANSPORT) $(PHASE) $(PROTO) $(SESSIONTL) $(MEAS) $(UNITY)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@ -lm

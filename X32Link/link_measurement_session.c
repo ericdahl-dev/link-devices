@@ -1,28 +1,21 @@
 // Pure Link measurement-session orchestrator — see link_measurement_session.h.
 #include "link_measurement_session.h"
 #include "link_measurement.h"   // LINK_MEASUREMENT_READY_SAMPLES
-#include "link_phase.h"         // link_phase_timeline_epoch_reset()
 #include <string.h>
 
 void link_session_reset(LinkSession* s) {
     memset(s, 0, sizeof(*s));
 }
 
-int link_session_on_timeline(LinkSession* s, bool tl_valid, int64_t time_origin_us,
-                             LinkSessionAct* out, int max) {
-    if (!tl_valid) return 0;   // no timeline yet — don't touch epoch tracking
+int link_session_on_epoch_reset(LinkSession* s, LinkSessionAct* out, int max) {
+    // ARC-011: the settled-timeline owner (session_timeline via link_protocol) has
+    // already debounced and confirmed a genuine transport re-origin (LNK-026 bug 1 /
+    // P4-028). Drop the committed xform (measured against the old ghost epoch), forget
+    // the reference peer, and arm an immediate re-measure against the new epoch.
     int n = 0;
-    if (s->have_last_origin &&
-        link_phase_timeline_epoch_reset(s->last_time_origin_us, time_origin_us)) {
-        // A transport re-origin: the committed xform was measured against the old
-        // ghost epoch and now reads garbage. Drop it, forget the ref, and arm an
-        // immediate re-measure (LNK-026 bug 1).
-        if (n < max) out[n++].type = LS_RESET_XFORM;
-        s->have_ref        = false;
-        s->next_measure_us = 0;
-    }
-    s->last_time_origin_us = time_origin_us;
-    s->have_last_origin    = true;
+    if (n < max) out[n++].type = LS_RESET_XFORM;
+    s->have_ref        = false;
+    s->next_measure_us = 0;
     return n;
 }
 

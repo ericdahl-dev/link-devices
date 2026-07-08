@@ -211,6 +211,32 @@ void metronome_audio_start(int volume, int voice)
 
 bool metronome_audio_ready(void) { return s_ready; }
 
+/* P4-029: re-apply volume + voice at runtime (no reboot) so the web /live path can
+ * preview them like the LED colours. No-op until _ready() — the codec/I2S are only
+ * brought up at boot when the metronome was enabled, so enabling it still needs a
+ * reboot; only volume/voice of an already-running metronome are live. Re-renders the
+ * two short bursts and re-sets the codec volume; a click landing mid-re-render is at
+ * worst one slightly-off burst, which is fine for a user-driven config edit. */
+void metronome_audio_set(int volume, int voice)
+{
+    if (!s_ready) return;
+    s_volume = volume < 0 ? 0 : (volume > 100 ? 100 : volume);
+    es8311_voice_volume_set(s_codec, s_volume, NULL);
+
+    float click_hz, accent_hz;
+    int   click_ms, accent_ms;
+    metronome_voice_params(voice, &click_hz, &click_ms, &accent_hz, &accent_ms);
+    int cf = SAMPLE_RATE * click_ms  / 1000;
+    int af = SAMPLE_RATE * accent_ms / 1000;
+    if (cf > MAX_FRAMES) cf = MAX_FRAMES;
+    if (af > MAX_FRAMES) af = MAX_FRAMES;
+    render_burst(s_click,  cf, click_hz,  CLICK_AMP);
+    render_burst(s_accent, af, accent_hz, ACCENT_AMP);
+    s_click_frames  = cf;   /* publish lengths after the buffers are rendered */
+    s_accent_frames = af;
+    ESP_LOGI(TAG, "metronome audio live: vol=%d voice=%d", s_volume, voice);
+}
+
 void metronome_audio_click(bool accent)
 {
     if (!s_ready) return;

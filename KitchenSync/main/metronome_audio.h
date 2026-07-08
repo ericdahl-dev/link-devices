@@ -17,6 +17,11 @@ void metronome_audio_start(int volume, int voice);
 // True once the codec + I2S came up successfully.
 bool metronome_audio_ready(void);
 
+// P4-029: re-apply volume (0..100) + voice preset at runtime, no reboot (the web
+// /live path). No-op until _ready() — enabling a metronome that was off at boot
+// still needs a reboot to bring up the codec.
+void metronome_audio_set(int volume, int voice);
+
 // Enqueue one click for the player task. Non-blocking (drops if the queue is
 // full, which shouldn't happen at musical tempos); a no-op until _ready().
 // accent = the louder/higher bar-downbeat tone.

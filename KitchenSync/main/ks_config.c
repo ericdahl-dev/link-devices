@@ -144,3 +144,18 @@ bool ks_config_set(KsConfig* c, const char* key, const char* value) {
     }
     return false;
 }
+
+// ARC-016: the single owner of the live-safe field set — see ks_config.h.
+void ks_config_live_safe_copy(KsConfig* dst, const KsConfig* src) {
+    dst->clock_out_enable = src->clock_out_enable;
+    dst->metronome_accent = src->metronome_accent;
+    dst->metronome_volume = src->metronome_volume;
+    dst->metronome_voice  = src->metronome_voice;
+    dst->led_enable       = src->led_enable;
+    dst->led_brightness   = src->led_brightness;
+    dst->led_mode         = src->led_mode;
+    dst->led_fade         = src->led_fade;
+    dst->led_beat_color   = src->led_beat_color;
+    dst->led_accent_color = src->led_accent_color;
+    for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) dst->clock[o] = src->clock[o];
+}
