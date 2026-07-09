@@ -129,6 +129,18 @@ void test_unknown_key(void) {
     TEST_ASSERT_FALSE(ks_config_set(&c, "bogus", "x"));
 }
 
+void test_follow_beat_default_off(void) {
+    TEST_ASSERT_EQUAL_INT(0, c.follow_beat_enable);
+}
+
+void test_follow_beat_set(void) {
+    TEST_ASSERT_TRUE(ks_config_set(&c, "follow_beat", "1"));
+    TEST_ASSERT_EQUAL_INT(1, c.follow_beat_enable);
+    TEST_ASSERT_TRUE(ks_config_set(&c, "follow_beat", "0"));
+    TEST_ASSERT_EQUAL_INT(0, c.follow_beat_enable);
+    TEST_ASSERT_FALSE(ks_config_set(&c, "follow_beat", "2"));  // 0/1 only
+}
+
 void test_metronome_volume_and_voice(void) {
     TEST_ASSERT_EQUAL_INT(80, c.metronome_volume);   // default
     TEST_ASSERT_EQUAL_INT(0,  c.metronome_voice);
@@ -177,5 +189,7 @@ int main(void) {
     RUN_TEST(test_metronome_accent_toggle);
     RUN_TEST(test_metronome_volume_and_voice);
     RUN_TEST(test_unknown_key);
+    RUN_TEST(test_follow_beat_default_off);
+    RUN_TEST(test_follow_beat_set);
     return UNITY_END();
 }

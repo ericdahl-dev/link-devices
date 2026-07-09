@@ -10,6 +10,7 @@ void ks_config_defaults(KsConfig* c) {
     c->metronome_volume = 80;  // ES8311 codec volume
     c->metronome_voice  = 0;   // Tone (default)
     c->led_enable       = 0;   // visual metronome on the strip: default off
+    c->follow_beat_enable = 0;  // mic capture: default off (P4-020)
     c->led_brightness   = 60;  // % (P4-019)
     c->led_mode         = 0;   // chase
     c->led_fade         = 55;  // pulse dim across a beat
@@ -32,6 +33,7 @@ bool ks_config_valid(const KsConfig* c) {
     if (c->metronome_volume < 0 || c->metronome_volume > 100) return false;
     if (c->metronome_voice < 0 || c->metronome_voice > 2) return false;
     if (c->led_enable != 0 && c->led_enable != 1) return false;
+    if (c->follow_beat_enable != 0 && c->follow_beat_enable != 1) return false;
     if (c->led_brightness < 0 || c->led_brightness > 100) return false;
     if (c->led_mode < 0 || c->led_mode > 2) return false;
     if (c->led_fade < 0 || c->led_fade > 100) return false;
@@ -97,6 +99,12 @@ bool ks_config_set(KsConfig* c, const char* key, const char* value) {
         int v = atoi(value);
         if (v != 0 && v != 1) return false;
         c->led_enable = v;
+        return true;
+    }
+    if (strcmp(key, "follow_beat") == 0) {
+        int v = atoi(value);
+        if (v != 0 && v != 1) return false;
+        c->follow_beat_enable = v;
         return true;
     }
     if (strcmp(key, "led_bright") == 0) {
