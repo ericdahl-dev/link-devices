@@ -12,10 +12,15 @@
 //
 // Clock-driver asymmetry: TX and RX share one BCLK/WS pair, but only one
 // direction actually drives that shared clock -- the other rides along as a
-// passenger. TX (metronome) is the driver here: it's expected to be enabled
-// first and to stay enabled whenever RX (follow_beat) might be active, since
-// disabling the driver side would starve RX of its clock. Don't disable TX
-// while RX depends on it still running.
+// passenger. TX is the driver here. Hardware validation (2026-07-09) found
+// that gating TX-enable on the metronome FEATURE being on left RX with no
+// clock at all whenever the metronome was off -- i2s_channel_read() just
+// blocked forever, silently breaking the mic-only use case entirely. Fix:
+// audio_bus_init() unconditionally enables TX itself once the bus comes up,
+// independent of metronome_enable -- an always-running, nothing-queued TX
+// just emits silence (auto_clear). metronome_audio.c no longer enables TX at
+// all; it only renders/queues click bursts onto an already-running channel.
+// Don't reintroduce a metronome_enable-gated TX-enable -- that's the bug.
 //
 // Known limitation: audio_bus_init()'s failure paths don't roll back partial
 // state (a mid-sequence I2S/I2C failure leaks the already-created handle(s)
