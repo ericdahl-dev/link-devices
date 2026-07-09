@@ -86,15 +86,16 @@ static esp_err_t codec_init(void) {
     };
     e = es8311_init(s_codec, &clk, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16);
     if (e != ESP_OK) return e;
-    return es8311_sample_frequency_config(s_codec, AUDIO_BUS_SAMPLE_RATE * AUDIO_BUS_MCLK_MULTIPLE,
-                                           AUDIO_BUS_SAMPLE_RATE);
-    // NOTE: es8311_microphone_config()'s bool param is `digital_mic` -- confirmed
-    // against the vendored es8311.h (KitchenSync/managed_components/espressif__es8311/
-    // include/es8311.h): "Set to true for digital microphone". It selects analog vs.
-    // digital mic input mode, NOT a mic on/off gate -- metronome_audio.c's existing
-    // codec_init() already calls it with `false` (analog) even though that path is
-    // TX-only, so `false` is safe there. Task 9 must call this here once the board's
-    // actual mic wiring (analog vs. digital) is confirmed against hardware.
+    e = es8311_sample_frequency_config(s_codec, AUDIO_BUS_SAMPLE_RATE * AUDIO_BUS_MCLK_MULTIPLE,
+                                        AUDIO_BUS_SAMPLE_RATE);
+    if (e != ESP_OK) return e;
+
+    // digital_mic=false selects analog mic-in mode (vs. digital/PDM). Matches the
+    // pre-P4-020 metronome_audio.c precedent, which called this the same way even
+    // on its TX-only path -- assumed correct for this board's wiring, final
+    // confirmation against real hardware happens at the P4-020 hardware-validation
+    // step (see docs/plans/2026-07-09-p4-020-follow-beat-design.md).
+    return es8311_microphone_config(s_codec, false);
 }
 
 void audio_bus_init(void) {
