@@ -4,16 +4,12 @@
  * host-tested (X32Link/metronome.c); this file only makes sound.
  *
  * Hardware (Waveshare ESP32-P4-NANO): ES8311 codec (I2C addr 0x18) feeding an
- * NS4150B power amp. Pin map lifted from the Waveshare esp32-p4-platform
- * "12_I2SCodec" example (examples/esp-idf/12_I2SCodec/main/example_config.h):
- *
- *   I2C:  SCL=GPIO8   SDA=GPIO7   (I2C0, ES8311 @ 0x18)
- *   PA:   GPIO53      (NS4150B enable, active-high)
- *   I2S:  MCLK=GPIO13 BCLK=GPIO12 WS=GPIO10 DOUT=GPIO9 (DIN=GPIO11, mic, unused)
- *
- * None of these collide with the C6/ESP-Hosted SDIO pins (CLK18/CMD19/D14-17,
- * reset 54) or the USB-host Type-A port. These assumptions are LOGGED at boot so
- * the user can confirm against the board silkscreen if a click is silent.
+ * NS4150B power amp on GPIO53 (active-high enable), owned directly by this
+ * file. The I2C bus, I2S_NUM_0 channel, and codec bring-up (pin map, MCLK/
+ * BCLK/WS/DOUT/DIN, boot-time pin logging) moved to i2s_audio_bus.c (P4-020)
+ * -- that module is the single owner, shared with follow_beat_io.c's mic
+ * capture, since the two can't each independently master I2S_NUM_0. This
+ * file only enables the TX handle i2s_audio_bus.c already brought up.
  *
  * A short pre-rendered tone burst (sine + attack/release envelope, no pop) is
  * written from a dedicated player task on a queued click event, so the 1 ms
@@ -126,8 +122,9 @@ void metronome_audio_start(int volume, int voice)
     gpio_set_level(PIN_PA_ENABLE, 1);
 
     s_tx = audio_bus_tx();
-    es8311_voice_volume_set(audio_bus_codec(), s_volume, NULL);
-    esp_err_t e = i2s_channel_enable(s_tx);
+    esp_err_t e = es8311_voice_volume_set(audio_bus_codec(), s_volume, NULL);
+    if (e != ESP_OK) { ESP_LOGE(TAG, "codec volume set failed: %s -- metronome muted", esp_err_to_name(e)); return; }
+    e = i2s_channel_enable(s_tx);
     if (e != ESP_OK) { ESP_LOGE(TAG, "TX channel enable failed: %s -- metronome muted", esp_err_to_name(e)); return; }
 
     s_queue = xQueueCreate(4, sizeof(bool));
