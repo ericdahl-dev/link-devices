@@ -17,9 +17,18 @@ for the full design.
 ```sh
 cp LoraLink/lora_secrets.h.example LoraLink/lora_secrets.h   # fill in your WiFi creds
 arduino-cli lib install RadioLib U8g2
-arduino-cli compile --fqbn esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi LoraLink
-arduino-cli upload  --fqbn esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi -p <port> LoraLink
+arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=default,FlashSize=8M,PSRAM=disabled LoraLink
+arduino-cli upload  --fqbn esp32:esp32:esp32s3:CDCOnBoot=default,FlashSize=8M,PSRAM=disabled -p <port> LoraLink
 ```
+
+This board (Meshnology N30) has **8MB flash and no PSRAM** — different from
+X32Link's QT Py/Super Mini profile (16MB, PSRAM). It also has no native USB,
+only a CP2102 UART bridge, so `CDCOnBoot` must stay `default` (not `cdc`) or
+`Serial` output is silently routed to a USB peripheral this board doesn't
+wire up. Confirmed on-device: `CDCOnBoot=cdc` and `FlashSize=16M` together
+produced total silence on the serial console and a boot-time
+`spi_flash: Detected size(8192k) smaller than the size in the binary image
+header(16384k)` assert crash-loop respectively.
 
 To flash the **receiver** board, override the role before compiling:
 

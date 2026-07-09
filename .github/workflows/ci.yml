@@ -68,7 +68,13 @@ jobs:
     name: Firmware compile (LoraLink)
     runs-on: ubuntu-latest
     env:
-      FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+      # 8MB flash, no PSRAM (Meshnology N30 — different profile from X32Link's
+      # QT Py/Super Mini). CDCOnBoot must stay 'default': this board has no
+      # native USB, only a CP2102 UART bridge, so 'cdc' silently blackholes
+      # Serial. Confirmed on-device: CDCOnBoot=cdc gave a silent serial
+      # console; FlashSize=16M gave a boot-time spi_flash size-mismatch
+      # assert crash-loop.
+      FQBN: esp32:esp32:esp32s3:CDCOnBoot=default,FlashSize=8M,PSRAM=disabled
     steps:
       - uses: actions/checkout@v4
 

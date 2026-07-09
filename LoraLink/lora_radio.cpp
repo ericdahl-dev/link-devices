@@ -2,6 +2,7 @@
 #include "lora_config.h"
 #include <RadioLib.h>
 #include <Arduino.h>
+#include <SPI.h>
 
 static SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY);
 static volatile bool s_rx_flag = false;
@@ -13,6 +14,13 @@ static void onDio1Action() {
 }
 
 void lora_radio_begin() {
+    // RadioLib's Module only owns NSS/DIO1/RST/BUSY as plain GPIOs it drives
+    // directly - the SCK/MOSI/MISO lines belong to the global SPI peripheral,
+    // which defaults to this chip's default SPI pins unless told otherwise.
+    // Without this, radio.begin() silently talks to the wrong pins and hangs
+    // waiting for a response the SX1262 never sends.
+    SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
+
     int state = radio.begin(LORA_FREQ_MHZ, LORA_BANDWIDTH_KHZ,
                              LORA_SPREADING_FACTOR, LORA_CODING_RATE,
                              LORA_SYNC_WORD, LORA_TX_POWER_DBM);
