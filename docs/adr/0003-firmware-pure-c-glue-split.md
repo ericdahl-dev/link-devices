@@ -1,7 +1,14 @@
 # 3. ESP32 firmware splits pure-C logic from thin Arduino glue
 
 Date: 2026-07-03
-Status: accepted
+Status: accepted (sharing mechanism amended by [ADR-0007](0007-shared-pure-c-compiled-by-path.md))
+
+> **Amended 2026-07-09.** The pure-C / thin-glue split below stands unchanged.
+> Only the paragraph describing *how* shared files reach each firmware is stale:
+> `X32MidiClock/` was retired in LNK-024, so nothing is symlinked into it and the
+> `midi_*` files are now real files in `X32Link/`. Shared pure C is compiled by
+> path. The symlink-mistaken-for-a-copy risk listed in Consequences is likewise
+> retired. See ADR-0007.
 
 ## Context
 

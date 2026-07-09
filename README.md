@@ -21,9 +21,6 @@ preserved; recovery tag `pre-split-2026-07-04` on the old repo).
   **web-based OTA updates** (P4-017, dual-slot), and **MIDI clock IN** detection
   (publishing it back into Link is next). Reuses this repo's pure modules
   unchanged. See [`KitchenSync/README.md`](KitchenSync/README.md).
-- **X32MidiClock** (`X32MidiClock/`) — legacy standalone MIDI-clock sketch;
-  superseded by X32Link (retirement tracked in LNK-024). Shares C files with
-  X32Link via symlinks.
 - **X32_emulator** (`X32_emulator/`) — on-device X32 OSC emulator used for
   integration tests (also consumed by the CLI tests in the `behringer` repo).
 
@@ -46,8 +43,8 @@ CI (`.github/workflows/ci.yml`) runs the host suite + compiles X32Link (headless
 ## Tasks
 
 Own Ordna tracker in `tasks/` (prefixes: `LNK-` X32Link, `P4-` KitchenSync, `ARC-`
-cross-cutting firmware architecture, `ESP-` emulator, `MCK-` X32MidiClock;
-`.ordna/config.yaml`). The `behringer` monorepo keeps its `T-*` CLI tracker
+cross-cutting firmware architecture, `ESP-` emulator, `MCK-` the retired
+standalone MIDI-clock sketch, historical; `.ordna/config.yaml`). The `behringer` monorepo keeps its `T-*` CLI tracker
 separately.
 
 ## Credits

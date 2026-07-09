@@ -23,8 +23,8 @@ bridge and emulator only. Don't edit `cli/` when working here.
 
 | Action | Command |
 |---|---|
-| Compile | `arduino-cli compile --fqbn esp32:esp32:adafruit_qtpy_esp32s3_n4r2 X32Link` |
-| Flash   | `arduino-cli upload  --fqbn esp32:esp32:adafruit_qtpy_esp32s3_n4r2 -p /dev/ttyACM0 X32Link` |
+| Compile | `arduino-cli compile --fqbn esp32:esp32:adafruit_qtpy_esp32s3_n4r2:PartitionScheme=min_spiffs X32Link` |
+| Flash   | `arduino-cli upload  --fqbn esp32:esp32:adafruit_qtpy_esp32s3_n4r2:PartitionScheme=min_spiffs -p /dev/ttyACM0 X32Link` |
 | Host tests | `cd test && make`  (Unity; pure-logic suites, runs on the dev box) |
 
 Notes:
@@ -44,6 +44,22 @@ Notes:
 - Native-USB boards re-enumerate `/dev/ttyACM0` on reset; serial capture is
   flaky right after flashing. The web UI `/status` endpoint is the reliable
   way to read live BPM.
+- **`PartitionScheme=min_spiffs` is required for OTA** (hardware-verified
+  2026-07-09): the QT Py FQBN's default scheme is `tinyuf2_noota` — no second
+  app slot, so `/update` fails with `Partition Could Not be Found`. A USB
+  flash that changes the partition scheme also relocates NVS → config + WiFi
+  creds reset to first-boot defaults (AP fallback). Back up the config from
+  the device's `/` page before repartitioning; after it, one `/save` POST
+  restores it.
+- **Versioning (LNK-038):** `X32Link/fw_version.h` is the one source of truth
+  for `FW_VERSION` (shared by every firmware in this repo — KitchenSync via
+  include path, X32_emulator via symlink; the emulator's
+  `XVERSION "4.06"` is the *emulated console's* version, not ours — never
+  merge the two). Devices report it on the serial boot
+  banner + periodic status line, the web UI header/footer, `/status` JSON
+  (`"fw"` field — use this to audit deployed units), and the `/update` OTA
+  page. Release = bump `FW_VERSION` + `git tag v<FW_VERSION>` on that commit,
+  so any distributed .bin traces back to source.
 
 ## Mixer output
 
@@ -60,7 +76,7 @@ Notes:
 | `tempo_source.{h,cpp}` | the input **seam** — one interface, dispatches to Link or MIDI by `input_source` |
 | `link_listener.*` + `link_protocol.*` | Link adapter; `link_protocol.c` is our own ~100-line gossip parser (the vendored `lib/link/` SDK is **not** used at runtime) |
 | `link_measurement.{h,c}` + `link_measurement_session.{h,c}` + `link_measurement_io.cpp` | Link measurement (ping/pong) client. `link_measurement.c` = pure TLV build/parse + median/offset math; `link_measurement_session.c` = pure orchestrator (LNK-031: peer targeting, re-measure, epoch-reset, watchdog — the policy where LNK-026 lived, host-tested via an action list); `link_measurement_io.cpp` = thin WiFiUDP glue executing the session's actions — pinger-only, no PingResponder |
-| `midi_clock.*` · `midi_bpm.*` · `midi_bpm_calc.*` | USB-MIDI adapter; `midi_bpm_calc` is the pure, host-tested BPM math (symlinked from `X32MidiClock/`). `midi_clock` also owns the shared USBMIDI endpoint + `midi_clock_send_f8()` for clock OUT |
+| `midi_clock.*` · `midi_bpm.*` · `midi_bpm_calc.*` | USB-MIDI adapter; `midi_bpm_calc` is the pure, host-tested BPM math. `midi_clock` also owns the shared USBMIDI endpoint + `midi_clock_send_f8()` for clock OUT |
 | `clock_ticker.{h,c}` | LNK-027/028 shared pure tick engine: quantizes `tempo_source_beats_now()` to N PPQN pulses (phase-locked, re-primes on re-origin) + a `BarReset` tracker that fires once per bar boundary (analog reset pulse). Host-tested |
 | `beat_synth.{h,c}` | LNK-033 pure free-run beat generator (`60000/bpm` interval + edge-detect); `tempo_source_beat()` delegates to it. Host-tested |
 | `midi_clock_out.{h,c}` + `midi_clock_out_io.cpp` | LNK-027 Link→USB-MIDI clock OUT; `midi_clock_out.{h,c}` is a thin 24-PPQN adapter over `clock_ticker`, `midi_clock_out_io.cpp` is the 1ms FreeRTOS task + TinyUSB writes |
@@ -75,8 +91,12 @@ Notes:
 | `touch_ui.{h,c}` + `axs5106l.{h,c}` | pure, host-tested UI logic: `touch_ui` = hit-testing / value formatting / config-field taps / keypad buffer; `axs5106l` = AXS5106L touch-report parser |
 | `X32_emulator/` | X32 on-device emulator for integration tests |
 
-Shared C files are real in `X32Link/` and **symlinked** into `X32MidiClock/`
-(Arduino sketches must be flat dirs); the `midi_*` files are the reverse.
+Shared pure C lives real in `X32Link/` (ADR-0007 — arduino-cli compiles only the
+sketch root, so it can't move to `shared/`) and is **compiled by path**:
+KitchenSync lists it in `SRCS`, host tests in `test/Makefile`. Symlinking is only
+for a second flat Arduino sketch that needs the file in its own root — currently
+just `X32_emulator/fw_version.h`. The old `X32MidiClock/` sketch was retired in
+LNK-024 (2026-07-08); its `midi_*` files moved into `X32Link/`.
 
 ## Key facts that must stay exact (cross-check against code if editing)
 
@@ -87,10 +107,10 @@ Shared C files are real in `X32Link/` and **symlinked** into `X32MidiClock/`
 
 ## Ordna tasks
 
-`tasks/`, prefixes: `LNK-` (X32Link — the Link tempo firmware), `MCK-` (legacy
-standalone MIDI clock, superseded by X32Link — see LNK-024), `ESP-` (X32
-emulator), `ARC-` (cross-cutting firmware architecture), `P4-` (the planned
-ESP32-P4 hub tier). OSC node references live in
+`tasks/`, prefixes: `LNK-` (X32Link — the Link tempo firmware), `MCK-`
+(historical: the standalone MIDI-clock sketch, merged into X32Link by LNK-010
+and its directory retired by LNK-024), `ESP-` (X32 emulator), `ARC-`
+(cross-cutting firmware architecture), `P4-` (the planned ESP32-P4 hub tier). OSC node references live in
 `docs/xr18-xair-osc-cheatsheet.md` and `docs/x32-osc-protocol.md`.
 
 Non-Link ESP32 products (X32FaderDisp `FDR-`, X32SafeMutes `MUT-`, MidiOscIttt
