@@ -56,6 +56,32 @@ void test_detects_150_bpm(void) {
     TEST_ASSERT_TRUE(fabsf(out.bpm - 150.0f) < 3.0f);
 }
 
+// Regression test for the DC/mean-removal fix: a signal with a nonzero,
+// *sustained* baseline loudness between beats (unlike the click trains
+// above, which sit near zero/silent between clicks -- this is closer to
+// continuous rhythmic material like sustained/held notes) plus a short
+// louder pulse once per beat at a known BPM. Without mean-centering the
+// autocorrelation, the nonzero baseline term dominates every lag equally and
+// confidence collapses toward ~1.0 regardless of the pulse -- the detector
+// would never report valid on this kind of "never silent between beats"
+// real-world audio.
+void test_detects_120_bpm_with_nonzero_baseline(void) {
+    const float bpm         = 120.0f;
+    const int   period      = 8000;    // one beat every 0.5s at 16kHz
+    const int   pulse_len   = 300;     // short louder pulse at the top of each beat
+    const int16_t baseline  = 6000;    // nonzero DC floor between pulses (never silent)
+    const int16_t pulse_amp = 20000;
+    const int   n_samples   = 16000 * 10;
+
+    FollowBeatOut out = {0};
+    for (int i = 0; i < n_samples; i++) {
+        int16_t s = (i % period) < pulse_len ? pulse_amp : baseline;
+        out = follow_beat_push_sample(&f, s);
+    }
+    TEST_ASSERT_TRUE(out.valid);
+    TEST_ASSERT_TRUE(fabsf(out.bpm - bpm) < 3.0f);
+}
+
 // Pure noise (no periodic structure) must never cross the confidence
 // threshold -- "don't report garbage" is the whole point of `valid`.
 void test_noise_never_valid(void) {
@@ -84,6 +110,7 @@ int main(void) {
     RUN_TEST(test_detects_120_bpm);
     RUN_TEST(test_detects_90_bpm);
     RUN_TEST(test_detects_150_bpm);
+    RUN_TEST(test_detects_120_bpm_with_nonzero_baseline);
     RUN_TEST(test_noise_never_valid);
     RUN_TEST(test_reset_clears_state);
     return UNITY_END();

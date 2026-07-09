@@ -17,11 +17,13 @@ extern "C" {
 #define FOLLOW_BEAT_ENV_LEN        (FOLLOW_BEAT_ENV_RATE * FOLLOW_BEAT_ENV_WINDOW_S)  // 400
 #define FOLLOW_BEAT_MIN_BPM        60
 #define FOLLOW_BEAT_MAX_BPM        200
-#define FOLLOW_BEAT_CONFIDENCE_THRESHOLD 2.5f  // peak/mean ratio needed to report valid
+#define FOLLOW_BEAT_CONFIDENCE_THRESHOLD 0.5f  // best-lag corr / window variance needed to report valid
 
 typedef struct {
     float bpm;
-    float confidence;   // peak/mean ratio of the autocorrelation search range
+    float confidence;   // best-lag autocorrelation normalized by the mean-
+                         // centered window's own variance (roughly 0..1: how
+                         // strongly periodic the signal is at that lag)
     bool  valid;         // true once confidence clears FOLLOW_BEAT_CONFIDENCE_THRESHOLD
 } FollowBeatOut;
 
