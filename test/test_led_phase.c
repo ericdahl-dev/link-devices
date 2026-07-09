@@ -57,6 +57,13 @@ void test_flash_rgb_invalid_bar_uses_beat_colour(void) {
     TEST_ASSERT_EQUAL_HEX32(0x00FF00, led_flash_rgb(0x00FF00, 0xFF0000, 0.0f, false, 255));
 }
 
+// Negative phase (the -1.0f "no reading yet" sentinel family) is not beat 0 —
+// (int)(-0.5f) == 0 would otherwise falsely accent it.
+void test_flash_rgb_negative_phase_is_not_downbeat(void) {
+    TEST_ASSERT_EQUAL_HEX32(0x00FF00, led_flash_rgb(0x00FF00, 0xFF0000, -0.5f, true, 255));
+    TEST_ASSERT_EQUAL_HEX32(0x00FF00, led_flash_rgb(0x00FF00, 0xFF0000, -1.0f, true, 255));
+}
+
 // Brightness scales each channel by bright/255; 40 reproduces the old
 // hardcoded rgbLedWrite(pin, 0, 40, 0) level for a pure-green colour.
 void test_flash_rgb_brightness_scales_channels(void) {
@@ -78,6 +85,7 @@ int main(void) {
     RUN_TEST(test_prev_phase_zero_is_a_real_reading);
     RUN_TEST(test_flash_rgb_accent_on_bar_downbeat);
     RUN_TEST(test_flash_rgb_invalid_bar_uses_beat_colour);
+    RUN_TEST(test_flash_rgb_negative_phase_is_not_downbeat);
     RUN_TEST(test_flash_rgb_brightness_scales_channels);
     return UNITY_END();
 }
