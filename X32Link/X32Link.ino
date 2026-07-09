@@ -63,10 +63,11 @@ static WifiConnPolicy g_wifi_pol;
     #define LED_PIN_NUM 48
 #endif
 
-#define LED_BRIGHTNESS 40   // NeoPixel channel cap — matches the pre-LNK-039 hardcoded level
+#define LED_BRIGHTNESS 40        // NeoPixel channel cap — matches the pre-LNK-039 hardcoded level
+#define LED_STATUS_GREEN 0x00FF00  // WiFi-down blink stays this, never user-configurable
 
 #if defined(LED_RGB)
-static uint32_t s_led_rgb = 0x002800;   // current flash colour, set per flash (LNK-039)
+static uint32_t s_led_rgb = 0;   // current flash colour, set per flash (LNK-039)
 #endif
 
 // LNK-039: pick this flash's colour from the configured dot colours —
@@ -162,7 +163,11 @@ static void led_task(void*) {
         if (wifi_down_blink_due(now_ms, last_wifi_blink_ms,
                                  WIFI_DOWN_BLINK_INTERVAL_MS, wifi_connected)) {
             last_wifi_blink_ms = now_ms;
-            led_pick_color(false);          // status blink: plain beat colour
+            // Diagnostic blink keeps a fixed colour: a dark user beat colour
+            // (down to #000000) must never hide the "WiFi is down" signal.
+#if defined(LED_RGB)
+            s_led_rgb = led_flash_rgb(LED_STATUS_GREEN, LED_STATUS_GREEN, 0.0f, false, LED_BRIGHTNESS);
+#endif
             for (int i = 0; i < WIFI_DOWN_BLINK_COUNT; i++) {
                 led_set(true);
                 vTaskDelay(pdMS_TO_TICKS(WIFI_DOWN_BLINK_ON_MS));
@@ -332,12 +337,14 @@ void loop() {
     if (now - last_log >= 5000) {
         last_log = now;
         TempoSnapshot ts; tempo_snapshot_read(&ts);
-        Serial.printf("[X32Link] ip:%s mcast:%d rx:%lu peers:%d bpm:%.2f heap:%lu fw:" FW_VERSION "\n",
+        // fw as a %s arg, not pasted into the format — an injected FW_VERSION
+        // containing '%' must never become a conversion specifier.
+        Serial.printf("[X32Link] ip:%s mcast:%d rx:%lu peers:%d bpm:%.2f heap:%lu fw:%s\n",
                       WiFi.localIP().toString().c_str(),
                       link_listener_mcast_ok() ? 1 : 0,
                       (unsigned long)link_listener_rx_count(),
                       link_listener_peers(), ts.bpm,
-                      (unsigned long)ESP.getFreeHeap());
+                      (unsigned long)ESP.getFreeHeap(), FW_VERSION);
     }
     delay(20);
 }

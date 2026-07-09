@@ -208,8 +208,10 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     ks_config_load(&g_cfg);
-    ESP_LOGI(TAG, "KitchenSync fw:" FW_VERSION " built:" FW_BUILD
-                  " — Link tempo -> USB-MIDI host clock out (P4-005/007)");
+    /* fw/built as %s args, not pasted into the format — an injected FW_VERSION
+     * containing '%' must never become a conversion specifier. */
+    ESP_LOGI(TAG, "KitchenSync fw:%s built:%s — Link tempo -> USB-MIDI host clock out (P4-005/007)",
+             FW_VERSION, FW_BUILD);
     g_cfg_mutex = xSemaphoreCreateMutex();   /* ARC-016: before the web server / clock task */
     usb_midi_host_start();
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);

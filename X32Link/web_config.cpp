@@ -320,10 +320,8 @@ static void handle_update_upload() {
 // (LNK-015) already drive off, just surfaced over HTTP so the JS can
 // poll-correct + client-side-interpolate instead of free-running off bpm
 // alone. quantum is g_config.quantum_beats (bar-quantized, matching the
-// touch UI's phase wheel, not the LED's per-beat 1.0f quantum). Reads the
-// g_current_phase/g_phase_valid globals (see extern decls above) rather
-// than calling tempo_source_phase()/_valid() directly — shared-safe, same
-// as g_current_bpm.
+// touch UI's phase wheel, not the LED's per-beat 1.0f quantum). One atomic
+// tempo_snapshot_read() (ARC-001 seam) — never tempo_source_* directly.
 static void handle_status() {
     TempoSnapshot ts; tempo_snapshot_read(&ts);
     char buf[96];

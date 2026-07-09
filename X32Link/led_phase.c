@@ -9,7 +9,9 @@ bool led_phase_should_flash(float prev_phase, float phase, bool valid) {
 
 uint32_t led_flash_rgb(uint32_t beat_rgb, uint32_t accent_rgb, float bar_phase,
                        bool bar_valid, uint8_t bright) {
-    uint32_t c = (bar_valid && (int)bar_phase == 0) ? accent_rgb : beat_rgb;
+    // >= 0 guard: (int) truncation would map the -1.0f "no reading" sentinel
+    // family (-0.x) to beat 0 and falsely accent it.
+    uint32_t c = (bar_valid && bar_phase >= 0.0f && (int)bar_phase == 0) ? accent_rgb : beat_rgb;
     uint32_t r = ((c >> 16) & 0xFF) * bright / 255;
     uint32_t g = ((c >>  8) & 0xFF) * bright / 255;
     uint32_t b = ( c        & 0xFF) * bright / 255;

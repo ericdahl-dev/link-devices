@@ -12,5 +12,17 @@
 #define FW_VERSION "2.2.0"
 #endif
 
-// Compile stamp — tells dev builds apart between version bumps.
+// Invariants an injected FW_VERSION must keep: charset [A-Za-z0-9.-] only —
+// it is interpolated unescaped into /status JSON and web-UI JS strings — and
+// short enough that the /status snprintf buffers never truncate (asserted
+// below; both firmwares' status handlers rely on it).
+#ifdef __cplusplus
+static_assert(sizeof(FW_VERSION) <= 24, "FW_VERSION too long for /status buffers");
+#else
+_Static_assert(sizeof(FW_VERSION) <= 24, "FW_VERSION too long for /status buffers");
+#endif
+
+// Compile stamp — tells dev builds apart between version bumps. Note: expands
+// per translation unit, so serial vs web stamps can differ on an incremental
+// rebuild; clean release builds agree.
 #define FW_BUILD __DATE__ " " __TIME__

@@ -64,8 +64,8 @@ RC-505, and **4 PPB** (pulses per beat = 16th-note triggers) into modular clock
 inputs, which is exactly what Juanito's HexKlox external-trigger input expects. The
 existing `clock_output` module already does arbitrary per-output division, so this
 is configuration, not new firmware (confirmed via codebase index: `clock_output`
-is a shared, host-tested pure-C module reused across three targets — X32Link,
-X32MidiClock, KitchenSync). The brick
+is a shared, host-tested pure-C module reused across both targets — X32Link and
+KitchenSync). The brick
 doesn't compete with HexKlox or any clock module — it makes all of them Link-native.
 It removes the laptop *as the clock master/babysitter*, not the laptop (Ableton
 still runs and joins as a Link peer).
@@ -148,7 +148,7 @@ Win the wedge, expand from strength.
 
 **The real frame: you're not shipping a product, you're shipping the first device
 off a platform.** `link-devices` is a **monorepo device family** — X32Link (the
-shipped S3 mixer-FX/Link/MIDI box), X32MidiClock, KitchenSync, the emulator, and
+shipped S3 mixer-FX/Link/MIDI box, which absorbed X32MidiClock), KitchenSync, the emulator, and
 in-flight analog-sync (LNK-028) work — all riding **one shared pure-C clock/sync
 engine** that already runs across three targets. So the wedge isn't "build a
 product," it's "sell the first device off a platform you already have." The **moat**
