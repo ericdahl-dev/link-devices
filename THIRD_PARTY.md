@@ -23,12 +23,12 @@ by **Espressif Systems**, **Apache-2.0**.
 | [`espressif/esp_wifi_remote`](https://components.espressif.com/components/espressif/esp_wifi_remote) | WiFi API surface over the hosted link |
 | [`espressif/es8311`](https://components.espressif.com/components/espressif/es8311) | ES8311 codec driver for the onboard-speaker metronome |
 
-### Frameworks & Arduino libraries — X32Link / X32MidiClock (arduino-cli)
+### Frameworks & Arduino libraries — X32Link / X32_emulator (arduino-cli)
 
 | Component | Author(s) | License |
 |---|---|---|
 | **ESP-IDF** (KitchenSync) | Espressif Systems | Apache-2.0 |
-| **Arduino-ESP32** core (X32Link, X32MidiClock) | Espressif Systems | LGPL-2.1-or-later |
+| **Arduino-ESP32** core (X32Link, X32_emulator) | Espressif Systems | LGPL-2.1-or-later |
 | **LovyanGFX** — touch-LCD graphics ([`X32Link/touch_display.*`](X32Link/)) | lovyan03 (Kenji Ono) | BSD-2-Clause (FreeBSD) |
 
 ### Web fonts — loaded at runtime by the config UI (CDN, not redistributed here)
