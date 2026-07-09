@@ -112,3 +112,20 @@ in some other way.
   detection can disagree).
 - Any DSP beyond envelope + autocorrelation (no onset-histogram, no ML).
 - Stereo / higher sample rates — mono 16kHz throughout, matching the existing codec config.
+
+## Addendum (2026-07-09): shared I2S bus, not mutual exclusion
+
+Consulted the Embedded Firmware Engineer agent on whether `follow_beat_io.c` (RX)
+and `metronome_audio.c` (TX) could each independently own an I2S_NUM_0 channel.
+Confirmed this is a real hardware conflict, not just an API restriction: both
+would be `I2S_ROLE_MASTER` driving the same physical BCLK/WS pins (GPIO12/10) to
+the ES8311, which is bus contention — not something the driver can catch, and it
+corrupts clocking on both sides.
+
+Fix: a single new module, `i2s_audio_bus.c`, becomes the one owner of
+`i2s_new_channel()` (full-duplex, one call, one shared clock generator) and the
+ES8311 I2C bring-up. `metronome_audio.c` and `follow_beat_io.c` stop allocating
+their own channels/codec handles — they become consumers that call
+`i2s_channel_enable()`/`disable()` on the shared TX/RX handles as their own
+feature turns on/off. This supersedes the original design's implicit assumption
+that the two features would never run concurrently — they now safely can.
