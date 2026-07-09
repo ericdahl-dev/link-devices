@@ -9,6 +9,20 @@
 // (true full duplex, one shared clock generator) plus the one ES8311 I2C
 // bring-up; metronome_audio.c and follow_beat_io.c become consumers that only
 // call i2s_channel_enable()/disable() on the handles this module owns.
+//
+// Clock-driver asymmetry: TX and RX share one BCLK/WS pair, but only one
+// direction actually drives that shared clock -- the other rides along as a
+// passenger. TX (metronome) is the driver here: it's expected to be enabled
+// first and to stay enabled whenever RX (follow_beat) might be active, since
+// disabling the driver side would starve RX of its clock. Don't disable TX
+// while RX depends on it still running.
+//
+// Known limitation: audio_bus_init()'s failure paths don't roll back partial
+// state (a mid-sequence I2S/I2C failure leaks the already-created handle(s)
+// and leaves re-init impossible for the process lifetime, since e.g.
+// i2c_driver_install() errors on a port that's already installed). Acceptable
+// today because init() has no retry caller and runs once at boot; revisit if
+// Task 9's hardware bring-up needs a retry/reinit path.
 #include <stdbool.h>
 #include "driver/i2s_std.h"
 #include "es8311.h"
