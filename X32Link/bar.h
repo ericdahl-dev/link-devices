@@ -7,8 +7,8 @@ extern "C" {
 
 // A bar is `quantum` beats — ARC-003. One place owns that assumption so non-4/4
 // quanta (g_config.quantum_beats is 1..16) get the right refresh/resend cadence,
-// instead of the hardcoded `4 *` scattered across bpm_publisher.c and
-// X32MidiClock.ino. (MIDI is 24 PPQN, so a bar is 24*quantum pulses — but the
+// instead of the hardcoded `4 *` that used to be scattered across the call
+// sites. (MIDI is 24 PPQN, so a bar is 24*quantum pulses — but the
 // two call sites here work in beats and milliseconds, not pulses.)
 
 // Total beats in `bars` bars. Returns 0 for quantum < 1 or bars < 1.

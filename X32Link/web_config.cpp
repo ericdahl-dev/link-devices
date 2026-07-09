@@ -1,5 +1,6 @@
 #include "web_config.h"
 #include "app_config.h"
+#include "fw_version.h"
 #include "web_status_json.h"
 #include "tempo_snapshot.h"
 #include <WiFi.h>
@@ -10,9 +11,8 @@
 extern AppConfig g_config;
 extern void config_save(const AppConfig*);
 // Live tempo comes from the tempo_snapshot seam (ARC-001): one atomic read
-// yields a torn-free {bpm,phase,valid,quantum}. Symlink-safe — both firmwares'
-// bpm_tasks publish into it, so this file needs no firmware-specific tempo_source
-// calls (the reason the old shared globals existed).
+// yields a torn-free {bpm,phase,valid,quantum}, so this file needs no
+// tempo_source calls (the reason the old shared globals existed).
 
 static WebServer  server(80);
 static DNSServer  s_dns;
@@ -109,7 +109,7 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 </style></head><body>
 <div class="unit">
 <span class="screw tl"></span><span class="screw tr"></span><span class="screw bl"></span><span class="screw br"></span>
-<div class="brand"><span class="pwr"></span><span class="wordmark">X32&middot;<b>SYNC</b></span><span class="rev" id="rev">FW 2.0</span></div>
+<div class="brand"><span class="pwr"></span><span class="wordmark">X32&middot;<b>SYNC</b></span><span class="rev" id="rev">FW %FWVER%</span></div>
 <div class="scr">
 <div class="scr-top"><span class="beat" id="beat"></span><span class="scr-lbl">Session Tempo</span><span class="scr-src" id="srcLbl">Ableton Link</span></div>
 <div class="readout"><span class="ghost bignum">188.8</span><span class="live"><span class="bignum" id="bpm">%BPM%</span><span class="unit-bpm">BPM</span></span></div>
@@ -144,7 +144,7 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 <label class="sw"><input type="checkbox" name="midi_clock_out" value="1" %MCKCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
 </div>
 <div class="row">
-<div class="cap"><label>Phase Display</label><span class="hint">beat-flash dot vs sweep wheel &middot; restart to apply</span></div>
+<div class="cap"><label>Phase Display</label><span class="hint">beat-flash dot vs sweep wheel &middot; colours also set the beat LED</span></div>
 <label class="sw"><input type="checkbox" class="live" name="phase_flash" value="1" %PHFLASHCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
 <div class="fld" style="margin-top:6px"><span class="pre">BEAT</span><input type="color" class="live" name="dot_beat" value="%DOTBEAT%"></div>
 <div class="fld" style="margin-top:6px"><span class="pre">BAR1</span><input type="color" class="live" name="dot_acc" value="%DOTACC%"></div>
@@ -159,7 +159,7 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 <div class="fld" style="margin-top:6px"><span class="pre">PASS</span><input type="password" name="wifi_pass" placeholder="keep current"></div>
 </div>
 <button class="write" type="submit">Write &amp; Reboot<small>commit to flash &middot; device restarts</small></button>
-<div class="foot">ESP32-S3 &middot; Ableton Link &harr; OSC &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
+<div class="foot">ESP32-S3 &middot; Ableton Link &harr; OSC &middot; FW %FWVER% &middot; %FWBUILD% &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
 </form>
 </div>
 <script>
@@ -173,7 +173,7 @@ var hSrc=document.getElementById('h_src'),hModel=document.getElementById('h_mode
 wireSeg('segSrc',hSrc.value,function(v){hSrc.value=v;
 document.getElementById('srcLbl').textContent=v==='0'?'Ableton Link':'USB MIDI Clock';
 document.getElementById('srcFoot').textContent=v==='0'?'SOURCE·LINK':'SOURCE·MIDI';
-document.getElementById('rev').textContent=v==='0'?'FW 2.0·LNK':'FW 2.0·MCK';});
+document.getElementById('rev').textContent=v==='0'?'FW %FWVER%·LNK':'FW %FWVER%·MCK';});
 var slotsEl=document.getElementById('slots'),maxSlot=4,curSlot=parseInt(hSlot.value)||1;
 function renderSlots(){slotsEl.innerHTML='';for(var i=1;i<=8;i++){(function(i){var b=document.createElement('button');
 b.type='button';b.className='slot';b.textContent=i;b.disabled=i>maxSlot;b.setAttribute('aria-pressed',i===curSlot);
@@ -254,6 +254,8 @@ static String build_html() {
     h.replace("%SRC%",   String(g_config.input_source));
     h.replace("%SSID%",  g_config.wifi_ssid);
     h.replace("%BPM%",   bpm);
+    h.replace("%FWVER%",   FW_VERSION);  // LNK-038 — replaces the old hardcoded "FW 2.0"
+    h.replace("%FWBUILD%", FW_BUILD);
     return h;
 }
 
@@ -282,6 +284,7 @@ a{color:#b6ff36;text-decoration:none;font-size:12px}
 </style></head><body>
 <div class="card">
 <h2>Firmware Update</h2>
+<p>Running FW %FWVER% &middot; built %FWBUILD%</p>
 <p>Select a compiled .bin. The device flashes it and reboots automatically.</p>
 <form method="POST" action="/update" enctype="multipart/form-data">
 <input type="file" name="update" accept=".bin">
@@ -291,7 +294,10 @@ a{color:#b6ff36;text-decoration:none;font-size:12px}
 </div></body></html>)HTML";
 
 static void handle_update_page() {
-    server.send(200, "text/html", UPDATE_HTML);
+    String h(UPDATE_HTML);
+    h.replace("%FWVER%",   FW_VERSION);  // LNK-038: show what's about to be overwritten
+    h.replace("%FWBUILD%", FW_BUILD);
+    server.send(200, "text/html", h);
 }
 
 static void handle_update_upload() {
@@ -314,14 +320,12 @@ static void handle_update_upload() {
 // (LNK-015) already drive off, just surfaced over HTTP so the JS can
 // poll-correct + client-side-interpolate instead of free-running off bpm
 // alone. quantum is g_config.quantum_beats (bar-quantized, matching the
-// touch UI's phase wheel, not the LED's per-beat 1.0f quantum). Reads the
-// g_current_phase/g_phase_valid globals (see extern decls above) rather
-// than calling tempo_source_phase()/_valid() directly — shared-safe, same
-// as g_current_bpm, so X32MidiClock still compiles.
+// touch UI's phase wheel, not the LED's per-beat 1.0f quantum). One atomic
+// tempo_snapshot_read() (ARC-001 seam) — never tempo_source_* directly.
 static void handle_status() {
     TempoSnapshot ts; tempo_snapshot_read(&ts);
-    char buf[80];
-    web_status_json(buf, sizeof(buf), ts.bpm, ts.phase, ts.valid, ts.quantum);
+    char buf[96];
+    web_status_json(buf, sizeof(buf), ts.bpm, ts.phase, ts.valid, ts.quantum, FW_VERSION);
     server.send(200, "application/json", buf);
 }
 

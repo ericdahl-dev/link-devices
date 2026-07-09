@@ -2,7 +2,7 @@ name: CI
 
 # Host-side Unity tests (pure logic, no hardware) + firmware compiles so a change
 # that passes host tests but breaks a real build is caught before merge:
-#   - X32Link  (ESP32-S3, arduino-cli): headless + Waveshare touch variants
+#   - X32Link  (ESP32-S3, arduino-cli): headless + Waveshare touch + QT Py NeoPixel variants
 #   - KitchenSync    (ESP32-P4, ESP-IDF): the hub-tier target (see ADR-0005)
 on:
   push:
@@ -53,6 +53,14 @@ jobs:
       - name: Compile X32Link (Waveshare touch board)
         run: |
           echo '-DBOARD_WAVESHARE_S3_TOUCH_LCD_147' > X32Link/build_opt.h
+          arduino-cli compile --fqbn "$FQBN" X32Link
+          git checkout -- X32Link/build_opt.h
+
+      # LED_RGB path (LNK-039) only compiles under this flag — without it the
+      # NeoPixel colour glue is preprocessed away in both variants above.
+      - name: Compile X32Link (QT Py NeoPixel board)
+        run: |
+          echo '-DBOARD_QTPY_ESP32S3' > X32Link/build_opt.h
           arduino-cli compile --fqbn "$FQBN" X32Link
           git checkout -- X32Link/build_opt.h
 

@@ -1,7 +1,14 @@
 # 6. Shared pure C lives in the X32Link Arduino sketch root
 
 Date: 2026-07-05
-Status: accepted
+Status: superseded by [ADR-0007](0007-shared-pure-c-compiled-by-path.md)
+
+> **Superseded 2026-07-09.** The conclusion below still holds — shared pure C
+> lives in the `X32Link/` sketch root, and ARC-008/ARC-009 stay declined — but
+> the reasoning does not. This ADR rests its case on "the symlink farm the
+> flat-sketch rule forces"; LNK-024 retired `X32MidiClock/` and with it the farm.
+> The real and sufficient blocker is that arduino-cli compiles only the sketch
+> root. See ADR-0007.
 
 ## Context
 
