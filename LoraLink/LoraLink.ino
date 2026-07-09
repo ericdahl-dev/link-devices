@@ -82,6 +82,7 @@ void loop() {
 static uint32_t s_last_seen_ms = 0;
 static bool     s_has_received = false;
 static float    s_last_bpm     = 0.0f;
+static bool     s_rx_blink     = false;
 
 void setup() {
     Serial.begin(115200);
@@ -94,16 +95,19 @@ void loop() {
     int len = 0;
     if (lora_radio_try_receive(buf, sizeof(buf), &len)) {
         lora_bpm_packet_t pkt;
-        if (lora_bpm_packet_decode(buf, len, &pkt) && pkt.msg_type == LORA_MSG_BPM) {
-            s_last_bpm     = pkt.bpm_x100 / 100.0f;
-            s_last_seen_ms = millis();
-            s_has_received = true;
+        if (lora_bpm_packet_decode(buf, len, &pkt)) {
+            s_rx_blink = !s_rx_blink;  // any packet counts as reception activity
+            if (pkt.msg_type == LORA_MSG_BPM) {
+                s_last_bpm     = pkt.bpm_x100 / 100.0f;
+                s_last_seen_ms = millis();
+                s_has_received = true;
+            }
         }
     }
 
     bool stale = lora_freshness_is_stale(millis(), s_last_seen_ms,
                                           LORA_STALE_THRESHOLD_MS, s_has_received);
-    lora_display_show_receiver(s_last_bpm, stale);
+    lora_display_show_receiver(s_last_bpm, stale, s_rx_blink);
     delay(50);
 }
 
