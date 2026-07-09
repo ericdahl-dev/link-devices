@@ -39,6 +39,19 @@ void test_absent_checkbox_reads_off(void) {
     TEST_ASSERT_EQUAL_INT(0, out.metronome_accent);
 }
 
+// follow_beat_enable is a checkbox too: absent from the body -> off.
+void test_follow_beat_absent_reads_off(void) {
+    base.follow_beat_enable = 1;
+    resolve("wifi_ssid=X");
+    TEST_ASSERT_EQUAL_INT(0, out.follow_beat_enable);
+}
+
+void test_follow_beat_present_reads_on(void) {
+    base.follow_beat_enable = 0;
+    resolve("follow_beat=1");
+    TEST_ASSERT_EQUAL_INT(1, out.follow_beat_enable);
+}
+
 // A present checkbox flips back on.
 void test_present_checkbox_reads_on(void) {
     base.metronome_enable = 0;
@@ -124,6 +137,8 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_sets_one_field_keeps_base);
     RUN_TEST(test_absent_checkbox_reads_off);
+    RUN_TEST(test_follow_beat_absent_reads_off);
+    RUN_TEST(test_follow_beat_present_reads_on);
     RUN_TEST(test_present_checkbox_reads_on);
     RUN_TEST(test_per_output_enable_absence);
     RUN_TEST(test_absent_value_field_keeps_base);

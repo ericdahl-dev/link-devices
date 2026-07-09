@@ -51,6 +51,7 @@ void ks_form_resolve(char *body, const KsConfig *base, KsConfig *out) {
     out->metronome_enable = 0;
     out->metronome_accent = 0;
     out->led_enable       = 0;
+    out->follow_beat_enable = 0;
     for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) out->clock[i].enable = 0;
 
     apply_pairs(body, out);

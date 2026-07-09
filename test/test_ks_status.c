@@ -1,4 +1,5 @@
-// Host tests for the pure KitchenSync /status JSON builder (P4-007).
+// Host tests for the pure KitchenSync /status JSON builder (P4-007, extended
+// P4-020 with the mic tempo-follow fields).
 #include "unity.h"
 #include "ks_status.h"
 #include <string.h>
@@ -6,44 +7,59 @@
 void setUp(void)    {}
 void tearDown(void) {}
 
-// All fields present; usb serializes as a real JSON bool. `min` is the detected
-// MIDI-clock-IN tempo (P4-011).
+// All fields present; usb/follow_enabled/follow_valid serialize as real JSON bools.
 void test_all_fields_present(void) {
-    char b[160];
-    ks_status_json(b, sizeof(b), 132.0f, 120.5f, 1, true, 583, "2.1.0");
+    char b[220];
+    ks_status_json(b, sizeof(b), 132.0f, 120.5f, 1, true, 583, "2.1.0", true, 128.3f, 3.1f, true);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"bpm\":132.0"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"min\":120.5"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"peers\":1"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"usb\":true"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"tx\":583"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"fw\":\"2.1.0\""));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"follow_enabled\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"follow_bpm\":128.3"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"follow_confidence\":3.1"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"follow_valid\":true"));
 }
 
-// usb false serializes as the bool false, not 0/"false".
 void test_usb_false_is_json_bool(void) {
-    char b[160];
-    ks_status_json(b, sizeof(b), 0.0f, 0.0f, 0, false, 0, "2.1.0");
+    char b[220];
+    ks_status_json(b, sizeof(b), 0.0f, 0.0f, 0, false, 0, "2.1.0", false, 0.0f, 0.0f, false);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"usb\":false"));
-    TEST_ASSERT_NULL(strstr(b, "true"));
 }
 
-// Return value mirrors snprintf's contract — bytes that would've been written,
-// so a too-small buffer is detectable by the caller (same test as the
-// web_status_json twin).
+// follow_valid false serializes as the bool false, not 0/"false".
+void test_follow_valid_false_is_json_bool(void) {
+    char b[220];
+    ks_status_json(b, sizeof(b), 0.0f, 0.0f, 0, false, 0, "2.1.0", false, 0.0f, 0.0f, false);
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"follow_valid\":false"));
+}
+
+// follow_enabled is distinct from follow_valid: the feature can be enabled
+// but not yet confident (valid=false while enabled=true) -- the web UI needs
+// to tell "off" apart from "listening", so these two fields must vary
+// independently, not just mirror each other.
+void test_follow_enabled_independent_of_valid(void) {
+    char b[220];
+    ks_status_json(b, sizeof(b), 0.0f, 0.0f, 0, false, 0, "2.1.0", true, 0.0f, 0.0f, false);
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"follow_enabled\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"follow_valid\":false"));
+}
+
 void test_return_value_is_snprintf_style_length(void) {
-    char b[160];
-    int n = ks_status_json(b, sizeof(b), 132.0f, 120.5f, 1, true, 583, "2.1.0");
+    char b[220];
+    int n = ks_status_json(b, sizeof(b), 132.0f, 120.5f, 1, true, 583, "2.1.0", true, 128.3f, 3.1f, true);
     TEST_ASSERT_EQUAL_INT((int)strlen(b), n);
 
     char tiny[4];
-    int n2 = ks_status_json(tiny, sizeof(tiny), 132.0f, 120.5f, 1, true, 583, "2.1.0");
+    int n2 = ks_status_json(tiny, sizeof(tiny), 132.0f, 120.5f, 1, true, 583, "2.1.0", true, 128.3f, 3.1f, true);
     TEST_ASSERT_TRUE(n2 > (int)sizeof(tiny) - 1);  // truncated but length still reported
 }
 
-// LNK-038: the fw string is caller-supplied (pure builder stays version-agnostic).
 void test_fw_string_passes_through(void) {
-    char b[160];
-    ks_status_json(b, sizeof(b), 120.0f, 0.0f, 0, false, 0, "9.9.9-rc1");
+    char b[220];
+    ks_status_json(b, sizeof(b), 120.0f, 0.0f, 0, false, 0, "9.9.9-rc1", false, 0.0f, 0.0f, false);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"fw\":\"9.9.9-rc1\""));
 }
 
@@ -51,6 +67,8 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_all_fields_present);
     RUN_TEST(test_usb_false_is_json_bool);
+    RUN_TEST(test_follow_valid_false_is_json_bool);
+    RUN_TEST(test_follow_enabled_independent_of_valid);
     RUN_TEST(test_return_value_is_snprintf_style_length);
     RUN_TEST(test_fw_string_passes_through);
     return UNITY_END();
