@@ -10,14 +10,17 @@
 extern "C" {
 #endif
 
-// Formats {"bpm":F,"min":F,"peers":N,"usb":bool,"tx":N,"fw":"S"} into buf. `bpm`
-// is the live Link session tempo, `min` the detected MIDI-clock-IN tempo (0 when
-// no clock in, P4-011), `peers` the Link peer count, `usb` whether a USB-MIDI
-// device is ready, `tx` the running clock-pulse count, `fw` the firmware version
-// string (LNK-038, caller passes FW_VERSION so the builder stays pure). Returns
-// snprintf()'s return value so the caller can detect truncation.
+// Formats {"bpm":F,"min":F,"peers":N,"usb":bool,"tx":N,"fw":"S","follow_bpm":F,
+// "follow_confidence":F,"follow_valid":bool} into buf. `bpm` is the live Link
+// session tempo, `min` the detected MIDI-clock-IN tempo (0 when no clock in,
+// P4-011), `peers` the Link peer count, `usb` whether a USB-MIDI device is
+// ready, `tx` the running clock-pulse count, `fw` the firmware version string
+// (LNK-038), `follow_bpm`/`follow_confidence`/`follow_valid` the mic tempo-
+// follow estimate (P4-020, 0/0/false when the feature is off or not yet
+// confident). Returns snprintf()'s return value so the caller can detect
+// truncation.
 int ks_status_json(char* buf, size_t len, float bpm, float midi_bpm, int peers, bool usb, uint32_t tx,
-                   const char* fw);
+                   const char* fw, float follow_bpm, float follow_confidence, bool follow_valid);
 
 #ifdef __cplusplus
 }
