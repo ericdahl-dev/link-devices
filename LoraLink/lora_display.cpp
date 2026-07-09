@@ -28,7 +28,7 @@ void lora_display_show_sender(int peers, float bpm, bool link_active) {
     u8g2.sendBuffer();
 }
 
-void lora_display_show_receiver(float bpm, bool stale) {
+void lora_display_show_receiver(float bpm, bool stale, bool rx_blink) {
     char line[32];
     u8g2.clearBuffer();
     u8g2.drawStr(0, 12, "LoraLink: RECEIVER");
@@ -37,6 +37,14 @@ void lora_display_show_receiver(float bpm, bool stale) {
     } else {
         snprintf(line, sizeof(line), "%.2f BPM", bpm);
         u8g2.drawStr(0, 28, line);
+    }
+    // Activity dot: toggles filled/hollow on every packet, independent of
+    // whether the BPM/status changed, so reception is visible even at a
+    // steady tempo.
+    if (rx_blink) {
+        u8g2.drawDisc(120, 8, 4);
+    } else {
+        u8g2.drawCircle(120, 8, 4);
     }
     u8g2.sendBuffer();
 }
