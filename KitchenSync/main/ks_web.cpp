@@ -19,6 +19,7 @@
 #include "link_protocol.h"
 #include "wifi_link.h"
 #include "usb_midi_host.h"
+#include "fw_version.h"      /* LNK-038: shared FW_VERSION / FW_BUILD (X32Link/ include path) */
 #include "ks_status.h"
 #include "ks_config.h"
 #include "ks_config_nvs.h"
@@ -162,7 +163,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 </style></head><body>
 <div class="unit">
 <span class="screw tl"></span><span class="screw tr"></span><span class="screw bl"></span><span class="screw br"></span>
-<div class="brand"><span class="pwr"></span><span class="wordmark">KITCHEN&middot;<b>SYNC</b></span><span class="rev">ESP32-P4</span></div>
+<div class="brand"><span class="pwr"></span><span class="wordmark">KITCHEN&middot;<b>SYNC</b></span><span class="rev">ESP32-P4 &middot; FW %FWVER%</span></div>
 <div class="scr">
 <div class="scr-top"><span class="beat" id="beat"></span><span class="scr-lbl">Session Tempo</span><span class="scr-src">Ableton Link</span></div>
 <div class="readout"><span class="ghost bignum">188.8</span><span class="live"><span class="bignum" id="bpm">--.-</span><span class="unit-bpm">BPM</span></span></div>
@@ -197,7 +198,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 </div>
 <button class="write" type="submit">Write &amp; Reboot</button>
 </form>
-<div class="foot">Everything and the kitchen sync &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
+<div class="foot">Everything and the kitchen sync &middot; FW %FWVER% &middot; %FWBUILD% &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
 </div>
 <script>
 var bpmEl=document.getElementById('bpm'),beatEl=document.getElementById('beat');
@@ -334,6 +335,8 @@ static std::string build_page()
     subst(h, "%MVOL%",    std::to_string(s_cfg ? s_cfg->metronome_volume : 80));
     subst(h, "%MVOICE%",  std::to_string(s_cfg ? s_cfg->metronome_voice : 0));
     subst(h, "%OUTPUTS%", build_outputs());
+    subst(h, "%FWVER%",   FW_VERSION);   // LNK-038
+    subst(h, "%FWBUILD%", FW_BUILD);
     return h;
 }
 
@@ -349,7 +352,8 @@ static esp_err_t status_handler(httpd_req_t *req)
     char buf[128];
     ks_status_json(buf, sizeof(buf),
                       (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
-                      wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx());
+                      wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx(),
+                      FW_VERSION);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }
@@ -466,6 +470,7 @@ a{color:#b6ff36;text-decoration:none;font-size:12px}
 </style></head><body>
 <div class="card">
 <h2>Firmware Update</h2>
+<p>Running FW %FWVER% &middot; built %FWBUILD%</p>
 <p>Select a compiled .bin. The device flashes the inactive OTA slot and reboots
 into it automatically.</p>
 <input type="file" id="fw" accept=".bin">
@@ -487,8 +492,11 @@ return r.text().then(function(t){return {ok:r.ok,t:t}})
 
 static esp_err_t update_page_handler(httpd_req_t *req)
 {
+    std::string page(UPDATE_PAGE);
+    subst(page, "%FWVER%",   FW_VERSION);  /* LNK-038: show what's about to be overwritten */
+    subst(page, "%FWBUILD%", FW_BUILD);
     httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, UPDATE_PAGE, HTTPD_RESP_USE_STRLEN);
+    return httpd_resp_send(req, page.c_str(), page.size());
 }
 
 static esp_err_t send_plain(httpd_req_t *req, const char *status, const char *msg)

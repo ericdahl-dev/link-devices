@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <LittleFS.h>
 #include <ArduinoOTA.h>
+#include "fw_version.h"  // LNK-038: our build identity (NOT XVERSION — that's the emulated console's)
 
 #define WIFI_SSID_HOME "Skeyelab"
 #define WIFI_PASS_HOME "diamond2"
@@ -75,7 +76,7 @@ void setup() {
     Serial.println("OTA ready (x32-emulator.local)");
 
     x32_init(ip_str);
-    Serial.println("X32 emulator ready on UDP port 10023");
+    Serial.println("X32 emulator fw:" FW_VERSION " built:" FW_BUILD " — ready on UDP port 10023");
 }
 
 void loop() {

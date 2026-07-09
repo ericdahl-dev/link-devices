@@ -1,5 +1,6 @@
 #include <WiFi.h>
 #include "config.h"
+#include "fw_version.h"      // LNK-038: FW_VERSION / FW_BUILD identity
 #include "app_config.h"
 #include "tempo_source.h"
 #include "led_phase.h"
@@ -62,11 +63,32 @@ static WifiConnPolicy g_wifi_pol;
     #define LED_PIN_NUM 48
 #endif
 
+#define LED_BRIGHTNESS 40   // NeoPixel channel cap — matches the pre-LNK-039 hardcoded level
+
+#if defined(LED_RGB)
+static uint32_t s_led_rgb = 0x002800;   // current flash colour, set per flash (LNK-039)
+#endif
+
+// LNK-039: pick this flash's colour from the configured dot colours —
+// bar-1 accent when bar phase is available, plain beat colour otherwise.
+// Reads g_config at each flash, so /live colour edits apply immediately.
+static void led_pick_color(bool bar_valid) {
+#if defined(LED_RGB)
+    float bar_phase = bar_valid ? tempo_source_phase((float)g_config.quantum_beats) : 0.0f;
+    s_led_rgb = led_flash_rgb((uint32_t)g_config.dot_beat_color,
+                              (uint32_t)g_config.dot_accent_color,
+                              bar_phase, bar_valid, LED_BRIGHTNESS);
+#else
+    (void)bar_valid;
+#endif
+}
+
 static void led_set(bool on) {
 #if defined(LED_NONE)
     (void)on;                                      // headless: beat via web /status dot
 #elif defined(LED_RGB)
-    rgbLedWrite(LED_PIN_NUM, 0, on ? 40 : 0, 0);   // green beat
+    uint32_t c = on ? s_led_rgb : 0;
+    rgbLedWrite(LED_PIN_NUM, (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
 #elif defined(LED_ACTIVE_LOW)
     digitalWrite(LED_PIN_NUM, on ? LOW : HIGH);
 #else
@@ -106,6 +128,7 @@ static void led_task(void*) {
             if (valid) {
                 float phase = tempo_source_phase(1.0f);
                 if (led_phase_should_flash(prev_phase, phase, valid)) {
+                    led_pick_color(true);   // LNK-039: bar-1 accent vs beat colour
                     led_set(true);
                     vTaskDelay(pdMS_TO_TICKS(LED_FLASH_MS));
                     led_set(false);
@@ -119,6 +142,7 @@ static void led_task(void*) {
                 // against a stale value (no double-flash/stutter).
                 prev_phase = -1.0f;
                 if (tempo_source_beat()) {
+                    led_pick_color(false);  // no bar info in the sync gap: beat colour
                     led_set(true);
                     vTaskDelay(pdMS_TO_TICKS(LED_FLASH_MS));
                     led_set(false);
@@ -138,6 +162,7 @@ static void led_task(void*) {
         if (wifi_down_blink_due(now_ms, last_wifi_blink_ms,
                                  WIFI_DOWN_BLINK_INTERVAL_MS, wifi_connected)) {
             last_wifi_blink_ms = now_ms;
+            led_pick_color(false);          // status blink: plain beat colour
             for (int i = 0; i < WIFI_DOWN_BLINK_COUNT; i++) {
                 led_set(true);
                 vTaskDelay(pdMS_TO_TICKS(WIFI_DOWN_BLINK_ON_MS));
@@ -240,7 +265,7 @@ static void check_factory_reset() {
 void setup() {
     Serial.begin(115200);
     delay(2000);
-    Serial.println("[X32Link] booting");
+    Serial.println("[X32Link] booting fw:" FW_VERSION " built:" FW_BUILD);
 
     check_factory_reset();
     config_load(&g_config);
@@ -307,7 +332,7 @@ void loop() {
     if (now - last_log >= 5000) {
         last_log = now;
         TempoSnapshot ts; tempo_snapshot_read(&ts);
-        Serial.printf("[X32Link] ip:%s mcast:%d rx:%lu peers:%d bpm:%.2f heap:%lu\n",
+        Serial.printf("[X32Link] ip:%s mcast:%d rx:%lu peers:%d bpm:%.2f heap:%lu fw:" FW_VERSION "\n",
                       WiFi.localIP().toString().c_str(),
                       link_listener_mcast_ok() ? 1 : 0,
                       (unsigned long)link_listener_rx_count(),
