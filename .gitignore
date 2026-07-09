@@ -9,6 +9,9 @@ test/*.dSYM/
 # macOS / editor cruft
 .DS_Store
 
+# LoraLink WiFi credentials (copy lora_secrets.h.example -> lora_secrets.h)
+LoraLink/lora_secrets.h
+
 # ESP-IDF (KitchenSync)
 sdkconfig
 sdkconfig.old
