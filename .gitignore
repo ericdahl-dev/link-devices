@@ -16,3 +16,5 @@ managed_components/
 dependencies.lock
 .worktrees/
 .gstack/
+tests/test_x32_port
+*.dSYM/
