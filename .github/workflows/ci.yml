@@ -64,6 +64,46 @@ jobs:
           arduino-cli compile --fqbn "$FQBN" X32Link
           git checkout -- X32Link/build_opt.h
 
+  loralink-compile:
+    name: Firmware compile (LoraLink)
+    runs-on: ubuntu-latest
+    env:
+      FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache arduino-cli data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino
+          key: arduino-esp32-lora-${{ runner.os }}-v1
+
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      - name: Install ESP32 core + LoRa/OLED libs
+        run: |
+          arduino-cli config init --overwrite --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install RadioLib U8g2
+
+      - name: Provide placeholder WiFi secrets for CI compile
+        run: cp LoraLink/lora_secrets.h.example LoraLink/lora_secrets.h
+
+      - name: Compile LoraLink (sender role)
+        run: arduino-cli compile --fqbn "$FQBN" LoraLink
+
+      - name: Compile LoraLink (receiver role)
+        run: |
+          echo '-DLORA_ROLE_OVERRIDE=LORA_ROLE_RECEIVER' > LoraLink/build_opt.h
+          arduino-cli compile --fqbn "$FQBN" LoraLink
+          git checkout -- LoraLink/build_opt.h
+
   kitchensync-compile:
     name: Firmware compile (KitchenSync, ESP-IDF)
     runs-on: ubuntu-latest
