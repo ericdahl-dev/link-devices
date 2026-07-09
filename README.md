@@ -23,6 +23,9 @@ preserved; recovery tag `pre-split-2026-07-04` on the old repo).
   unchanged. See [`KitchenSync/README.md`](KitchenSync/README.md).
 - **X32_emulator** (`X32_emulator/`) — on-device X32 OSC emulator used for
   integration tests (also consumed by the CLI tests in the `behringer` repo).
+- **LoraLink** (`LoraLink/`) — a pair of ESP32-S3+SX1262 LoRa boards that relay
+  the Link session BPM out of WiFi range for loose (non-phase-accurate) FX
+  tempo control. See [`LoraLink/README.md`](LoraLink/README.md).
 
 ## Architecture
 
