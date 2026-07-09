@@ -21,6 +21,7 @@
 #include "usb_midi_host.h"
 #include "fw_version.h"      /* LNK-038: shared FW_VERSION / FW_BUILD (X32Link/ include path) */
 #include "ks_status.h"
+#include "follow_beat_io.h"   /* P4-020: mic tempo-follow estimate for /status (Task 9 creates this header) */
 #include "ks_config.h"
 #include "ks_config_nvs.h"
 #include "ks_form.h"
@@ -173,6 +174,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="row"><label>USB-MIDI Device</label><span class="pill" id="usb">Waiting</span></div>
 <div class="row"><label>MIDI Clock In</label><span class="val" id="min">&mdash;&mdash;.&mdash; BPM</span></div>
 <div class="row"><label>Clock Out</label><span class="val" id="tx">0 pulses</span></div>
+<div class="row"><label>Follow Beat</label><span class="val" id="follow">off</span></div>
 </div>
 <form method="POST" action="/save">
 <div class="formcols">
@@ -195,6 +197,9 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="grp"><div class="frow head"><span class="cap">LED Strip &middot; Visual Metronome</span>
 <label class="sw"><input type="checkbox" class="live" name="led" value="1" %LEDCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="sect %LEDSECT%" data-when="led">%LEDCTL%</div></div>
+<div class="grp"><div class="frow head"><span class="cap">Follow Beat (Mic)</span>
+<label class="sw"><input type="checkbox" name="follow_beat" value="1" %FBCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
+</div>
 </div>
 <button class="write" type="submit">Write &amp; Reboot</button>
 </form>
@@ -203,6 +208,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <script>
 var bpmEl=document.getElementById('bpm'),beatEl=document.getElementById('beat');
 var peersEl=document.getElementById('peers'),usbEl=document.getElementById('usb'),txEl=document.getElementById('tx'),minEl=document.getElementById('min');
+var followEl=document.getElementById('follow');
 var beatTimer=null,shownBpm=-1;
 function setBeat(bpm){if(beatTimer){clearInterval(beatTimer);beatTimer=null}
 if(bpm>0){beatTimer=setInterval(function(){beatEl.classList.add('on');setTimeout(function(){beatEl.classList.remove('on')},90)},60000/bpm)}}
@@ -211,7 +217,11 @@ function poll(){fetch('/status',{cache:'no-store'}).then(function(r){return r.js
 if(typeof d.bpm==='number')showBpm(d.bpm);peersEl.textContent=d.peers;
 usbEl.textContent=d.usb?'Connected':'Waiting';usbEl.className='pill'+(d.usb?' on':'');
 minEl.textContent=(d.min>0)?d.min.toFixed(1)+' BPM':'——.— BPM';
-txEl.textContent=(d.tx||0)+' pulses';}).catch(function(){})}
+txEl.textContent=(d.tx||0)+' pulses';
+if(typeof d.follow_enabled!=='undefined'){
+  followEl.textContent=!d.follow_enabled?'off':(d.follow_valid?(d.follow_bpm.toFixed(1)+' BPM'):'listening...');
+}
+}).catch(function(){})}
 poll();setInterval(poll,1000);
 // Live controls (P4-015): POST the changed field to /live so timing/division are
 // audible immediately, no reboot. Save still persists everything via /save.
@@ -329,6 +339,7 @@ static std::string build_page()
     subst(h, "%MTACHK%",  (s_cfg && s_cfg->metronome_accent) ? "checked" : "");
     subst(h, "%LEDCHK%",  (s_cfg && s_cfg->led_enable) ? "checked" : "");
     subst(h, "%LEDCTL%",  build_led());
+    subst(h, "%FBCHK%",   (s_cfg && s_cfg->follow_beat_enable) ? "checked" : "");
     subst(h, "%CLKSECT%", (s_cfg && s_cfg->clock_out_enable) ? "" : "hide");
     subst(h, "%METSECT%", (s_cfg && s_cfg->metronome_enable) ? "" : "hide");
     subst(h, "%LEDSECT%", (s_cfg && s_cfg->led_enable) ? "" : "hide");
@@ -349,11 +360,13 @@ static esp_err_t root_handler(httpd_req_t *req)
 
 static esp_err_t status_handler(httpd_req_t *req)
 {
-    char buf[128];
+    char buf[220];   // grew from 128 -- four more fields (P4-020); matches test_ks_status.c's margin
+    bool fb_enabled = s_cfg && s_cfg->follow_beat_enable;
+    FollowBeatOut fb = fb_enabled ? follow_beat_io_status() : FollowBeatOut{};
     ks_status_json(buf, sizeof(buf),
                       (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
                       wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx(),
-                      FW_VERSION);
+                      FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }

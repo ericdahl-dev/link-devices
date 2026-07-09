@@ -28,7 +28,7 @@ I2S mic (ES8311, GPIO11)
   -> follow_beat_io.c   (impure: I2S RX task, ring buffer)      -- new, KitchenSync/main/
   -> follow_beat.c/h    (pure: envelope + autocorrelation -> BPM/confidence) -- new, KitchenSync/main/
   -> ks_status.c         (adds follow_bpm / follow_confidence / follow_valid to /status JSON)
-  -> ks_web.cpp + ks_config.h/.c  (adds follow_beat_enable toggle, live-safe)
+  -> ks_web.cpp + ks_config.h/.c  (adds follow_beat_enable toggle, reboot-only)
 ```
 
 ### `follow_beat_io.c` (impure)
@@ -77,8 +77,10 @@ int follow_beat_enable;  // 0/1 — mic-based tempo detection (P4-020)
 - `ks_config_defaults`: default `0` (off).
 - `ks_config_set` / `ks_form.c`: goes through the existing single POST-body-grammar intake
   (ARC-006) — no new parsing path.
-- `ks_config_live_safe_copy`: live-safe (toggling doesn't need a reboot), same as
-  `metronome_enable`.
+- `ks_config_live_safe_copy`: **excluded** — starting/stopping mic capture needs the I2S/codec
+  bus brought up, so this is Save-and-reboot only, same as `metronome_enable` itself (not to be
+  confused with `metronome_volume`/`metronome_voice`/`metronome_accent`, which *are* live-safe —
+  only the enable flag needs a reboot).
 
 `ks_status.c` JSON gains `follow_bpm`, `follow_confidence`, `follow_valid`, populated straight from
 `FollowBeatOut` — same shape as the existing `bpm`/`peers`/`locked` fields.
@@ -112,3 +114,20 @@ in some other way.
   detection can disagree).
 - Any DSP beyond envelope + autocorrelation (no onset-histogram, no ML).
 - Stereo / higher sample rates — mono 16kHz throughout, matching the existing codec config.
+
+## Addendum (2026-07-09): shared I2S bus, not mutual exclusion
+
+Consulted the Embedded Firmware Engineer agent on whether `follow_beat_io.c` (RX)
+and `metronome_audio.c` (TX) could each independently own an I2S_NUM_0 channel.
+Confirmed this is a real hardware conflict, not just an API restriction: both
+would be `I2S_ROLE_MASTER` driving the same physical BCLK/WS pins (GPIO12/10) to
+the ES8311, which is bus contention — not something the driver can catch, and it
+corrupts clocking on both sides.
+
+Fix: a single new module, `i2s_audio_bus.c`, becomes the one owner of
+`i2s_new_channel()` (full-duplex, one call, one shared clock generator) and the
+ES8311 I2C bring-up. `metronome_audio.c` and `follow_beat_io.c` stop allocating
+their own channels/codec handles — they become consumers that call
+`i2s_channel_enable()`/`disable()` on the shared TX/RX handles as their own
+feature turns on/off. This supersedes the original design's implicit assumption
+that the two features would never run concurrently — they now safely can.
