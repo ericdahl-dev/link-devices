@@ -26,13 +26,10 @@ static void capture_task(void *arg) {
     (void)arg;
     i2s_chan_handle_t rx = audio_bus_rx();
     // AUDIO_BUS is configured I2S_SLOT_MODE_STEREO (metronome's TX needs
-    // stereo out); read stereo frames and use the left channel only. Which
-    // slot actually carries the ES8311's mono ADC output is, like the
-    // digital_mic wiring assumption in i2s_audio_bus.c's codec_init(), NOT
-    // yet confirmed against real hardware -- a wrong-slot read degrades
-    // quietly (follow_beat just never reaches confidence, no crash), so this
-    // needs verifying (e.g. log both block[2*i] and block[2*i+1] once) at the
-    // P4-020 hardware-validation step, not assumed indefinitely.
+    // stereo out); read stereo frames and use the left channel only. Confirmed
+    // on real hardware (2026-07-09): the ES8311's mono ADC output is duplicated
+    // into both slots identically, so either slot works -- left is as good as
+    // any.
     int16_t block[READ_BLOCK_FRAMES * 2];
     size_t  bytes_read = 0;
     for (;;) {

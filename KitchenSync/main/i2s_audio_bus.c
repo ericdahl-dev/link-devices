@@ -55,8 +55,16 @@ static esp_err_t i2s_init(void) {
     e = i2s_channel_init_std_mode(s_rx, &std_cfg);
     if (e != ESP_OK) return e;
 
-    // Both channels start disabled -- metronome_audio_start()/follow_beat_io_start()
-    // enable their own direction when their feature is actually turned on.
+    // RX starts disabled -- follow_beat_io_start() enables it when its feature
+    // is turned on. TX does NOT: hardware validation (2026-07-09) found that
+    // with only RX enabled, i2s_channel_read() blocks forever -- only one
+    // direction actually drives the shared BCLK/WS clock generator (the header
+    // comment's "clock-driver asymmetry" note), and it turned out enabling RX
+    // alone never starts it. TX is unconditionally enabled by audio_bus_init()
+    // below instead, independent of whether the metronome FEATURE is on, so the
+    // clock always runs whenever the bus exists -- metronome_audio_start() just
+    // queues/writes click bursts into an already-running channel; it no longer
+    // owns enabling TX itself.
     return ESP_OK;
 }
 
@@ -90,12 +98,22 @@ static esp_err_t codec_init(void) {
                                         AUDIO_BUS_SAMPLE_RATE);
     if (e != ESP_OK) return e;
 
-    // digital_mic=false selects analog mic-in mode (vs. digital/PDM). Matches the
-    // pre-P4-020 metronome_audio.c precedent, which called this the same way even
-    // on its TX-only path -- assumed correct for this board's wiring, final
-    // confirmation against real hardware happens at the P4-020 hardware-validation
-    // step (see docs/plans/2026-07-09-p4-020-follow-beat-design.md).
-    return es8311_microphone_config(s_codec, false);
+    // digital_mic=false selects analog mic-in mode (vs. digital/PDM). Confirmed
+    // correct against real hardware (2026-07-09): with this setting (plus the
+    // gain below), follow_beat locked onto real click tracks across 108-183 BPM
+    // within ~1%. The ES8311's mono ADC output turned out to be duplicated into
+    // both I2S slots identically (see follow_beat_io.c's capture_task comment),
+    // resolving that assumption too.
+    e = es8311_microphone_config(s_codec, false);
+    if (e != ESP_OK) return e;
+
+    // Mic PGA gain: hardware validation (2026-07-09) found the ADC reporting
+    // total silence (confidence exactly 0.0, not just below threshold) with no
+    // gain set -- the codec's power-on-reset gain is evidently too low/muted to
+    // register a normal room mic signal. 24dB is a reasonable mid-high starting
+    // point (Espressif's ES8311 examples commonly use this range for MEMS mic
+    // recording); revisit if follow_beat still can't lock or clips.
+    return es8311_microphone_gain_set(s_codec, ES8311_MIC_GAIN_24DB);
 }
 
 void audio_bus_init(void) {
@@ -110,6 +128,13 @@ void audio_bus_init(void) {
     if (e != ESP_OK) { ESP_LOGE(TAG, "I2S init failed: %s -- audio bus unavailable", esp_err_to_name(e)); return; }
     e = codec_init();
     if (e != ESP_OK) { ESP_LOGE(TAG, "ES8311 init failed: %s -- audio bus unavailable", esp_err_to_name(e)); return; }
+
+    // TX is the shared clock driver (see i2s_init()'s comment above) -- enable
+    // it unconditionally so RX always has a clock, regardless of whether the
+    // metronome feature itself wants to click. auto_clear (set in i2s_init())
+    // means an always-running, nothing-queued TX just emits silence.
+    e = i2s_channel_enable(s_tx);
+    if (e != ESP_OK) { ESP_LOGE(TAG, "TX channel enable failed: %s -- audio bus unavailable", esp_err_to_name(e)); return; }
 
     s_ready = true;
     ESP_LOGI(TAG, "audio bus ready");

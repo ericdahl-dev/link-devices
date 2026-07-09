@@ -121,11 +121,14 @@ void metronome_audio_start(int volume, int voice)
     gpio_config(&pa);
     gpio_set_level(PIN_PA_ENABLE, 1);
 
+    // TX is already enabled by audio_bus_init() -- it's the shared clock
+    // driver for the whole bus (see i2s_audio_bus.c), not something this
+    // feature owns anymore. Hardware validation (2026-07-09) found that
+    // gating TX-enable on metronome_enable left RX with no clock at all
+    // whenever the metronome was off.
     s_tx = audio_bus_tx();
     esp_err_t e = es8311_voice_volume_set(audio_bus_codec(), s_volume, NULL);
     if (e != ESP_OK) { ESP_LOGE(TAG, "codec volume set failed: %s -- metronome muted", esp_err_to_name(e)); return; }
-    e = i2s_channel_enable(s_tx);
-    if (e != ESP_OK) { ESP_LOGE(TAG, "TX channel enable failed: %s -- metronome muted", esp_err_to_name(e)); return; }
 
     s_queue = xQueueCreate(4, sizeof(bool));
     if (!s_queue) { ESP_LOGE(TAG, "queue alloc failed -- metronome muted"); return; }
