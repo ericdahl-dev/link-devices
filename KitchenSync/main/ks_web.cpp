@@ -351,7 +351,7 @@ static esp_err_t root_handler(httpd_req_t *req)
 static esp_err_t status_handler(httpd_req_t *req)
 {
     char buf[192];   // grew from 128 -- three more fields (P4-020)
-    FollowBeatOut fb = s_cfg && s_cfg->follow_beat_enable ? follow_beat_io_status() : (FollowBeatOut){0};
+    FollowBeatOut fb = s_cfg && s_cfg->follow_beat_enable ? follow_beat_io_status() : FollowBeatOut{};
     ks_status_json(buf, sizeof(buf),
                       (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
                       wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx(),
