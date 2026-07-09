@@ -218,8 +218,8 @@ if(typeof d.bpm==='number')showBpm(d.bpm);peersEl.textContent=d.peers;
 usbEl.textContent=d.usb?'Connected':'Waiting';usbEl.className='pill'+(d.usb?' on':'');
 minEl.textContent=(d.min>0)?d.min.toFixed(1)+' BPM':'——.— BPM';
 txEl.textContent=(d.tx||0)+' pulses';
-if(typeof d.follow_valid!=='undefined'){
-  followEl.textContent=d.follow_valid?(d.follow_bpm.toFixed(1)+' BPM'):'listening...';
+if(typeof d.follow_enabled!=='undefined'){
+  followEl.textContent=!d.follow_enabled?'off':(d.follow_valid?(d.follow_bpm.toFixed(1)+' BPM'):'listening...');
 }
 }).catch(function(){})}
 poll();setInterval(poll,1000);
@@ -360,12 +360,13 @@ static esp_err_t root_handler(httpd_req_t *req)
 
 static esp_err_t status_handler(httpd_req_t *req)
 {
-    char buf[192];   // grew from 128 -- three more fields (P4-020)
-    FollowBeatOut fb = s_cfg && s_cfg->follow_beat_enable ? follow_beat_io_status() : FollowBeatOut{};
+    char buf[220];   // grew from 128 -- four more fields (P4-020); matches test_ks_status.c's margin
+    bool fb_enabled = s_cfg && s_cfg->follow_beat_enable;
+    FollowBeatOut fb = fb_enabled ? follow_beat_io_status() : FollowBeatOut{};
     ks_status_json(buf, sizeof(buf),
                       (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
                       wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx(),
-                      FW_VERSION, fb.bpm, fb.confidence, fb.valid);
+                      FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }

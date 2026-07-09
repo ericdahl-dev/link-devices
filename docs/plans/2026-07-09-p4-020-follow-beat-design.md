@@ -28,7 +28,7 @@ I2S mic (ES8311, GPIO11)
   -> follow_beat_io.c   (impure: I2S RX task, ring buffer)      -- new, KitchenSync/main/
   -> follow_beat.c/h    (pure: envelope + autocorrelation -> BPM/confidence) -- new, KitchenSync/main/
   -> ks_status.c         (adds follow_bpm / follow_confidence / follow_valid to /status JSON)
-  -> ks_web.cpp + ks_config.h/.c  (adds follow_beat_enable toggle, live-safe)
+  -> ks_web.cpp + ks_config.h/.c  (adds follow_beat_enable toggle, reboot-only)
 ```
 
 ### `follow_beat_io.c` (impure)
@@ -77,8 +77,10 @@ int follow_beat_enable;  // 0/1 — mic-based tempo detection (P4-020)
 - `ks_config_defaults`: default `0` (off).
 - `ks_config_set` / `ks_form.c`: goes through the existing single POST-body-grammar intake
   (ARC-006) — no new parsing path.
-- `ks_config_live_safe_copy`: live-safe (toggling doesn't need a reboot), same as
-  `metronome_enable`.
+- `ks_config_live_safe_copy`: **excluded** — starting/stopping mic capture needs the I2S/codec
+  bus brought up, so this is Save-and-reboot only, same as `metronome_enable` itself (not to be
+  confused with `metronome_volume`/`metronome_voice`/`metronome_accent`, which *are* live-safe —
+  only the enable flag needs a reboot).
 
 `ks_status.c` JSON gains `follow_bpm`, `follow_confidence`, `follow_valid`, populated straight from
 `FollowBeatOut` — same shape as the existing `bpm`/`peers`/`locked` fields.
