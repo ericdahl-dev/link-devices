@@ -165,7 +165,7 @@ Add `test_follow_beat` to the `all:` target's dependency list and its `./test_fo
 
 ```make
 test_follow_beat: test_follow_beat.c $(FOLLOWBEAT) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@ -lm
 ```
 
 **Step 3: Run to verify it fails**
