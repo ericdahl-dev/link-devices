@@ -36,6 +36,8 @@
 #include "clock_ticker.h"
 #include "metronome.h"
 #include "metronome_audio.h"
+#include "i2s_audio_bus.h"     /* shared I2S_NUM_0 + ES8311 codec owner (P4-020) */
+#include "follow_beat_io.h"    /* mic capture task (P4-020) */
 #include "metro_strip.h"     /* pure WS2812 bar-position chase (P4-018) */
 #include "ks_led.h"       /* WS2812 strip glue (RMT) */
 #include "usb_midi_pack.h"
@@ -216,8 +218,12 @@ void app_main(void)
     usb_midi_host_start();
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
     ks_web_start(&g_cfg, &g_cfg_gen, g_cfg_mutex);
+    if (g_cfg.metronome_enable || g_cfg.follow_beat_enable)
+        audio_bus_init();   /* shared I2S_NUM_0 + ES8311 codec owner (P4-020) -- once, before either consumer */
     if (g_cfg.metronome_enable)
         metronome_audio_start(g_cfg.metronome_volume, g_cfg.metronome_voice);   /* codec/I2S only when used */
+    if (g_cfg.follow_beat_enable)
+        follow_beat_io_start();   /* mic-based tempo detection, display-only v1 (P4-020) */
     ks_led_start(LED_GPIO, LED_PIXELS);   /* WS2812 visual metronome; harmless if nothing wired (P4-018) */
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
 }
