@@ -36,6 +36,7 @@ typedef struct {
     int  led_fade;          // 0..100 — dim across a beat % (0 steady .. 100 dark by next)
     int  led_beat_color;    // 0xRRGGBB — colour for beats 2..N
     int  led_accent_color;  // 0xRRGGBB — colour for the bar-1 downbeat
+    int  follow_beat_enable; // 0/1 -- mic-based tempo detection (P4-020, display only)
 } KsConfig;
 
 void ks_config_defaults(KsConfig* c);
