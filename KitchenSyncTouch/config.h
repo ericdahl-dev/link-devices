@@ -14,8 +14,14 @@
 #define LINK_SEND_INTERVAL_MS 500
 #define LINK_REFRESH_BARS     1
 
-// MIDI clock: 24 PPQN protocol constant (drives the clock generator, Inc 1b).
+// MIDI clock: 24 PPQN protocol constant (drives the clock generator, Inc 1b). The
+// rest are consumed by the shared midi_clock.cpp's MIDI-IN ring, which is dead code
+// here (Link-only) but still compiled — keep the constants so it builds.
 #define MCK_PPQN              24
+#define MCK_BPM_THRESHOLD     1.5f
+#define MCK_POLL_MS           10
+#define MCK_CLOCK_WINDOW      48
+#define MCK_CLOCK_TIMEOUT_MS  2000
 
 // KitchenSync Touch defaults — a MIDI product, NO mixer/OSC/model/fx anything.
 #define DEFAULT_QUANTUM_BEATS    4
