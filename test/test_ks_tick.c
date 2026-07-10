@@ -98,8 +98,45 @@ void test_metronome_clicks_when_playing(void) {
     TEST_ASSERT_TRUE(clicked);
 }
 
+/* ---- ESP-009: standby -- connected-but-stopped must not look dead ------- */
+
+// Session up, transport stopped: the plan says "standby" so the caller can show
+// a heartbeat instead of going dark and indistinguishable from a crashed board.
+void test_standby_when_session_up_but_stopped(void) {
+    KsTickInputs in = mk(0, 0, /*tp_playing=*/false, true);
+    KsTickPlan p = ks_tick_step(&st, &in);
+    TEST_ASSERT_TRUE(p.active);
+    TEST_ASSERT_TRUE(p.standby);
+}
+
+// Playing: no standby, the beat chase owns the strip.
+void test_no_standby_while_playing(void) {
+    KsTickInputs in = mk(0, 0, /*tp_playing=*/true, true);
+    TEST_ASSERT_FALSE(ks_tick_step(&st, &in).standby);
+}
+
+// No session at all is NOT standby -- that state is "disconnected", visually
+// distinct, and owned by the caller (WiFi-down blink convention).
+void test_no_standby_without_session(void) {
+    KsTickInputs in = mk(0, 0, false, true);
+    in.have_session = false;
+    KsTickPlan p = ks_tick_step(&st, &in);
+    TEST_ASSERT_FALSE(p.active);
+    TEST_ASSERT_FALSE(p.standby);
+}
+
+// Standby never clicks the speaker. An idle rig must stay silent.
+void test_standby_is_silent(void) {
+    KsTickInputs in = mk(0, 0, false, true);
+    TEST_ASSERT_FALSE(ks_tick_step(&st, &in).click);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_standby_when_session_up_but_stopped);
+    RUN_TEST(test_no_standby_while_playing);
+    RUN_TEST(test_no_standby_without_session);
+    RUN_TEST(test_standby_is_silent);
     RUN_TEST(test_free_run_is_active);
     RUN_TEST(test_cfg_gen_change_reprimes);
     RUN_TEST(test_enabled_output_emits_pulses);

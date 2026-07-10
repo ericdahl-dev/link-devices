@@ -51,6 +51,10 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
         plan.transport = transport_update(&st->tr, in->start_stop_seen, in->playing);
     }
 
+    // Connected but waiting for transport. The caller pulses the strip; the
+    // speaker stays quiet (ESP-009).
+    plan.standby = !in->tp_playing;
+
     // Metronome click, gated by the transport (quiet when stopped, P4-019).
     if (in->cfg->metronome_enable) {
         if (in->tp_playing) {

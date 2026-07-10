@@ -60,6 +60,9 @@ typedef struct {
     TransportAction transport;                 // START/STOP/NONE, fan to enabled outputs
     bool            click;                      // emit a metronome click
     bool            click_accent;               // ...as the bar-1 accent
+    bool            standby;    // session up, transport stopped: show a heartbeat,
+                                // stay silent. Without it, "waiting for play" looks
+                                // exactly like a dead board (ESP-009).
 } KsTickPlan;
 
 // Advance one tick: beat_source, the reprime fold, and — when the beat is active — the
