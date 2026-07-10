@@ -85,8 +85,11 @@ void test_enabled_output_emits_pulses(void) {
     TEST_ASSERT_GREATER_THAN_INT(0, run_pulses(true, 1, 1));   // usb ready, clock on, out on
 }
 
-void test_clock_gated_by_usb_ready(void) {
-    TEST_ASSERT_EQUAL_INT(0, run_pulses(false, 1, 1));         // no USB host -> nothing
+// ESP-015: pulses are a musical decision, NOT gated on a USB host -- the DIN MIDI
+// output must clock with no USB device attached. (The USB *send* is gated in the
+// glue, not here.) This replaces the old "no USB -> no pulses" behavior.
+void test_clock_not_gated_by_usb_ready(void) {
+    TEST_ASSERT_GREATER_THAN_INT(0, run_pulses(false, 1, 1));  // no USB host -> DIN still clocks
 }
 
 void test_clock_gated_by_master_switch(void) {
@@ -255,7 +258,7 @@ int main(void) {
     RUN_TEST(test_no_downbeat_without_session);
     RUN_TEST(test_cfg_gen_change_reprimes);
     RUN_TEST(test_enabled_output_emits_pulses);
-    RUN_TEST(test_clock_gated_by_usb_ready);
+    RUN_TEST(test_clock_not_gated_by_usb_ready);
     RUN_TEST(test_clock_gated_by_master_switch);
     RUN_TEST(test_disabled_output_never_pulses);
     RUN_TEST(test_metronome_silent_when_stopped);

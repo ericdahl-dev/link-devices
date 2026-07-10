@@ -47,8 +47,11 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
     }
 
     // Clock fan-out: the one shared beat to each enabled output at its own division +
-    // phase nudge + swing (P4-010), gated by the USB host + the master clock switch.
-    if (in->usb_ready && in->cfg->clock_out_enable) {
+    // phase nudge + swing (P4-010), gated by the master clock switch. NOT gated on
+    // the USB host: how many pulses are due is a musical decision, and the DIN MIDI
+    // output (ESP-015) must clock whether or not a USB device is attached. The glue
+    // gates only the USB *send* on usb_ready; the pulse count is computed regardless.
+    if (in->cfg->clock_out_enable) {
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
             const ClockOutputCfg* oc = &in->cfg->clock[o];
             if (!oc->enable) continue;
