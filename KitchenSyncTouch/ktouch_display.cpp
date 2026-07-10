@@ -40,10 +40,14 @@ public:
 };
 
 #define LCD_BL   46
-// Phase/sync wheel (leaves the lower third free for the PLAY/STOP buttons, Inc2).
-#define WHEEL_CX 86
-#define WHEEL_CY 150
-#define WHEEL_R  42
+// Landscape 320x172 (setRotation 7): a transport device is held horizontally, so
+// there's width for a big BPM readout, the sync wheel, a readable name -- and, in
+// Inc2, two fat side-by-side PLAY/STOP buttons across the bottom.
+#define SCR_W    320
+#define SCR_H    172
+#define WHEEL_CX 255
+#define WHEEL_CY 74
+#define WHEEL_R  50
 
 static LGFX     s_lcd;
 static float    s_shown_bpm = -1.0f;
@@ -53,25 +57,25 @@ static uint32_t s_last_text = 0;
 
 static void backlight_on(void) { pinMode(LCD_BL, OUTPUT); digitalWrite(LCD_BL, HIGH); }
 
-// Static frame: header, wheel outline, "BPM" label. Redrawn on a sync-state change.
+// Static frame: header, wheel outline, "SYNC" label. Redrawn on a sync-state change.
 static void draw_frame(int sync) {
     s_lcd.fillScreen(TFT_BLACK);
     s_lcd.setTextColor(0x838d95u, TFT_BLACK); s_lcd.setTextSize(1);
-    s_lcd.setCursor(8, 8); s_lcd.println("KITCHENSYNC TOUCH");
+    s_lcd.setCursor(10, 8); s_lcd.println("KITCHENSYNC TOUCH");
     s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);
     s_lcd.setTextColor(0x6f8a4du, TFT_BLACK); s_lcd.setTextSize(1);
-    s_lcd.setCursor(WHEEL_CX - 24, WHEEL_CY + WHEEL_R + 8); s_lcd.println("SYNC");
+    s_lcd.setCursor(WHEEL_CX - 12, WHEEL_CY + WHEEL_R + 6); s_lcd.println("SYNC");
     s_prev_mx = s_prev_my = -1;
     (void)sync;
 }
 
 void ktouch_display_begin(void) {
     s_lcd.init();
-    s_lcd.setRotation(6);   // LNK-035: USB exits downward when hand-held
+    s_lcd.setRotation(7);   // landscape 320x172 (transport device held horizontally)
     backlight_on();
     draw_frame(-1);
-    s_lcd.setTextColor(0xB6FF36u, TFT_BLACK); s_lcd.setTextSize(1);
-    s_lcd.setCursor(8, 300); s_lcd.println("booting...");
+    s_lcd.setTextColor(0xB6FF36u, TFT_BLACK); s_lcd.setTextSize(2);
+    s_lcd.setCursor(10, 140); s_lcd.println("booting...");
 }
 
 void ktouch_display_tick(void) {
@@ -79,25 +83,29 @@ void ktouch_display_tick(void) {
     int   sync = tempo_source_phase_valid() ? 1 : (tempo_source_active() ? 0 : -1);
     uint32_t now = millis();
 
-    // Text (BPM number + sync line + IP): throttled, redraw on change.
+    // Text (BPM number + sync line + name): throttled, redraw on change.
     if (now - s_last_text >= 200 &&
         (fabsf(bpm - s_shown_bpm) >= 0.05f || sync != s_shown_sync)) {
         s_last_text = now;
         if (sync != s_shown_sync) draw_frame(sync);  // clears wheel interior too
         s_shown_bpm = bpm; s_shown_sync = sync;
 
-        s_lcd.fillRect(0, 40, 172, 46, TFT_BLACK);   // BPM area
-        s_lcd.setTextColor(0xB6FF36u, TFT_BLACK); s_lcd.setTextSize(6);
-        s_lcd.setCursor(8, 42);
+        // Big BPM, top-left.
+        s_lcd.fillRect(0, 32, 200, 60, TFT_BLACK);
+        s_lcd.setTextColor(0xB6FF36u, TFT_BLACK); s_lcd.setTextSize(7);
+        s_lcd.setCursor(10, 34);
         if (bpm > 0.0f) s_lcd.printf("%3.0f", bpm); else s_lcd.print("---");
+        s_lcd.setTextColor(0x6f8a4du, TFT_BLACK); s_lcd.setTextSize(2);
+        s_lcd.setCursor(150, 94); s_lcd.println("BPM");
 
-        s_lcd.fillRect(0, 250, 172, 60, TFT_BLACK);
+        // Sync state + name across the bottom, both large.
+        s_lcd.fillRect(0, 118, SCR_W, 54, TFT_BLACK);
         const char* st = sync == 1 ? "SYNCED" : sync == 0 ? "linking..." : "no link";
         s_lcd.setTextColor(sync == 1 ? 0xB6FF36u : 0xFF9D3Bu, TFT_BLACK); s_lcd.setTextSize(2);
-        s_lcd.setCursor(8, 258); s_lcd.println(st);
-        // Reach it by name, not a faint IP. Brighter: white on black.
-        s_lcd.setTextColor(TFT_WHITE, TFT_BLACK); s_lcd.setTextSize(1);
-        s_lcd.setCursor(8, 292);
+        s_lcd.setCursor(10, 120); s_lcd.println(st);
+        // Reach it by name, not a faint IP. Bigger + white.
+        s_lcd.setTextColor(TFT_WHITE, TFT_BLACK); s_lcd.setTextSize(2);
+        s_lcd.setCursor(10, 146);
         if (WiFi.status() == WL_CONNECTED) { s_lcd.print(g_ks_host); s_lcd.println(".local"); }
         else s_lcd.println("no wifi");
     }
