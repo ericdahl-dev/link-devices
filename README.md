@@ -17,15 +17,23 @@ preserved; recovery tag `pre-split-2026-07-04` on the old repo).
   for real hardware: **USB-MIDI host** clock + transport out (drive gear like a
   Blokas Midihub directly), **phase-locked downbeat** sync, four Multiclock-style
   outputs with per-output division / phase nudge / **swing**, an audible
-  metronome, a rack-panel web UI with **live (no-reboot) timing config**,
-  **web-based OTA updates** (P4-017, dual-slot), and **MIDI clock IN** detection
-  (publishing it back into Link is next). Reuses this repo's pure modules
-  unchanged. See [`KitchenSync/README.md`](KitchenSync/README.md).
+  metronome, a WS2812 visual metronome, a rack-panel web UI with **live
+  (no-reboot) timing config**, **web-based OTA updates** (P4-017, dual-slot),
+  **MIDI clock IN** detection, and **Follow Beat** (P4-020) — mic-based tempo
+  detection from the onboard ES8311 codec, display-only for now. Reuses this
+  repo's pure modules unchanged. See [`KitchenSync/README.md`](KitchenSync/README.md).
 - **X32_emulator** (`X32_emulator/`) — on-device X32 OSC emulator used for
   integration tests (also consumed by the CLI tests in the `behringer` repo).
 - **LoraLink** (`LoraLink/`) — a pair of ESP32-S3+SX1262 LoRa boards that relay
   the Link session BPM out of WiFi range for loose (non-phase-accurate) FX
   tempo control. See [`LoraLink/README.md`](LoraLink/README.md).
+- **LinkAudioPoC** (`LinkAudioPoC/`) — a **proven spike, not a product**
+  (P4-032). Streams the P4's onboard mic into an Ableton Live 12.4 session as a
+  **Link Audio** channel, sample-rate-adaptive and calibrated to ~1 ms of Live's
+  grid. Deliberately separate from KitchenSync: it links the **GPLv2** Ableton
+  Link SDK, which cannot ship in closed hardware without a commercial licence
+  from Ableton — a business gate nobody has cleared yet. See
+  [`LinkAudioPoC/README.md`](LinkAudioPoC/README.md).
 
 ## Architecture
 
@@ -39,12 +47,19 @@ the touch-vs-web config split.
 ## Build / test
 
 - **Host tests:** `make -C test` (Unity is vendored in `lib/unity/` — no submodule).
-- **Firmware:** `arduino-cli compile --fqbn 'esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi' X32Link` (see `AGENTS.md`; board flag goes in `X32Link/build_opt.h`, kept empty at HEAD).
+  Every test also depends on every header, so a changed constant can never leave
+  a stale binary passing locally while CI fails.
+- **Firmware (Arduino targets):** `arduino-cli compile --fqbn 'esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi' X32Link` (see `AGENTS.md`; board flag goes in `X32Link/build_opt.h`, kept empty at HEAD).
+- **Firmware (ESP-IDF targets):** `idf.py build` in `KitchenSync/` or
+  `LinkAudioPoC/` (esp32p4). WiFi credentials live in a gitignored `sdkconfig`,
+  never committed.
 - **OTA (no USB after first flash):** both X32Link and KitchenSync accept a `.bin`
   at `/update` over WiFi. See [`docs/ota-deployment.md`](docs/ota-deployment.md).
 
-CI (`.github/workflows/ci.yml`) runs the host suite + emulator seam tests +
-compiles X32Link (headless + touch) and X32_emulator.
+CI (`.github/workflows/ci.yml`) runs the host suite + emulator seam tests and
+compiles X32Link (headless / touch / QT Py+battery), X32_emulator, LoraLink
+(sender + receiver), and KitchenSync (ESP-IDF). `master` is protected: all four
+checks must pass, on an up-to-date branch, before a PR can merge.
 
 ## Tasks
 
@@ -56,6 +71,11 @@ separately.
 ## Credits
 
 This firmware builds on third-party work — Unity, ESP-IDF + Espressif components,
-Arduino-ESP32, LovyanGFX, and the web-UI fonts — and speaks the Ableton Link
-protocol via a clean-room implementation. See [`THIRD_PARTY.md`](THIRD_PARTY.md)
-for authors, licenses, and where each is used.
+Arduino-ESP32, RadioLib, U8g2, LovyanGFX, and the web-UI fonts. The shipping
+firmware (X32Link, KitchenSync, LoraLink) speaks the Ableton Link protocol via a
+**clean-room implementation** in `X32Link/link_protocol.c` — receive-only, no
+Ableton code. The `LinkAudioPoC/` spike is the one exception: it links Ableton's
+own **GPLv2** SDK (vendored, gitignored, patched — see
+`LinkAudioPoC/patches/`), which is why it is quarantined outside the product
+firmware. See [`THIRD_PARTY.md`](THIRD_PARTY.md) for authors, licenses, and
+where each is used.
