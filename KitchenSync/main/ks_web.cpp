@@ -2,7 +2,9 @@
  * KitchenSync web UI (P4-007) — rack-panel status + config page styled like X32Link,
  * served over esp_http_server. Thin glue: live values from pure ks_status.c
  * (/status, polled 1 Hz); config model is pure ks_config.c; NVS + reboot are
- * the only side effects. CSS/aesthetic lifted from X32Link/web_config.cpp.
+ * the only side effects. The panel look and the client-side plumbing are the
+ * shared, host-tested ui_chrome.c (ARC-017) -- this file owns only KitchenSync's
+ * own form and the rules that extend the chrome.
  */
 #include <string>
 #include <string.h>
@@ -18,6 +20,7 @@
 #include "esp_partition.h"
 #include "midi_clock_in.h"   /* detected MIDI-clock-IN tempo for /status (P4-011) */
 #include "link_protocol.h"
+#include "ui_chrome.h"    /* ARC-017: shared CSS/JS + result & update pages */
 #include "wifi_link.h"
 #include "usb_midi_host.h"
 #include "fw_version.h"      /* LNK-038: shared FW_VERSION / FW_BUILD (X32Link/ include path) */
@@ -29,6 +32,9 @@
 #include "ks_web.h"
 #include "metronome_audio.h"   // P4-029: live vol/voice re-apply
 #include "transport_intent.h"   // ESP-011: quantized launch presses
+
+#define RESULT_PAGE_MAX 1536   /* ui_result_page worst case + slack */
+#define UPDATE_PAGE_MAX 2560   /* ui_update_page worst case + slack */
 
 static const char *TAG = "ks_web";
 static KsConfig *s_cfg = nullptr;
@@ -48,39 +54,9 @@ static const char PAGE[] = R"HTML(<!doctype html>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/dseg@0.46.0/css/dseg.css" rel="stylesheet">
-<style>
-:root{--bg:#070809;--panel-2:#0f1216;--ink:#e9ece6;--mut:#838d95;--line:#262b31;
---led:#b6ff36;--led-dim:#36431a;--amber:#ff9d3b;
---mono:'DM Mono',ui-monospace,Menlo,monospace;--disp:'Bricolage Grotesque','Arial Narrow',sans-serif;--seg:'DSEG7 Classic','DM Mono',monospace;}
-*{box-sizing:border-box}html,body{margin:0}
-body{min-height:100vh;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:14px;
-display:flex;align-items:flex-start;justify-content:center;padding:34px 16px 80px;
-background-image:radial-gradient(900px 500px at 50% -10%,#14181d 0%,transparent 60%),radial-gradient(700px 500px at 90% 110%,#0e1318 0%,transparent 55%);}
-.unit{width:100%;max-width:430px;border:1px solid var(--line);border-radius:16px;position:relative;overflow:hidden;
-background:repeating-linear-gradient(180deg,rgba(255,255,255,.012) 0 2px,transparent 2px 4px),linear-gradient(180deg,#191d22,#101317);
-box-shadow:0 1px 0 rgba(255,255,255,.04),0 22px 60px -20px #000;}
-.unit::before{content:"";position:absolute;inset:0 0 auto 0;height:120px;background:linear-gradient(180deg,rgba(255,255,255,.05),transparent);pointer-events:none}
-.screw{position:absolute;width:11px;height:11px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3a4047,#0d0f12 70%);box-shadow:inset 0 1px 1px rgba(255,255,255,.18)}
-.screw::after{content:"";position:absolute;inset:3px;border-top:1px solid #05070a;transform:rotate(28deg)}
-.tl{top:12px;left:12px}.tr{top:12px;right:12px}.bl{bottom:12px;left:12px}.br{bottom:12px;right:12px}
-.brand{display:flex;align-items:center;gap:11px;padding:18px 26px 14px;border-bottom:1px solid var(--line)}
-.pwr{width:9px;height:9px;border-radius:50%;background:var(--led);box-shadow:0 0 10px 1px var(--led);animation:breathe 3.4s ease-in-out infinite}
-.wordmark{font-family:var(--disp);font-weight:800;font-size:20px;letter-spacing:.06em;text-transform:uppercase}
-.wordmark b{color:var(--led)}
-.rev{margin-left:auto;font-size:10.5px;color:var(--mut);letter-spacing:.18em;text-transform:uppercase}
-.scr{margin:18px;padding:18px 20px 16px;border-radius:11px;position:relative;border:1px solid #1f261b;
-background:radial-gradient(120% 120% at 50% -20%,rgba(182,255,54,.08),transparent 60%),linear-gradient(180deg,#0a0d0a,#070907);
-box-shadow:inset 0 0 32px rgba(0,0,0,.9)}
-.scr-top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.beat{width:8px;height:8px;border-radius:2px;background:var(--led-dim)}
-.beat.on{background:var(--led);box-shadow:0 0 9px 1px var(--led)}
-.scr-lbl{font-size:10.5px;letter-spacing:.22em;color:#6f8a4d;text-transform:uppercase}
-.scr-src{margin-left:auto;font-size:10.5px;letter-spacing:.2em;color:var(--amber);text-transform:uppercase}
-.readout{position:relative;font-family:var(--seg);line-height:1;padding:4px 0 2px}
-.readout .ghost{position:absolute;inset:4px 0 2px;color:#1a2113}
-.readout .live{position:relative;color:var(--led);text-shadow:0 0 14px rgba(182,255,54,.45)}
-.bignum{font-size:58px}
-.unit-bpm{font-family:var(--mono);font-size:13px;color:#6f8a4d;letter-spacing:.2em;margin-left:6px}
+<style>%CSS%
+/* Page-specific: everything above is the shared chrome (ui_chrome_css, ARC-017).
+   These rules extend or follow it, and only win by coming second. */
 .rows{padding:6px 26px 4px}
 .row{display:flex;justify-content:space-between;align-items:baseline;padding:15px 0;border-top:1px solid var(--line)}
 .row label{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--mut)}
@@ -90,9 +66,7 @@ box-shadow:inset 0 0 32px rgba(0,0,0,.9)}
 form{padding:2px 26px 26px}
 .frow{padding:14px 0;border-top:1px solid var(--line)}
 .cap{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--mut);margin-bottom:9px;display:block}
-.fld{display:flex;align-items:center;background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:0 12px;margin-top:6px}
-.fld:focus-within{border-color:#4a5a2c;box-shadow:0 0 0 3px rgba(182,255,54,.08)}
-.fld .pre{color:#4b535b;font-size:12px;letter-spacing:.1em;padding-right:9px;border-right:1px solid var(--line);margin-right:11px}
+.fld{margin-top:6px}
 .fld input,.fld select{flex:1;appearance:none;background:transparent;border:0;outline:0;color:var(--ink);font-family:var(--mono);font-size:14.5px;padding:13px 0}
 .fld option{background:#0f1216}
 .fld.nudge{gap:9px}
@@ -108,7 +82,7 @@ justify-content:center;user-select:none;-webkit-user-select:none;touch-action:ma
 .sect{position:relative;margin:0 0 8px 3px;padding:0 0 10px 18px;border-left:2px solid var(--line)}
 .sect::before{content:"";position:absolute;left:-2px;top:0;width:2px;height:28px;background:var(--led-dim)}
 .sect > .frow:first-child{border-top:0;padding-top:12px}
-/* !important because the desktop media query's `.grp--wide .sect{display:grid}`
+/* !important because the desktop media query's `.grp--wide .sect`
    (two classes) otherwise out-specifies this single-class rule, leaving the MIDI
    Clock Out group unable to collapse above 760px while every other group could. */
 .hide{display:none!important}
@@ -129,22 +103,9 @@ color:var(--ink);cursor:pointer}
 .grid2 .fld,.colrow .fld{margin-top:0}
 .fld.color{margin-top:0}
 .fld.color input[type=color]{flex:1;width:auto;height:30px;margin-left:0}
-.sw{display:flex;align-items:center;gap:13px;cursor:pointer;user-select:none}
-.sw input{position:absolute;opacity:0;width:0;height:0}
-.sw .track{position:relative;flex:none;width:52px;height:28px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);transition:.2s}
-.sw .knob{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#5b636b;transition:.2s}
-.sw input:checked + .track{background:linear-gradient(180deg,#caff5a,#9be32a);border-color:#7fbf1f}
-.sw input:checked + .track .knob{left:28px;background:#0a0d07}
-.sw .swlbl{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
-.sw .swlbl::after{content:" Off"}
-.sw input:checked ~ .swlbl{color:var(--led)}
-.sw input:checked ~ .swlbl::after{content:" On"}
-.write{width:100%;margin-top:22px;border:0;cursor:pointer;border-radius:11px;font-family:var(--disp);font-weight:800;font-size:16px;letter-spacing:.14em;text-transform:uppercase;color:#0a0d07;padding:17px;
-background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 16px 30px -12px rgba(182,255,54,.5)}
+.write{margin-top:22px}
 .write:active{transform:translateY(4px);box-shadow:0 1px 0 #5e8a16}
-.foot{text-align:center;color:#3c444c;font-size:10.5px;letter-spacing:.18em;margin:8px 0 20px;text-transform:uppercase}
-@keyframes breathe{0%,100%{opacity:1}50%{opacity:.45}}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.foot{margin:8px 0 20px}
 /* Let the 2-up grid cells shrink to their track so wide inner controls (the
    nudge steppers) don't spill past the card edge. Applies at every width. */
 .grid2,.colrow{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
@@ -221,23 +182,20 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 </form>
 <div class="foot">Everything and the kitchen sync &middot; FW %FWVER% &middot; %FWBUILD% &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
 </div>
-<script>
-var bpmEl=document.getElementById('bpm'),beatEl=document.getElementById('beat');
+<script>%JS%
+// Page-specific. ui_chrome_js (ARC-017) already owns setBeat / showBpm / postLive
+// and the poll() loop; poll() hands each /status here.
 var peersEl=document.getElementById('peers'),usbEl=document.getElementById('usb'),txEl=document.getElementById('tx'),minEl=document.getElementById('min');
 var followEl=document.getElementById('follow');
-var beatTimer=null,shownBpm=-1;
-function setBeat(bpm){if(beatTimer){clearInterval(beatTimer);beatTimer=null}
-if(bpm>0){beatTimer=setInterval(function(){beatEl.classList.add('on');setTimeout(function(){beatEl.classList.remove('on')},90)},60000/bpm)}}
-function showBpm(bpm){if(Math.abs(bpm-shownBpm)<0.05)return;shownBpm=bpm;bpmEl.textContent=bpm>0?bpm.toFixed(1):'--.-';setBeat(bpm)}
-function poll(){fetch('/status',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
-if(typeof d.bpm==='number')showBpm(d.bpm);peersEl.textContent=d.peers;
+function onStatus(d){
+peersEl.textContent=d.peers;
 usbEl.textContent=d.usb?'Connected':'Waiting';usbEl.className='pill'+(d.usb?' on':'');
 minEl.textContent=(d.min>0)?d.min.toFixed(1)+' BPM':'——.— BPM';
 txEl.textContent=(d.tx||0)+' pulses';showLaunch(d.launch);
 if(typeof d.follow_enabled!=='undefined'){
   followEl.textContent=!d.follow_enabled?'off':(d.follow_valid?(d.follow_bpm.toFixed(1)+' BPM'):'listening...');
 }
-}).catch(function(){})}
+}
 poll();setInterval(poll,1000);
 // ESP-011: transport presses. Start is quantized on the device (fires on the
 // next bar line); stop is immediate. The button only posts the intent.
@@ -249,12 +207,6 @@ Array.prototype.forEach.call(document.querySelectorAll('.tp[data-play="1"]'),fun
 var o=b.dataset.out; if(o==='all')return;
 var st=a[+o]|0; b.classList.toggle('armed',st===1); b.classList.toggle('running',st===2);
 b.textContent=st===1?'ARMED':'PLAY'})}
-// Live controls (P4-015): POST the changed field to /live so timing/division are
-// audible immediately, no reboot. Save still persists everything via /save.
-function postLive(el){var n=el.name;if(!n)return;
-var v=el.type==='checkbox'?(el.checked?'1':'0'):el.value;
-fetch('/live',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-body:encodeURIComponent(n)+'='+encodeURIComponent(v)}).catch(function(){})}
 var liveT=null;
 Array.prototype.forEach.call(document.querySelectorAll('.live'),function(el){
 var num=el.type==='number';
@@ -395,9 +347,11 @@ static std::string build_led()
     return s;
 }
 
-static std::string build_page()
+// Only the slice between %CSS% and %JS% needs per-request values. The chrome on
+// either side goes out straight from static storage, never copied.
+static std::string build_body(const char* begin, const char* end)
 {
-    std::string h(PAGE);
+    std::string h(begin, end);
     subst(h, "%WIFI%",    build_wifi());
     subst(h, "%MCKCHK%",  (s_cfg && s_cfg->clock_out_enable) ? "checked" : "");
     subst(h, "%MTOCHK%",  (s_cfg && s_cfg->metronome_enable) ? "checked" : "");
@@ -416,11 +370,25 @@ static std::string build_page()
     return h;
 }
 
+// ARC-017: assembled from parts and sent chunked. The shared CSS and JS are ~4KB
+// of static rodata that used to be copied into the page string on every request.
 static esp_err_t root_handler(httpd_req_t *req)
 {
-    std::string page = build_page();
+    static const char CSS_MARK[] = "%CSS%", JS_MARK[] = "%JS%";
+    const char *css = strstr(PAGE, CSS_MARK);
+    const char *js  = strstr(PAGE, JS_MARK);
+    if (!css || !js) return ESP_FAIL;   // template lost its markers
+
     httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, page.c_str(), page.size());
+    httpd_resp_send_chunk(req, PAGE, css - PAGE);
+    httpd_resp_send_chunk(req, ui_chrome_css(), HTTPD_RESP_USE_STRLEN);
+
+    std::string body = build_body(css + strlen(CSS_MARK), js);
+    httpd_resp_send_chunk(req, body.c_str(), body.size());
+
+    httpd_resp_send_chunk(req, ui_chrome_js(), HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, js + strlen(JS_MARK), HTTPD_RESP_USE_STRLEN);
+    return httpd_resp_send_chunk(req, NULL, 0);   // terminate
 }
 
 static esp_err_t status_handler(httpd_req_t *req)
@@ -438,26 +406,20 @@ static esp_err_t status_handler(httpd_req_t *req)
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }
 
-// Minimal result page in the panel palette.
-// reboot=true adds a script that waits for the device to come back after the restart
-// and then loads the config homepage — so a Write & Reboot returns to '/' on its own
-// instead of leaving the browser stranded on /save.
+// ARC-017: the page itself is ui_result_page() — pure, shared with X32Link, tested.
+// reboot=true makes it poll until the device answers again and then return to '/',
+// so Write & Reboot doesn't strand the browser on /save.
 static esp_err_t send_result(httpd_req_t *req, const char *title, const char *msg, bool reboot)
 {
-    std::string p =
-        "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<body style='margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;"
-        "background:#070809;color:#e9ece6;font-family:ui-monospace,Menlo,monospace;text-align:center'>"
-        "<div style='padding:2rem'><div style='width:10px;height:10px;border-radius:50%;margin:0 auto 1.2rem;"
-        "background:#b6ff36;box-shadow:0 0 14px 2px #b6ff36'></div><h2 style='font-weight:600'>";
-    p += title; p += "</h2><p style='color:#717a82'>"; p += msg; p += "</p>";
-    if (reboot)
-        p += "<p style='color:#4b535b;font-size:12px'>returning to config&hellip;</p>"
-             "<script>setTimeout(function r(){fetch('/',{cache:'no-store'})"
-             ".then(function(){location.href='/'}).catch(function(){setTimeout(r,1500)})},6000)</script>";
-    p += "</div></body>";
+    /* Heap, not stack: the httpd task has ~4KB and this page is over 1KB. */
+    char *p = (char *)malloc(RESULT_PAGE_MAX);
+    if (!p) return ESP_ERR_NO_MEM;
+    int n = ui_result_page(p, RESULT_PAGE_MAX, title, msg, reboot);
+    if (n < 0 || n >= RESULT_PAGE_MAX) { free(p); return ESP_FAIL; }   // truncated
     httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, p.c_str(), p.size());
+    esp_err_t e = httpd_resp_send(req, p, n);
+    free(p);
+    return e;
 }
 
 static esp_err_t save_handler(httpd_req_t *req)
@@ -574,51 +536,20 @@ static esp_err_t live_handler(httpd_req_t *req)
 // (otadata + ota_0 + ota_1, no factory slot), so a push always targets "the
 // other" slot and boots into it on success — the running image is never
 // touched until esp_ota_set_boot_partition commits.
-static const char UPDATE_PAGE[] = R"HTML(<!doctype html><html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>KitchenSync &middot; Firmware Update</title>
-<style>
-body{margin:0;min-height:100vh;background:#070809;color:#e9ece6;font-family:ui-monospace,Menlo,monospace;
-display:flex;align-items:center;justify-content:center;padding:16px}
-.card{width:100%;max-width:380px;border:1px solid #262b31;border-radius:14px;padding:28px 26px;background:#12151a}
-h2{margin:0 0 6px;font-size:18px;letter-spacing:.04em}
-p{color:#717a82;font-size:12.5px;margin:0 0 20px;letter-spacing:.03em}
-input[type=file]{display:block;width:100%;margin-bottom:18px;color:#e9ece6;font-family:inherit;font-size:13px}
-button{width:100%;border:0;cursor:pointer;border-radius:10px;font-weight:700;font-size:14px;
-letter-spacing:.06em;text-transform:uppercase;color:#0a0d07;padding:14px;
-background:linear-gradient(180deg,#d2ff63,#9be32a)}
-#st{margin-top:14px;font-size:12px;color:#717a82;letter-spacing:.03em}
-a{color:#b6ff36;text-decoration:none;font-size:12px}
-</style></head><body>
-<div class="card">
-<h2>Firmware Update</h2>
-<p>Running FW %FWVER% &middot; built %FWBUILD%</p>
-<p>Select a compiled .bin. The device flashes the inactive OTA slot and reboots
-into it automatically.</p>
-<input type="file" id="fw" accept=".bin">
-<button id="go">Upload &amp; Flash</button>
-<div id="st"></div>
-<p style="margin-top:16px"><a href="/">&larr; Back</a></p>
-</div>
-<script>
-document.getElementById('go').addEventListener('click',function(){
-var f=document.getElementById('fw').files[0],st=document.getElementById('st');
-if(!f){st.textContent='Choose a .bin file first.';return}
-st.textContent='Uploading '+f.size+' bytes...';
-fetch('/update',{method:'POST',body:f}).then(function(r){
-return r.text().then(function(t){return {ok:r.ok,t:t}})
-}).then(function(res){st.textContent=res.ok?'Flashed — rebooting…':('Failed: '+res.t)})
-.catch(function(e){st.textContent='Error: '+e})
-});
-</script></body></html>)HTML";
+/* ARC-017: the /update page is ui_update_page() — shared with X32Link.
+ * multipart=false selects the fetch(body:file) uploader that esp_ota_ops wants. */
 
 static esp_err_t update_page_handler(httpd_req_t *req)
 {
-    std::string page(UPDATE_PAGE);
-    subst(page, "%FWVER%",   FW_VERSION);  /* LNK-038: show what's about to be overwritten */
-    subst(page, "%FWBUILD%", FW_BUILD);
+    char *page = (char *)malloc(UPDATE_PAGE_MAX);   /* not the 4KB httpd stack */
+    if (!page) return ESP_ERR_NO_MEM;
+    /* LNK-038: show what's about to be overwritten. */
+    int n = ui_update_page(page, UPDATE_PAGE_MAX, "KitchenSync", FW_VERSION, FW_BUILD, false);
+    if (n < 0 || n >= UPDATE_PAGE_MAX) { free(page); return ESP_FAIL; }
     httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, page.c_str(), page.size());
+    esp_err_t e = httpd_resp_send(req, page, n);
+    free(page);
+    return e;
 }
 
 static esp_err_t send_plain(httpd_req_t *req, const char *status, const char *msg)
