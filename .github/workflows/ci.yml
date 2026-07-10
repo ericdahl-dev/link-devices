@@ -29,18 +29,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache arduino-cli data
+      # Static key so a hit is permanent: adding a lib/bumping the core version
+      # below won't get cached under a stale key. Bump the -vN suffix when you
+      # change what "Install ESP32 core + LovyanGFX" installs. restore-keys lets
+      # this fall back to loralink-compile's cache (same esp32:esp32 core) on a
+      # cold cache instead of re-downloading it from scratch.
+      - name: Cache arduino-cli data (ESP32 core + libraries)
         uses: actions/cache@v4
         with:
           path: |
             ~/.arduino15
             ~/Arduino
-          key: arduino-esp32-${{ runner.os }}-v1
+          key: arduino-esp32-${{ runner.os }}-x32link-v1
+          restore-keys: |
+            arduino-esp32-${{ runner.os }}-
+
+      - name: Cache arduino-cli binary
+        id: cache-arduino-cli-bin
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: arduino-cli-bin-${{ runner.os }}-v1
 
       - name: Install arduino-cli
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
-          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+        if: steps.cache-arduino-cli-bin.outputs.cache-hit != 'true'
+        run: curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
+
+      - name: Add arduino-cli to PATH
+        run: echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
 
       - name: Install ESP32 core + LovyanGFX
         run: |
@@ -102,18 +118,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache arduino-cli data
+      # See firmware-compile's matching step for why the key is static + versioned.
+      # restore-keys falls back to firmware-compile's cache (same esp32:esp32 core)
+      # on a cold cache instead of re-downloading the core from scratch.
+      - name: Cache arduino-cli data (ESP32 core + libraries)
         uses: actions/cache@v4
         with:
           path: |
             ~/.arduino15
             ~/Arduino
-          key: arduino-esp32-lora-${{ runner.os }}-v1
+          key: arduino-esp32-${{ runner.os }}-lora-v1
+          restore-keys: |
+            arduino-esp32-${{ runner.os }}-
+
+      - name: Cache arduino-cli binary
+        id: cache-arduino-cli-bin
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: arduino-cli-bin-${{ runner.os }}-v1
 
       - name: Install arduino-cli
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
-          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+        if: steps.cache-arduino-cli-bin.outputs.cache-hit != 'true'
+        run: curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
+
+      - name: Add arduino-cli to PATH
+        run: echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
 
       - name: Install ESP32 core + LoRa/OLED libs
         run: |
