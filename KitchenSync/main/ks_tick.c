@@ -10,6 +10,7 @@ void ks_tick_reset(KsTickState* st, uint32_t cfg_gen) {
         transport_reset(&st->tr[i]);
         transport_launch_reset(&st->tl[i]);
     }
+    bar_reset_reset(&st->bar);
     st->seen_gen = cfg_gen;
 }
 
@@ -35,6 +36,7 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
     if (reprime) {
         for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) clock_ticker_reset(&st->cts[i]);
         metronome_reset(&st->mt);
+        bar_reset_reset(&st->bar);   // a re-origin must not fire a false downbeat
         if (!bs.active) for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) transport_reset(&st->tr[i]);
     }
     plan.reprime = reprime;
@@ -96,6 +98,11 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
         }
     }
     for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) plan.launch_state[o] = st->tl[o].state;
+
+    // ESP-015: once per bar boundary. The BarReset tracker owns "did we cross into
+    // a new bar", exactly the primitive the analog reset pulse (P4-021) reuses.
+    // Called once per active tick because it mutates state.
+    plan.downbeat = bar_reset_due(&st->bar, bs.beats, KS_TICK_METRO_QUANTUM);
 
     // Connected but waiting for transport. The caller pulses the strip; the
     // speaker stays quiet (ESP-009).
