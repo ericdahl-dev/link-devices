@@ -1,0 +1,22 @@
+diff --git a/include/ableton/platforms/esp32/Context.hpp b/include/ableton/platforms/esp32/Context.hpp
+index 27fb8b5..8a6c88f 100644
+--- a/include/ableton/platforms/esp32/Context.hpp
++++ b/include/ableton/platforms/esp32/Context.hpp
+@@ -63,9 +63,15 @@ class Context
+       : mpService(new ::asio::io_service())
+       , mpWork(new ::asio::io_service::work(*mpService))
+     {
++      // P4-032 PoC patch (2026-07-09): 8192 was sized for base Link and
++      // overflows the moment LinkAudio's SinkProcessor/Resizer machinery runs
++      // here (hardware stack-protection fault on ESP32-P4, constant ~2KB
++      // overshoot regardless of the app task's own stack -- this asio service
++      // task is where all Link/LinkAudio processing actually executes).
++      // Upstream this if the PoC graduates.
+       xTaskCreatePinnedToCore(run,
+-                              "link",
+-                              8192,
++                              "link_io",
++                              16384,
+                               this,
+                               2 | portPRIVILEGE_BIT,
+                               &mTaskHandle,

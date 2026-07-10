@@ -1,0 +1,16 @@
+# P4-032 PoC — P4-NANO board gates copied from KitchenSync/sdkconfig.defaults
+# (early silicon rev + C6 hosted WiFi). See that file for the full rationale.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+
+# asio throws; Link's esp32 example requires exceptions enabled.
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+
+# Spike: single big app slot, no OTA. The SDK + asio produce a large image;
+# this is the upstream example's choice too.
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# WiFi credentials (CONFIG_POC_WIFI_*) are set locally via menuconfig or a
+# gitignored sdkconfig -- never committed.
