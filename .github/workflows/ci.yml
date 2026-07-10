@@ -22,7 +22,7 @@ jobs:
         run: make -C tests run     # native gcc — x32_port IP/defaults/path seam
 
   firmware-compile:
-    name: Firmware compile (X32Link + X32 emulator)
+    name: Firmware compile (X32Link + KitchenSyncTouch + X32 emulator)
     runs-on: ubuntu-latest
     env:
       FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
@@ -80,6 +80,13 @@ jobs:
         env:
           EMU_FQBN: esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc
         run: arduino-cli compile --fqbn "$EMU_FQBN" X32_emulator
+
+      # KitchenSync Touch (ESP-016) — dedicated sketch, Waveshare touch board. The
+      # board flag lives in KitchenSyncTouch/config.h (not build_opt.h), so no
+      # flag-juggling here; secrets.h is gitignored and the sketch builds without
+      # it via __has_include.
+      - name: Compile KitchenSyncTouch (ESP-016, Waveshare touch board)
+        run: arduino-cli compile --fqbn "$FQBN" KitchenSyncTouch
 
   loralink-compile:
     name: Firmware compile (LoraLink)
