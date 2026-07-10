@@ -27,6 +27,7 @@
 #define DEFAULT_QUANTUM_BEATS    4
 #define DEFAULT_CLOCK_ENABLE     1   // clock on by default (unlike X32Link's mixer product)
 #define DEFAULT_TRANSPORT_ENABLE 1
+#define DEFAULT_PLAY_ON_RELEASE  0   // 0 = fire on touch, 1 = on release
 
 // The board flag implies the on-device touch UI (LNK-014/015).
 #if defined(BOARD_WAVESHARE_S3_TOUCH_LCD_147) && !defined(HAS_TOUCH_DISPLAY)

@@ -14,6 +14,7 @@ typedef struct {
     int  quantum_beats;      // beats per bar for phase / launch quantize (LNK-019)
     int  clock_enable;       // 0/1 — emit 24-PPQN MIDI clock on DIN + USB
     int  transport_enable;   // 0/1 — allow PLAY/STOP from the touch screen (Inc2)
+    int  play_on_release;    // 0 = toggle on touch (digital DJ), 1 = on release (turntable)
 } AppConfig;
 
 void config_defaults(AppConfig* cfg);

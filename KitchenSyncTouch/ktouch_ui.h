@@ -1,16 +1,18 @@
 #pragma once
-// Pure transport-button hit-test (ESP-016). Touch is transport-ONLY: two big
-// buttons, PLAY and STOP, no settings screen (a stray tap must never change a
-// setting mid-performance). Screen is the 172x320 LCD in rotation 6. Host-tested
-// in test/test_ktouch_ui.c. No Arduino/LovyanGFX dependency.
+// Pure transport-toggle logic (ESP-016). Touch is transport-ONLY and the WHOLE
+// screen is one toggle: no left/right buttons (so no mis-hit), no settings screen
+// (so no stray-tap config change mid-performance). A tap sends the opposite of
+// the current transport state. Host-tested in test/test_ktouch_ui.c.
+#include "transport_launch.h"   // TransportLaunchIntent, TransportLaunchState
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum { KTOUCH_BTN_NONE = 0, KTOUCH_BTN_PLAY, KTOUCH_BTN_STOP } KtouchBtn;
-
-// Which transport button contains screen point (x,y), or KTOUCH_BTN_NONE.
-int ktouch_ui_hit(int x, int y);
+// Given the current launch state (TL_STOPPED / TL_ARMED / TL_RUNNING), the intent
+// a tap should post: stopped -> PLAY (arms, fires on the next bar); armed or
+// running -> STOP (cancel the arm, or stop immediately).
+TransportLaunchIntent ktouch_toggle_intent(int launch_state);
 
 #ifdef __cplusplus
 }
