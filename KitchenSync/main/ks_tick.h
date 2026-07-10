@@ -13,6 +13,7 @@
 #include "clock_output.h"
 #include "metronome.h"
 #include "transport.h"
+#include "transport_launch.h"
 #include "ks_config.h"
 #include "link_protocol.h"      // LinkTimeline
 #include "link_measurement.h"   // LinkGhostXForm
@@ -29,7 +30,12 @@ typedef struct {
     BeatSource  src;
     ClockTicker cts[KS_CLOCK_OUTPUTS];   // one grid per output (P4-010)
     Metronome   mt;
-    Transport   tr;
+    // Per-output transport (ESP-011): each output arms and runs independently,
+    // exactly as each already owns its own division/phase/swing (P4-010).
+    // `tl` decides WHEN (quantized launch), `tr` guarantees exactly one
+    // 0xFA/0xFC per transition.
+    Transport       tr[KS_CLOCK_OUTPUTS];
+    TransportLaunch tl[KS_CLOCK_OUTPUTS];
     uint32_t    seen_gen;                // last config-generation acted on (P4-015)
 } KsTickState;
 
@@ -47,6 +53,8 @@ typedef struct {
     bool            start_stop_seen; // link_proto_start_stop_seen()
     bool            playing;         // link_proto_playing()
     bool            usb_ready;       // usb_midi_host_ready()
+    // One-shot launch intents from the web UI, consumed this tick (ESP-011).
+    TransportLaunchIntent launch[KS_CLOCK_OUTPUTS];
 } KsTickInputs;
 
 typedef struct {
@@ -57,7 +65,8 @@ typedef struct {
     bool   reprime;  // grids repriming happened this tick (basis/session/config edit)
 
     int             pulses[KS_CLOCK_OUTPUTS];  // 0xF8 count to emit per output (0 = none)
-    TransportAction transport;                 // START/STOP/NONE, fan to enabled outputs
+    TransportAction transport[KS_CLOCK_OUTPUTS];  // per-output START/STOP/NONE (ESP-011)
+    TransportLaunchState launch_state[KS_CLOCK_OUTPUTS];  // stopped/armed/running, for the UI
     bool            click;                      // emit a metronome click
     bool            click_accent;               // ...as the bar-1 accent
     bool            standby;    // session up, transport stopped: show a heartbeat,

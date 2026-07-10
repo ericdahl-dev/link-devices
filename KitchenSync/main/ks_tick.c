@@ -6,14 +6,17 @@ void ks_tick_reset(KsTickState* st, uint32_t cfg_gen) {
     beat_source_reset(&st->src);
     for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) clock_ticker_reset(&st->cts[i]);
     metronome_reset(&st->mt);
-    transport_reset(&st->tr);
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) {
+        transport_reset(&st->tr[i]);
+        transport_launch_reset(&st->tl[i]);
+    }
     st->seen_gen = cfg_gen;
 }
 
 KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
     KsTickPlan plan;
     memset(&plan, 0, sizeof(plan));
-    plan.transport = TRANSPORT_NONE;
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) plan.transport[i] = TRANSPORT_NONE;
 
     // beat_source (ARC-007) owns the basis: phase-locked session beat once a
     // GhostXForm is committed vs the free-running local accumulator, plus the
@@ -32,11 +35,14 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
     if (reprime) {
         for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) clock_ticker_reset(&st->cts[i]);
         metronome_reset(&st->mt);
-        if (!bs.active) transport_reset(&st->tr);
+        if (!bs.active) for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) transport_reset(&st->tr[i]);
     }
     plan.reprime = reprime;
 
-    if (!bs.active) return plan;
+    if (!bs.active) {
+        for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) plan.launch_state[i] = st->tl[i].state;
+        return plan;
+    }
 
     // Clock fan-out: the one shared beat to each enabled output at its own division +
     // phase nudge + swing (P4-010), gated by the USB host + the master clock switch.
@@ -47,9 +53,49 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
             plan.pulses[o] = clock_output_due(&st->cts[o], bs.beats, oc->ppqn,
                                               oc->phase_mbeats, oc->swing_mbeats, KS_TICK_MAX_BURST);
         }
-        // Transport: MIDI Start/Stop on the Link play-state edge (P4-008).
-        plan.transport = transport_update(&st->tr, in->start_stop_seen, in->playing);
     }
+
+    // Transport runs whether or not a USB device is attached: pulses need the
+    // cable, transport STATE does not. (Found on hardware -- with the launch
+    // step inside the usb_ready gate, pressing Play with nothing plugged in
+    // never even armed.) Only the emitted packets are dropped downstream.
+    if (in->cfg->clock_out_enable) {
+        // Transport, per output (ESP-011). Two sources, one wire:
+        //   - the web UI's launch intent, quantized to the bar line by `tl`,
+        //   - the Link session's play state (P4-008), which still drives every
+        //     output when the session publishes transport.
+        // `tr` sits downstream of both and emits exactly one 0xFA/0xFC per
+        // transition, so the two can never double-fire.
+        // Arbitration: once the session publishes StartStopState, Link owns
+        // transport and manual presses are ignored (the UI greys the buttons).
+        // Two masters is how "why did my gear stop" happens -- and it did, on
+        // the bench: a manual START was stomped by the session's stopped state
+        // in the same millisecond.
+        bool session_owns = in->start_stop_seen;
+
+        for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
+            if (!in->cfg->clock[o].enable) continue;
+            TransportLaunchIntent intent = session_owns ? TL_INTENT_NONE : in->launch[o];
+            TransportLaunchOut lo = transport_launch_step(&st->tl[o], intent,
+                                                          bs.beats, KS_TICK_METRO_QUANTUM, bs.active);
+            if (session_owns) {
+                plan.transport[o] = transport_update(&st->tr[o], true, in->playing);
+                continue;
+            }
+            if (lo.action != TL_NONE) {
+                // Manual launch bypasses `tr`: transport_launch already fires at
+                // most once per transition, and feeding it through transport_update
+                // would be swallowed by that module's priming rule (the first valid
+                // observation records state and emits nothing -- deliberate, so
+                // joining a session mid-play doesn't jump gear to bar 1, P4-008).
+                // Sync `tr` so a later session edge doesn't re-emit what we just sent.
+                plan.transport[o] = (lo.action == TL_START) ? TRANSPORT_START : TRANSPORT_STOP;
+                st->tr[o].primed  = true;
+                st->tr[o].playing = (lo.action == TL_START);
+            }
+        }
+    }
+    for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) plan.launch_state[o] = st->tl[o].state;
 
     // Connected but waiting for transport. The caller pulses the strip; the
     // speaker stays quiet (ESP-009).

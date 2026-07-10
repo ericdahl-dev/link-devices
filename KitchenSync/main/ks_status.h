@@ -22,9 +22,12 @@ extern "C" {
 // `follow_enabled` first, not infer it from `follow_valid`. `follow_bpm`/
 // `follow_confidence`/`follow_valid` are 0/0/false whenever `follow_enabled` is
 // false. Returns snprintf()'s return value so the caller can detect truncation.
+// `launch` is the per-output quantized-launch state (ESP-011): 0 stopped,
+// 1 armed (waiting for the bar line), 2 running. Emitted as "launch":[a,b,c,d]
+// so the UI can render "starting on next bar..." rather than a dead button.
 int ks_status_json(char* buf, size_t len, float bpm, float midi_bpm, int peers, bool usb, uint32_t tx,
                    const char* fw, bool follow_enabled, float follow_bpm, float follow_confidence,
-                   bool follow_valid);
+                   bool follow_valid, const int launch[4]);
 
 #ifdef __cplusplus
 }

@@ -46,7 +46,8 @@
 #include "link_measurement.h"   /* GhostXForm accessor (link_measurement_current_xform) */
 #include "link_measure_io.h"    /* unicast ping/pong measurement client */
 #include "clock_output.h"       /* per-output division + phase-nudge (P4-010) */
-#include "ks_tick.h"            /* ARC-015: pure clock-tick orchestration */
+#include "ks_tick.h"
+#include "transport_intent.h"   /* ESP-011: web UI launch presses */            /* ARC-015: pure clock-tick orchestration */
 
 static const char *TAG = "kitchensync";
 
@@ -114,7 +115,13 @@ static void clock_out_task(void *arg)
             .start_stop_seen = link_proto_start_stop_seen(),
             .playing = link_proto_playing(), .usb_ready = usb_midi_host_ready(),
         };
+        transport_intent_take(in.launch);   /* ESP-011: one press, one action */
         KsTickPlan plan = ks_tick_step(&ts, &in);
+        {   /* ESP-011: surface arming state to the web UI. */
+            int ls[KS_CLOCK_OUTPUTS];
+            for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) ls[o] = (int)plan.launch_state[o];
+            ks_web_publish_launch(ls);
+        }
 
         /* Execute the clock fan-out: plan.pulses[o] 0xF8 packets on output o's cable. */
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
@@ -125,16 +132,16 @@ static void clock_out_task(void *arg)
                 pulses++;
             }
         }
-        /* Transport: fan Start/Stop to every enabled output's cable (P4-008). */
-        if (plan.transport != TRANSPORT_NONE) {
-            uint8_t status = (plan.transport == TRANSPORT_START) ? 0xFA : 0xFC;
-            for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
-                if (!cfg.clock[o].enable) continue;
-                uint8_t pkt[4];
-                usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
-                usb_midi_host_send(pkt, 4);
-            }
-            ESP_LOGI(TAG, "transport %s", plan.transport == TRANSPORT_START ? "START" : "STOP");
+        /* Transport, per output (P4-008 + ESP-011): each output runs its own
+         * Start/Stop, so gear can be armed onto different bars. */
+        for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
+            if (plan.transport[o] == TRANSPORT_NONE) continue;
+            uint8_t status = (plan.transport[o] == TRANSPORT_START) ? 0xFA : 0xFC;
+            uint8_t pkt[4];
+            usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
+            usb_midi_host_send(pkt, 4);
+            ESP_LOGI(TAG, "transport out%d %s", o + 1,
+                     plan.transport[o] == TRANSPORT_START ? "START" : "STOP");
         }
         /* Metronome click on the onboard speaker (P4-006). */
         if (plan.click) {

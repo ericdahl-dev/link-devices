@@ -131,8 +131,97 @@ void test_standby_is_silent(void) {
     TEST_ASSERT_FALSE(ks_tick_step(&st, &in).click);
 }
 
+/* ---- ESP-011: per-output transport ------------------------------------- */
+
+// Each output owns its own transport. Playing output 0 leaves output 1 stopped.
+// beats=0 is a bar line, so output 0's START fires on this very tick.
+void test_transport_is_per_output(void) {
+    cfg.clock[1].enable = 1; cfg.clock[1].ppqn = 1;
+    KsTickInputs in = mk(0, 0, true, true);
+    in.launch[0] = TL_INTENT_PLAY;            // only output 0 asked to play
+    KsTickPlan p = ks_tick_step(&st, &in);
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_START, p.transport[0]);   // beats=0 -> on the grid
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_NONE,  p.transport[1]);
+}
+
+// Play mid-bar arms; START lands on the next bar line, not immediately.
+void test_play_mid_bar_fires_on_the_downbeat(void) {
+    // Prime the free-run accumulator: its first advance always returns beat 0,
+    // which is a bar line -- press play there and it fires instantly (correctly).
+    KsTickInputs p0 = mk(0, 0, true, true);
+    ks_tick_step(&st, &p0);
+
+    KsTickInputs a = mk((int64_t)(2.5 * MPB), 0, true, true);
+    a.launch[0] = TL_INTENT_PLAY;
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_NONE, ks_tick_step(&st, &a).transport[0]);
+
+    KsTickInputs b = mk((int64_t)(3.9 * MPB), 0, true, true);
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_NONE, ks_tick_step(&st, &b).transport[0]);
+
+    KsTickInputs c = mk((int64_t)(4.0 * MPB), 0, true, true);   // bar line
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_START, ks_tick_step(&st, &c).transport[0]);
+}
+
+// Stop is immediate and per-output.
+void test_stop_is_immediate_per_output(void) {
+    KsTickInputs a = mk(0, 0, true, true);
+    a.launch[0] = TL_INTENT_PLAY;
+    ks_tick_step(&st, &a);                                   // output 0 running
+    KsTickInputs b = mk((int64_t)(1.5 * MPB), 0, true, true);
+    b.launch[0] = TL_INTENT_STOP;
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_STOP, ks_tick_step(&st, &b).transport[0]);
+}
+
+// A disabled output never emits transport, whatever it is asked for.
+void test_disabled_output_emits_no_transport(void) {
+    cfg.clock[0].enable = 0;
+    KsTickInputs in = mk(0, 0, true, true);
+    in.launch[0] = TL_INTENT_PLAY;
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_NONE, ks_tick_step(&st, &in).transport[0]);
+}
+
+// Transport state must not depend on a USB device being plugged in. Found on
+// hardware: with no device, pressing Play never even armed, because the launch
+// step sat inside the usb_ready gate. Pulses need the cable; state does not.
+void test_launch_tracks_without_usb(void) {
+    KsTickInputs in = mk(0, 0, true, /*usb_ready=*/false);
+    in.launch[0] = TL_INTENT_PLAY;
+    KsTickPlan p = ks_tick_step(&st, &in);
+    TEST_ASSERT_EQUAL_INT(TL_RUNNING, p.launch_state[0]);   // beats=0 -> bar line
+    TEST_ASSERT_EQUAL_INT(0, p.pulses[0]);                  // but no clock without USB
+}
+
+// Arbitration (ESP-011 option 1): once the session publishes transport, Link
+// owns it and manual presses are ignored. Found on hardware: without this the
+// manual START fired and the session's stopped state stomped it in the SAME
+// millisecond -- "transport out1 START" immediately followed by "STOP".
+void test_session_transport_wins_over_manual(void) {
+    KsTickInputs in = mk(0, 0, true, true);
+    in.start_stop_seen = true;    // Ableton has Start/Stop sync on
+    in.playing = false;           // ...and is stopped
+    in.launch[0] = TL_INTENT_PLAY;
+    KsTickPlan p = ks_tick_step(&st, &in);
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_NONE, p.transport[0]);   // no START at all
+    TEST_ASSERT_EQUAL_INT(TL_STOPPED, p.launch_state[0]);    // and not armed
+}
+
+// With no session transport published, manual owns it.
+void test_manual_owns_transport_when_session_silent(void) {
+    KsTickInputs in = mk(0, 0, true, true);
+    in.start_stop_seen = false;
+    in.launch[0] = TL_INTENT_PLAY;
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_START, ks_tick_step(&st, &in).transport[0]);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_session_transport_wins_over_manual);
+    RUN_TEST(test_manual_owns_transport_when_session_silent);
+    RUN_TEST(test_launch_tracks_without_usb);
+    RUN_TEST(test_transport_is_per_output);
+    RUN_TEST(test_play_mid_bar_fires_on_the_downbeat);
+    RUN_TEST(test_stop_is_immediate_per_output);
+    RUN_TEST(test_disabled_output_emits_no_transport);
     RUN_TEST(test_standby_when_session_up_but_stopped);
     RUN_TEST(test_no_standby_while_playing);
     RUN_TEST(test_no_standby_without_session);
