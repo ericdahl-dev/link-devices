@@ -15,8 +15,11 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
+#include "esp_mac.h"
+#include "mdns.h"
 #include "wifi_link.h"
 #include "wifi_conn_policy.h"   // ARC-013: shared connection lifecycle
+#include "ks_hostname.h"        // ESP-012: pure per-unit name derivation
 
 static const char *TAG = "wifi_link";
 
@@ -89,6 +92,54 @@ static WifiConnPolicy s_pol;
 static WifiCred s_creds[KS_WIFI_SLOTS];
 static int      s_ncreds;
 
+/* ---- mDNS (ESP-012) ------------------------------------------------------- */
+
+/* Advertise `kitchensync-XXXX.local` (per-unit, from the MAC, so two boards on one
+ * LAN never collide) plus the plain `kitchensync.local` as a delegated alias for
+ * the common single-board case. Called once we have an address -- either a DHCP
+ * lease or the SoftAP's own 192.168.4.1. */
+static char s_host[KS_HOSTNAME_MAX];
+static bool s_mdns_up;
+
+static void mdns_advertise(esp_ip4_addr_t ip)
+{
+    if (!s_mdns_up) {
+        uint8_t mac[6] = {0};
+        /* On the P4 the WiFi MAC belongs to the onboard C6, not to this chip's
+         * efuse, so esp_read_mac(ESP_MAC_WIFI_STA) fails and every unit would
+         * name itself kitchensync-0000 -- exactly the collision the per-unit name
+         * exists to prevent. Ask the (remote) WiFi stack, which is started by the
+         * time we have an address. Fall back to the P4's own base MAC, still
+         * unique per board. */
+        esp_err_t m = esp_wifi_get_mac(WIFI_IF_STA, mac);
+        if (m != ESP_OK) m = esp_wifi_get_mac(WIFI_IF_AP, mac);   /* SoftAP fallback path */
+        if (m != ESP_OK) m = esp_read_mac(mac, ESP_MAC_BASE);
+        if (m != ESP_OK)
+            ESP_LOGW(TAG, "no MAC available; hostname collides if two units share a LAN");
+        ks_hostname(mac, s_host, sizeof(s_host));
+
+        esp_err_t e = mdns_init();
+        if (e != ESP_OK) { ESP_LOGW(TAG, "mdns_init failed: %s", esp_err_to_name(e)); return; }
+        mdns_hostname_set(s_host);
+        mdns_instance_name_set("KitchenSync");
+        mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+        s_mdns_up = true;
+    }
+
+    /* The friendly alias. Two units on one LAN both claim it; the -XXXX name is
+     * the unambiguous one, and that is the documented trade for having a name
+     * anyone can type. Re-registered on every new address, so a DHCP lease change
+     * or a fall to SoftAP does not leave a stale A record behind. */
+    mdns_ip_addr_t addr = {0};
+    addr.addr.type = ESP_IPADDR_TYPE_V4;
+    addr.addr.u_addr.ip4.addr = ip.addr;
+    mdns_delegate_hostname_remove("kitchensync");           /* no-op when absent */
+    if (mdns_delegate_hostname_add("kitchensync", &addr) != ESP_OK)
+        ESP_LOGW(TAG, "could not claim kitchensync.local (another unit has it?)");
+
+    ESP_LOGI(TAG, "mDNS: http://%s.local (alias http://kitchensync.local)", s_host);
+}
+
 /* Point the STA at slot `i` without restarting the WiFi stack. Called for the cold
  * start and again on every WCA_TRY_SLOT. */
 static void apply_slot(int i)
@@ -119,6 +170,12 @@ static void start_ap(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGW(TAG, "SoftAP '%s' at 192.168.4.1 for config", AP_SSID);
+
+    /* ESP-012: name the config portal too, so first-boot setup does not require
+     * knowing 192.168.4.1. The SoftAP netif always holds that address. */
+    esp_netif_ip_info_t ip = {0};
+    esp_netif_t *ap = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    if (ap && esp_netif_get_ip_info(ap, &ip) == ESP_OK) mdns_advertise(ip.ip);
 }
 
 static void give_up_and_start_ap(void)
@@ -166,6 +223,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         /* Multicast must not be dropped by modem sleep (the P4 equivalent of the
          * S3's WiFi.setSleep(false)). */
         esp_wifi_set_ps(WIFI_PS_NONE);
+        mdns_advertise(e->ip_info.ip);   /* ESP-012: re-announce on every lease */
         if (wifi_conn_policy_step(&s_pol, WCE_GOT_IP, esp_timer_get_time()) == WCA_SPAWN_LISTENER) {
             xTaskCreate(link_task, "link", 4096, NULL, 5, NULL);
         }

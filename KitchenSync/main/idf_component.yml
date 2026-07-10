@@ -8,3 +8,6 @@ dependencies:
   espressif/es8311: "^1.0.0"
   # WS2812 driver (RMT backend) for the external visual-metronome strip (P4-018).
   espressif/led_strip: "^2.5.5"
+  # mDNS so the board is reachable at kitchensync-XXXX.local instead of whatever
+  # address DHCP handed it this boot (ESP-012).
+  espressif/mdns: "^1.8.0"

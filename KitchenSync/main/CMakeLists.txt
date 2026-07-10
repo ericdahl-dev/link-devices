@@ -14,6 +14,7 @@ idf_component_register(
          "ks_web.cpp"
          "ks_status.c"
          "ks_config.c"
+         "ks_hostname.c"
          "ks_tick.c"
          "transport_intent.c"
          "ks_form.c"
