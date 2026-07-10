@@ -40,7 +40,7 @@ void ks_web_publish_launch(const int st[KS_CLOCK_OUTPUTS]) {
     for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) s_launch[i] = st[i];
 }
 
-// %SSID% / %MCKCHK% / %CABLE% are filled per-request from the live config.
+// %WIFI% / %MCKCHK% / %CABLE% are filled per-request from the live config.
 static const char PAGE[] = R"HTML(<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -195,9 +195,8 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 </div>
 <form method="POST" action="/save">
 <div class="formcols">
-<div class="grp"><div class="frow head"><span class="cap">WiFi Network</span>
-<div class="fld"><span class="pre">SSID</span><input name="wifi_ssid" value="%SSID%" autocomplete="off"></div>
-<div class="fld"><span class="pre">PASS</span><input name="wifi_pass" type="password" placeholder="keep current"></div></div></div>
+<div class="grp"><div class="frow head"><span class="cap">WiFi Networks</span>
+%WIFI%</div></div>
 <div class="grp grp--wide"><div class="frow head"><span class="cap">MIDI Clock Out</span>
 <label class="sw"><input type="checkbox" class="live" name="clock_out" value="1" %MCKCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
 <div class="sect %CLKSECT%" data-when="clock_out">%OUTPUTS%</div></div>
@@ -284,6 +283,42 @@ static void subst(std::string &s, const char *key, const std::string &val)
     while ((p = s.find(key)) != std::string::npos) s.replace(p, strlen(key), val);
 }
 
+// Escape a string for use inside a double-quoted HTML attribute. An SSID is
+// user-controlled text: a bare '"' in it would otherwise close the value= and let
+// the rest of the name inject markup into the page.
+static std::string attr_esc(const char *s)
+{
+    std::string o;
+    for (const char *p = s; *p; ++p) {
+        switch (*p) {
+            case '&':  o += "&amp;";  break;
+            case '"':  o += "&quot;"; break;
+            case '<':  o += "&lt;";   break;
+            case '>':  o += "&gt;";   break;
+            default:   o += *p;       break;
+        }
+    }
+    return o;
+}
+
+// ESP-013: one SSID/PASS pair per saved network. Slot 0 keeps the unsuffixed field
+// names; the rest are wifi_ssid1.. / wifi_pass1.. Clearing an SSID forgets that slot.
+static std::string build_wifi()
+{
+    if (!s_cfg) return "";
+    std::string o;
+    for (int i = 0; i < KS_WIFI_SLOTS; i++) {
+        std::string sfx = (i == 0) ? "" : std::to_string(i);
+        o += "<div class=\"fld\"><span class=\"pre\">SSID</span><input name=\"wifi_ssid" + sfx +
+             "\" value=\"" + attr_esc(s_cfg->wifi[i].ssid) + "\" autocomplete=\"off\" placeholder=\"" +
+             (i == 0 ? "required" : "optional") + "\"></div>"
+             "<div class=\"fld\"><span class=\"pre\">PASS</span><input name=\"wifi_pass" + sfx +
+             "\" type=\"password\" placeholder=\"" +
+             (s_cfg->wifi[i].ssid[0] ? "keep current" : "") + "\"></div>";
+    }
+    return o;
+}
+
 // Build the 4 per-output clock config rows (enable / cable / rate / phase nudge),
 // with the live config marked checked/selected (P4-010).
 static std::string build_outputs()
@@ -363,7 +398,7 @@ static std::string build_led()
 static std::string build_page()
 {
     std::string h(PAGE);
-    subst(h, "%SSID%",    s_cfg ? std::string(s_cfg->wifi_ssid) : "");
+    subst(h, "%WIFI%",    build_wifi());
     subst(h, "%MCKCHK%",  (s_cfg && s_cfg->clock_out_enable) ? "checked" : "");
     subst(h, "%MTOCHK%",  (s_cfg && s_cfg->metronome_enable) ? "checked" : "");
     subst(h, "%MTACHK%",  (s_cfg && s_cfg->metronome_accent) ? "checked" : "");
@@ -427,12 +462,27 @@ static esp_err_t send_result(httpd_req_t *req, const char *title, const char *ms
 
 static esp_err_t save_handler(httpd_req_t *req)
 {
-    char body[1024];   /* wifi + 4 outputs x 4 fields fits comfortably */
-    int len = req->content_len < (int)sizeof(body) - 1 ? req->content_len : (int)sizeof(body) - 1;
+    /* ESP-013: 3 wifi slots (32-char ssid + 63-char pass, each up to 3x longer
+     * url-encoded) plus 4 outputs x 5 fields plus the led/metronome fields. The old
+     * 1024-byte buffer no longer covers the worst case.
+     *
+     * On the HEAP, not the stack: the httpd task gets ~4KB total, so a buffer this
+     * size as a local overflows it and panics with a stack-protection fault the
+     * instant anyone saves. */
+    const size_t BODY_MAX = 3072;
+    /* A truncated body used to be parsed anyway: the tail fields simply vanished and
+     * a half-applied config was saved as if the user had asked for it. Refuse instead. */
+    if (req->content_len >= BODY_MAX)
+        return send_result(req, "Config Too Large", "Too many characters in the form. Shorten a field and retry.", false);
+
+    char *body = (char *)malloc(req->content_len + 1);
+    if (!body) return send_result(req, "Out of Memory", "Try again.", false);
+
+    int len = (int)req->content_len;
     int got = 0;
     while (got < len) {
         int r = httpd_req_recv(req, body + got, len - got);
-        if (r <= 0) return ESP_FAIL;
+        if (r <= 0) { free(body); return ESP_FAIL; }
         got += r;
     }
     body[got] = '\0';
@@ -440,6 +490,7 @@ static esp_err_t save_handler(httpd_req_t *req)
     // Decode + parse the POST body into a candidate config (pure, host-tested).
     KsConfig cfg;
     ks_form_resolve(body, s_cfg, &cfg);
+    free(body);
 
     if (!ks_config_valid(&cfg)) return send_result(req, "Invalid Config", "Check the values and go back.", false);
     *s_cfg = cfg;

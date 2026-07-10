@@ -23,7 +23,7 @@ static void resolve(const char *body) {
 // Tracer: a single value field lands, everything else copied from base.
 void test_sets_one_field_keeps_base(void) {
     resolve("wifi_ssid=Studio");
-    TEST_ASSERT_EQUAL_STRING("Studio", out.wifi_ssid);
+    TEST_ASSERT_EQUAL_STRING("Studio", out.wifi[0].ssid);
     TEST_ASSERT_EQUAL_INT(80, out.metronome_volume);   // untouched -> from base
 }
 
@@ -83,14 +83,14 @@ void test_absent_value_field_keeps_base(void) {
 // URL-decode: %XX and '+' in a value.
 void test_url_decode_value(void) {
     resolve("wifi_ssid=My+Home%20Net");
-    TEST_ASSERT_EQUAL_STRING("My Home Net", out.wifi_ssid);
+    TEST_ASSERT_EQUAL_STRING("My Home Net", out.wifi[0].ssid);
 }
 
 // A %26 inside a token decodes to '&' AFTER the split, so it doesn't act as a
 // pair separator — the classic reason decode must run per-token, not up front.
 void test_encoded_ampersand_survives_split(void) {
     resolve("wifi_pass=a%26b");
-    TEST_ASSERT_EQUAL_STRING("a&b", out.wifi_pass);
+    TEST_ASSERT_EQUAL_STRING("a&b", out.wifi[0].pass);
 }
 
 // --- ks_form_apply: PATCH semantics for POST /live ---------------------
