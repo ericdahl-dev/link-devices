@@ -50,6 +50,15 @@ bool ks_config_valid(const KsConfig* c) {
     return true;
 }
 
+// ESP-013: drop the empty slots so the connection policy can stay SSID-blind.
+int ks_config_wifi_slots(const KsConfig* c, WifiCred out[KS_WIFI_SLOTS]) {
+    int n = 0;
+    for (int i = 0; i < KS_WIFI_SLOTS; i++) {
+        if (c->wifi[i].ssid[0] != '\0') out[n++] = c->wifi[i];
+    }
+    return n;
+}
+
 // Copy a bounded string; returns false if it wouldn't fit (config unchanged).
 static bool copy_field(char* dst, size_t cap, const char* src) {
     if (strlen(src) >= cap) return false;
@@ -57,13 +66,31 @@ static bool copy_field(char* dst, size_t cap, const char* src) {
     return true;
 }
 
+// ESP-013 form keys: `base` alone means slot 0 (the pre-multi-network name, kept
+// so the existing form and its tests never had to move), `base<N>` means slot N.
+// Returns -1 for "not this family, or an out-of-range slot".
+static int wifi_slot_index(const char* key, const char* base) {
+    size_t n = strlen(base);
+    if (strncmp(key, base, n) != 0) return -1;
+    const char* suffix = key + n;
+    if (suffix[0] == '\0') return 0;
+    if (suffix[1] != '\0' || suffix[0] < '0' || suffix[0] > '9') return -1;
+    int i = suffix[0] - '0';
+    return (i < KS_WIFI_SLOTS) ? i : -1;
+}
+
 bool ks_config_set(KsConfig* c, const char* key, const char* value) {
-    if (strcmp(key, "wifi_ssid") == 0) {
-        return copy_field(c->wifi_ssid, sizeof(c->wifi_ssid), value);
+    int slot = wifi_slot_index(key, "wifi_ssid");
+    if (slot >= 0) {
+        // Empty ssid = forget this network. Clearing the password with it means a
+        // forgotten slot can never be retried against a same-named network later.
+        if (value[0] == '\0') { memset(&c->wifi[slot], 0, sizeof(c->wifi[slot])); return true; }
+        return copy_field(c->wifi[slot].ssid, sizeof(c->wifi[slot].ssid), value);
     }
-    if (strcmp(key, "wifi_pass") == 0) {
+    slot = wifi_slot_index(key, "wifi_pass");
+    if (slot >= 0) {
         if (value[0] == '\0') return true;   // blank = keep current
-        return copy_field(c->wifi_pass, sizeof(c->wifi_pass), value);
+        return copy_field(c->wifi[slot].pass, sizeof(c->wifi[slot].pass), value);
     }
     if (strcmp(key, "clock_out") == 0) {
         int v = atoi(value);
@@ -168,6 +195,49 @@ void ks_config_live_safe_copy(KsConfig* dst, const KsConfig* src) {
     for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) dst->clock[o] = src->clock[o];
 }
 
+/* ESP-013: the v1 layout, FROZEN. This is a copy of what shipped, not an alias of
+ * the current structs — if ClockOutputCfg or KsConfig ever change again, this must
+ * not follow them, or the migration would read v1 bytes at v3 offsets. Nothing here
+ * may reference the live types. Its own _Static_assert nails the size. */
+typedef struct { int enable, cable, ppqn, phase_mbeats, swing_mbeats; } ClockOutputCfgV1;
+typedef struct {
+    char wifi_ssid[33];
+    char wifi_pass[64];
+    int  clock_out_enable, metronome_enable, metronome_accent, metronome_volume, metronome_voice;
+    ClockOutputCfgV1 clock[4];
+    int  led_enable, led_brightness, led_mode, led_fade, led_beat_color, led_accent_color;
+    int  follow_beat_enable;
+} KsConfigV1;
+_Static_assert(sizeof(KsConfigV1) == 228, "frozen v1 layout must not change (ESP-013 migration)");
+
+// v1 -> v2: the single network becomes slot 0; the new slots start empty.
+static void migrate_v1(KsConfig* out, const KsConfigV1* v1) {
+    ks_config_defaults(out);            // new fields (wifi[1..]) get their defaults
+    memcpy(out->wifi[0].ssid, v1->wifi_ssid, sizeof(out->wifi[0].ssid));
+    memcpy(out->wifi[0].pass, v1->wifi_pass, sizeof(out->wifi[0].pass));
+    out->wifi[0].ssid[sizeof(out->wifi[0].ssid) - 1] = '\0';   // a corrupt blob need not be NUL-terminated
+    out->wifi[0].pass[sizeof(out->wifi[0].pass) - 1] = '\0';
+    out->clock_out_enable = v1->clock_out_enable;
+    out->metronome_enable = v1->metronome_enable;
+    out->metronome_accent = v1->metronome_accent;
+    out->metronome_volume = v1->metronome_volume;
+    out->metronome_voice  = v1->metronome_voice;
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) {
+        out->clock[i].enable       = v1->clock[i].enable;
+        out->clock[i].cable        = v1->clock[i].cable;
+        out->clock[i].ppqn         = v1->clock[i].ppqn;
+        out->clock[i].phase_mbeats = v1->clock[i].phase_mbeats;
+        out->clock[i].swing_mbeats = v1->clock[i].swing_mbeats;
+    }
+    out->led_enable        = v1->led_enable;
+    out->led_brightness    = v1->led_brightness;
+    out->led_mode          = v1->led_mode;
+    out->led_fade          = v1->led_fade;
+    out->led_beat_color    = v1->led_beat_color;
+    out->led_accent_color  = v1->led_accent_color;
+    out->follow_beat_enable = v1->follow_beat_enable;
+}
+
 // P4-014: the single owner of "is this persisted blob safe to load?" — see ks_config.h.
 // Every gate is fail-closed: anything we can't positively vouch for becomes defaults,
 // because loading a stale layout puts garbage in fields the user never sees until a
@@ -176,8 +246,22 @@ ks_decode_result ks_config_decode(KsConfig* out, const void* blob, size_t blob_l
                                   bool version_present, uint32_t version) {
     ks_config_defaults(out);
 
-    if (!blob || blob_len != sizeof(KsConfig)) return KS_DECODE_DEFAULTED;
-    if (!version_present || version != KS_CONFIG_VERSION) return KS_DECODE_DEFAULTED;
+    // A legacy blob predates the version key: its bytes could be any old layout,
+    // so no size coincidence earns it a migration.
+    if (!blob || !version_present) return KS_DECODE_DEFAULTED;
+
+    if (version == 1u && blob_len == sizeof(KsConfigV1)) {
+        KsConfigV1 v1;
+        memcpy(&v1, blob, sizeof(v1));
+        KsConfig candidate;
+        migrate_v1(&candidate, &v1);
+        // A migration is not a licence to skip the guard.
+        if (!ks_config_valid(&candidate)) return KS_DECODE_DEFAULTED;
+        *out = candidate;
+        return KS_DECODE_MIGRATED;
+    }
+
+    if (version != KS_CONFIG_VERSION || blob_len != sizeof(KsConfig)) return KS_DECODE_DEFAULTED;
 
     // Version and size both vouch for the layout; the bytes still have to be in
     // range (bit-rot, or a layout change someone shipped without bumping).

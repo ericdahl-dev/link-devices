@@ -1,6 +1,7 @@
 // Host tests for the pure KitchenSync runtime config (P4-007).
 #include "unity.h"
 #include "ks_config.h"
+#include "wifi_conn_policy.h"   // WIFI_CONN_MAX_SLOTS — the budget KS_WIFI_SLOTS must fit
 #include <string.h>
 
 static KsConfig c;
@@ -11,7 +12,7 @@ void test_defaults(void) {
     TEST_ASSERT_EQUAL_INT(1, c.clock_out_enable);
     TEST_ASSERT_EQUAL_INT(0, c.metronome_enable);   // audible feature: default off
     TEST_ASSERT_EQUAL_INT(1, c.metronome_accent);   // accent bar-1 when enabled
-    TEST_ASSERT_EQUAL_STRING("", c.wifi_ssid);
+    TEST_ASSERT_EQUAL_STRING("", c.wifi[0].ssid);
     TEST_ASSERT_TRUE(ks_config_valid(&c));   // empty ssid is valid (AP mode)
 }
 
@@ -27,16 +28,65 @@ void test_output_defaults(void) {
 
 void test_set_ssid_and_pass(void) {
     TEST_ASSERT_TRUE(ks_config_set(&c, "wifi_ssid", "TestNet"));
-    TEST_ASSERT_EQUAL_STRING("TestNet", c.wifi_ssid);
+    TEST_ASSERT_EQUAL_STRING("TestNet", c.wifi[0].ssid);
     TEST_ASSERT_TRUE(ks_config_set(&c, "wifi_pass", "secret"));
-    TEST_ASSERT_EQUAL_STRING("secret", c.wifi_pass);
+    TEST_ASSERT_EQUAL_STRING("secret", c.wifi[0].pass);
 }
 
 // Blank password field keeps the current password (never wipes it).
 void test_blank_pass_keeps_current(void) {
     ks_config_set(&c, "wifi_pass", "keepme");
     TEST_ASSERT_TRUE(ks_config_set(&c, "wifi_pass", ""));
-    TEST_ASSERT_EQUAL_STRING("keepme", c.wifi_pass);
+    TEST_ASSERT_EQUAL_STRING("keepme", c.wifi[0].pass);
+}
+
+/* ---- ESP-013: multi-network slots -------------------------------------- */
+
+// Unsuffixed keys stay slot 0, so the existing form keeps working untouched.
+void test_indexed_slot_keys(void) {
+    TEST_ASSERT_TRUE(ks_config_set(&c, "wifi_ssid1", "Office"));
+    TEST_ASSERT_TRUE(ks_config_set(&c, "wifi_pass1", "s3cret"));
+    TEST_ASSERT_EQUAL_STRING("Office", c.wifi[1].ssid);
+    TEST_ASSERT_EQUAL_STRING("s3cret", c.wifi[1].pass);
+    TEST_ASSERT_EQUAL_STRING("", c.wifi[0].ssid);   // slot 0 untouched
+
+    TEST_ASSERT_TRUE(ks_config_set(&c, "wifi_pass1", ""));       // blank = keep, per slot
+    TEST_ASSERT_EQUAL_STRING("s3cret", c.wifi[1].pass);
+
+    TEST_ASSERT_FALSE(ks_config_set(&c, "wifi_ssid3", "TooFar")); // KS_WIFI_SLOTS == 3
+    TEST_ASSERT_FALSE(ks_config_set(&c, "wifi_ssid9", "Nope"));
+}
+
+// Forgetting a network must take its password with it — a slot with a stale
+// password could otherwise be retried against a different network of the same name.
+void test_empty_ssid_forgets_the_whole_slot(void) {
+    ks_config_set(&c, "wifi_ssid1", "Office");
+    ks_config_set(&c, "wifi_pass1", "s3cret");
+    TEST_ASSERT_TRUE(ks_config_set(&c, "wifi_ssid1", ""));
+    TEST_ASSERT_EQUAL_STRING("", c.wifi[1].ssid);
+    TEST_ASSERT_EQUAL_STRING("", c.wifi[1].pass);
+}
+
+// Compaction is where "skip an empty slot" lives; the policy stays SSID-blind.
+void test_wifi_slots_compacts_and_skips_empties(void) {
+    WifiCred out[KS_WIFI_SLOTS];
+    TEST_ASSERT_EQUAL_INT(0, ks_config_wifi_slots(&c, out));   // fresh board: none
+
+    ks_config_set(&c, "wifi_ssid2", "Home");    // deliberately out of order:
+    ks_config_set(&c, "wifi_pass2", "diamond"); // slot 1 stays empty
+    ks_config_set(&c, "wifi_ssid",  "Studio");
+    ks_config_set(&c, "wifi_pass",  "vanal");
+
+    TEST_ASSERT_EQUAL_INT(2, ks_config_wifi_slots(&c, out));
+    TEST_ASSERT_EQUAL_STRING("Studio", out[0].ssid);   // slot order preserved
+    TEST_ASSERT_EQUAL_STRING("vanal",  out[0].pass);
+    TEST_ASSERT_EQUAL_STRING("Home",   out[1].ssid);   // the empty slot 1 vanished
+    TEST_ASSERT_EQUAL_STRING("diamond", out[1].pass);
+}
+
+// The slot list must never outgrow the budget the policy can split.
+void test_slot_count_fits_the_connection_budget(void) {
+    TEST_ASSERT_TRUE(KS_WIFI_SLOTS <= WIFI_CONN_MAX_SLOTS);
 }
 
 // Per-output indexed form fields: clk<N>_en / _cable / _ppqn / _phase.
@@ -156,15 +206,15 @@ void test_metronome_volume_and_voice(void) {
 // ARC-016: the live-safe copy carries the no-reboot fields but never WiFi creds.
 void test_live_safe_copy_carries_live_fields_not_wifi(void) {
     KsConfig live; ks_config_defaults(&live);
-    strcpy(live.wifi_ssid, "home");        // dst keeps its own creds
+    strcpy(live.wifi[0].ssid, "home");        // dst keeps its own creds
     KsConfig cand; ks_config_defaults(&cand);
-    strcpy(cand.wifi_ssid, "SHOULD_NOT_COPY");
+    strcpy(cand.wifi[0].ssid, "SHOULD_NOT_COPY");
     cand.led_enable = 1; cand.led_brightness = 42; cand.metronome_voice = 2;
     cand.clock[1].enable = 1; cand.clock[1].cable = 3; cand.clock[1].ppqn = 24;
 
     ks_config_live_safe_copy(&live, &cand);
 
-    TEST_ASSERT_EQUAL_STRING("home", live.wifi_ssid);   // creds untouched (reboot-only)
+    TEST_ASSERT_EQUAL_STRING("home", live.wifi[0].ssid);   // creds untouched (reboot-only)
     TEST_ASSERT_EQUAL_INT(1, live.led_enable);          // live fields carried
     TEST_ASSERT_EQUAL_INT(42, live.led_brightness);
     TEST_ASSERT_EQUAL_INT(2, live.metronome_voice);
@@ -184,7 +234,7 @@ void test_live_safe_copy_carries_live_fields_not_wifi(void) {
 static void make_good_blob(KsConfig* blob) {
     ks_config_defaults(blob);
     blob->metronome_volume = 42;          // a marker we can assert survived
-    strcpy(blob->wifi_ssid, "Studio");
+    strcpy(blob->wifi[0].ssid, "Studio");
 }
 
 void test_decode_accepts_current_version_blob(void) {
@@ -193,7 +243,7 @@ void test_decode_accepts_current_version_blob(void) {
     ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob), true, KS_CONFIG_VERSION);
     TEST_ASSERT_EQUAL_INT(KS_DECODE_OK, r);
     TEST_ASSERT_EQUAL_INT(42, out.metronome_volume);       // blob won, not defaults
-    TEST_ASSERT_EQUAL_STRING("Studio", out.wifi_ssid);
+    TEST_ASSERT_EQUAL_STRING("Studio", out.wifi[0].ssid);
 }
 
 // The upgrade case this whole ticket exists for: a blob written before the
@@ -204,7 +254,7 @@ void test_decode_legacy_unversioned_blob_falls_back_to_defaults(void) {
     ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob), false, 0);
     TEST_ASSERT_EQUAL_INT(KS_DECODE_DEFAULTED, r);
     TEST_ASSERT_EQUAL_INT(80, out.metronome_volume);       // default, not the blob's 42
-    TEST_ASSERT_EQUAL_STRING("", out.wifi_ssid);
+    TEST_ASSERT_EQUAL_STRING("", out.wifi[0].ssid);
 }
 
 // A blob from a DIFFERENT schema version: same size is not enough -- fields may
@@ -249,8 +299,86 @@ void test_decode_invalid_contents_falls_back_to_defaults(void) {
     TEST_ASSERT_TRUE(ks_config_valid(&out));
 }
 
+// --- ESP-013: v1 -> v2 migration --------------------------------------------
+// The v1 layout, frozen here independently of ks_config.c's own private copy.
+// If either drifts, these tests fail — which is the point: a migration that
+// silently reads the wrong offsets is worse than one that refuses to run.
+typedef struct { int enable, cable, ppqn, phase_mbeats, swing_mbeats; } ClockOutputCfgV1;
+typedef struct {
+    char wifi_ssid[33];
+    char wifi_pass[64];
+    int  clock_out_enable, metronome_enable, metronome_accent, metronome_volume, metronome_voice;
+    ClockOutputCfgV1 clock[KS_CLOCK_OUTPUTS];
+    int  led_enable, led_brightness, led_mode, led_fade, led_beat_color, led_accent_color;
+    int  follow_beat_enable;
+} KsConfigV1_ForTest;
+
+static void make_v1_blob(KsConfigV1_ForTest* b) {
+    memset(b, 0, sizeof(*b));
+    strcpy(b->wifi_ssid, "test123");
+    strcpy(b->wifi_pass, "hunter2");
+    b->clock_out_enable = 1;
+    b->metronome_accent = 1;
+    b->metronome_volume = 42;              // marker: must survive the migration
+    b->led_brightness = 60; b->led_fade = 55;
+    b->led_beat_color = 0x00B400; b->led_accent_color = 0xDC6E00;
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) {
+        b->clock[i].enable = (i == 0); b->clock[i].cable = i; b->clock[i].ppqn = 24;
+    }
+}
+
+// The whole reason v2 migrates instead of defaulting: bumping the version must
+// not make the device forget the network and strand the user in the SoftAP portal.
+void test_decode_migrates_v1_creds_into_slot_zero(void) {
+    KsConfigV1_ForTest blob; make_v1_blob(&blob);
+    KsConfig out;
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob), true, 1u);
+
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_MIGRATED, r);
+    TEST_ASSERT_EQUAL_STRING("test123", out.wifi[0].ssid);   // creds preserved
+    TEST_ASSERT_EQUAL_STRING("hunter2", out.wifi[0].pass);
+    TEST_ASSERT_EQUAL_STRING("", out.wifi[1].ssid);          // new slots start empty
+    TEST_ASSERT_EQUAL_STRING("", out.wifi[2].ssid);
+    TEST_ASSERT_EQUAL_INT(42, out.metronome_volume);         // and the rest of the config
+    TEST_ASSERT_EQUAL_INT(24, out.clock[0].ppqn);
+    TEST_ASSERT_TRUE(ks_config_valid(&out));
+}
+
+// A migration must not become a hole in the guard: a v1 blob of the wrong size
+// is still garbage, and migrated contents face ks_config_valid() like any other.
+void test_decode_v1_wrong_size_or_invalid_still_defaults(void) {
+    KsConfigV1_ForTest blob; make_v1_blob(&blob);
+    KsConfig out;
+
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob) - 4, true, 1u);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_DEFAULTED, r);
+    TEST_ASSERT_EQUAL_STRING("", out.wifi[0].ssid);
+
+    blob.metronome_volume = 999;                              // out of range
+    r = ks_config_decode(&out, &blob, sizeof(blob), true, 1u);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_DEFAULTED, r);
+    TEST_ASSERT_EQUAL_INT(80, out.metronome_volume);
+}
+
+// An unversioned blob whose length happens to equal v1's is still legacy: the
+// missing "ver" key means the bytes could be any pre-versioning layout.
+void test_decode_unversioned_v1_sized_blob_still_defaults(void) {
+    KsConfigV1_ForTest blob; make_v1_blob(&blob);
+    KsConfig out;
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob), false, 0);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_DEFAULTED, r);
+    TEST_ASSERT_EQUAL_STRING("", out.wifi[0].ssid);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_indexed_slot_keys);
+    RUN_TEST(test_empty_ssid_forgets_the_whole_slot);
+    RUN_TEST(test_wifi_slots_compacts_and_skips_empties);
+    RUN_TEST(test_slot_count_fits_the_connection_budget);
+    RUN_TEST(test_decode_migrates_v1_creds_into_slot_zero);
+    RUN_TEST(test_decode_v1_wrong_size_or_invalid_still_defaults);
+    RUN_TEST(test_decode_unversioned_v1_sized_blob_still_defaults);
     RUN_TEST(test_live_safe_copy_carries_live_fields_not_wifi);
     RUN_TEST(test_defaults);
     RUN_TEST(test_output_defaults);

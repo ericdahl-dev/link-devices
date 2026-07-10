@@ -31,17 +31,26 @@ void ks_config_load(KsConfig* c)
 
     // Say so out loud: a silent reset to defaults looks identical to "the user's
     // settings vanished", and that's exactly the moment someone needs to know why.
-    if (ks_config_decode(c, buf, sz, have_ver, ver) == KS_DECODE_DEFAULTED && sz > 0) {
+    ks_decode_result r = ks_config_decode(c, buf, sz, have_ver, ver);
+    if (r == KS_DECODE_DEFAULTED && sz > 0) {
         ESP_LOGW(TAG, "stored config rejected (ver_present=%d ver=%lu want=%lu, size=%u want=%u)"
                       " -- loaded defaults, re-save to persist",
                  (int)have_ver, (unsigned long)ver, (unsigned long)KS_CONFIG_VERSION,
                  (unsigned)sz, (unsigned)sizeof(*c));
+    } else if (r == KS_DECODE_MIGRATED) {
+        // Write the upgraded blob back now. Otherwise NVS keeps the old-version
+        // bytes and every future boot re-migrates -- and a downgrade to a build
+        // that has never heard of v1 would silently reset the user's settings.
+        ESP_LOGW(TAG, "migrated config v%lu -> v%lu (wifi creds preserved in slot 0)",
+                 (unsigned long)ver, (unsigned long)KS_CONFIG_VERSION);
+        esp_err_t e = ks_config_save(c);
+        if (e != ESP_OK) ESP_LOGE(TAG, "migration write-back failed: %s", esp_err_to_name(e));
     }
 
-    // Dev convenience: seed from the compile-time SSID if NVS has none.
-    if (c->wifi_ssid[0] == '\0' && sizeof(CONFIG_KS_WIFI_SSID) > 1) {
-        strncpy(c->wifi_ssid, CONFIG_KS_WIFI_SSID, sizeof(c->wifi_ssid) - 1);
-        strncpy(c->wifi_pass, CONFIG_KS_WIFI_PASSWORD, sizeof(c->wifi_pass) - 1);
+    // Dev convenience: seed slot 0 from the compile-time SSID if NVS has none.
+    if (c->wifi[0].ssid[0] == '\0' && sizeof(CONFIG_KS_WIFI_SSID) > 1) {
+        strncpy(c->wifi[0].ssid, CONFIG_KS_WIFI_SSID, sizeof(c->wifi[0].ssid) - 1);
+        strncpy(c->wifi[0].pass, CONFIG_KS_WIFI_PASSWORD, sizeof(c->wifi[0].pass) - 1);
     }
 }
 

@@ -233,7 +233,9 @@ void app_main(void)
              FW_VERSION, FW_BUILD);
     g_cfg_mutex = xSemaphoreCreateMutex();   /* ARC-016: before the web server / clock task */
     usb_midi_host_start();
-    wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
+    WifiCred creds[KS_WIFI_SLOTS];                        /* ESP-013: try each saved network in turn */
+    int ncreds = ks_config_wifi_slots(&g_cfg, creds);     /* empty slots dropped here, not in the policy */
+    wifi_link_start(creds, ncreds);
     ks_web_start(&g_cfg, &g_cfg_gen, g_cfg_mutex);
     if (g_cfg.metronome_enable || g_cfg.follow_beat_enable)
         audio_bus_init(AUDIO_BUS_SAMPLE_RATE);   /* shared I2S_NUM_0 + ES8311 codec owner (P4-020) -- once, before either consumer */
