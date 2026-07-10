@@ -12,9 +12,11 @@
  */
 #include <ableton/LinkAudio.hpp>
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include "beat_stamper.h"
 #include "i2s_audio_bus.h"   // KitchenSync's P4-020-validated ES8311/I2S bring-up
 #include "freertos/FreeRTOS.h"
@@ -114,10 +116,21 @@ static void wifi_connect_blocking()
 // codec mirrors it into both I2S slots (P4-020 finding), so both channels
 // carry the same mic. True 2-channel capture needs different input hardware
 // (Tier 4 USB audio interface, or an external stereo ADC).
-static constexpr uint32_t kSampleRate  = 44100;
+// Default until the session's rate is sniffed (below). Rate mismatch is
+// audible: streaming 44.1k into a 48k Live session put the receiver resampler
+// in the path, and clock-skewed stamps fought it -- "film projector" flutter,
+// a spectral comb at block rate (86Hz = 44100/512) in the recording analysis
+// (2026-07-10). Matching the session rate removes that resampler entirely.
+static constexpr uint32_t kDefaultRate = 48000;
 static constexpr uint32_t kBlockFrames = 512;
 static constexpr uint32_t kChannels    = 2;
 static constexpr size_t kMaxSinkSamples = kBlockFrames * kChannels;
+
+// Session-rate sniffing: Live announces channels but the channel list carries
+// no rate -- only received BUFFERS do (LinkAudioSource::BufferHandle::Info).
+// So subscribe to the first remote channel, read one buffer's sampleRate,
+// unsubscribe, reclock. 0 = not yet sniffed.
+static std::atomic<uint32_t> g_session_rate{0};
 static constexpr double kQuantum = 4.0;
 
 static void link_task(void*)
@@ -143,6 +156,8 @@ static void link_task(void*)
   beat_stamper_reset(&stamper);
 
   uint32_t committed = 0, skipped = 0, block = 0;
+  uint32_t rate = kDefaultRate;
+  std::optional<ableton::LinkAudioSource> sniffer;
 
   while (true)
   {
@@ -154,19 +169,58 @@ static void link_task(void*)
     }
     const uint32_t frames = bytes / sizeof(int16_t) / kChannels;
 
+    // --- session-rate adaptation ------------------------------------------
+    const uint32_t sniffed = g_session_rate.load(std::memory_order_relaxed);
+    if (sniffed != 0 && sniffer)
+    {
+      printf("[link_poc] session rate sniffed: %u Hz\n", (unsigned)sniffed);
+      sniffer.reset();   // job done; destroy OFF the Link thread
+    }
+    if (sniffed != 0 && sniffed != rate)
+    {
+      printf("[link_poc] session rate %u != ours %u -- reclocking\n",
+             (unsigned)sniffed, (unsigned)rate);
+      if (audio_bus_reclock(sniffed) && i2s_channel_enable(audio_bus_rx()) == ESP_OK)
+      {
+        rate = sniffed;
+        beat_stamper_reset(&stamper);   // old anchor is in the old rate's time
+      }
+      else
+      {
+        printf("[link_poc] reclock failed, staying at %u\n", (unsigned)rate);
+        g_session_rate.store(rate, std::memory_order_relaxed);  // stop retrying
+      }
+      continue;   // this block straddled the reclock; drop it
+    }
+    if (sniffed == 0 && !sniffer)
+    {
+      const auto chans = link.channels();
+      if (!chans.empty())
+      {
+        printf("[link_poc] sniffing session rate from '%s'\n", chans[0].name.c_str());
+        sniffer.emplace(link, chans[0].id,
+          [](ableton::LinkAudioSource::BufferHandle bh)
+          {
+            uint32_t expect = 0;   // only the first buffer matters
+            g_session_rate.compare_exchange_strong(expect, bh.info.sampleRate);
+          });
+      }
+    }
+    // -----------------------------------------------------------------------
+
     // Stamp at the block's END (the read just returned), then commit.
     const auto state = link.captureAudioSessionState();
     const double endBeats =
       state.beatAtTime(link.clock().micros(), kQuantum);
     const double bps = state.tempo() / 60.0;
     const double beginBeats =
-      beat_stamper_stamp(&stamper, endBeats, bps, frames, kSampleRate);
+      beat_stamper_stamp(&stamper, endBeats, bps, frames, rate);
 
     ableton::LinkAudioSink::BufferHandle h(sink);
     if (h && h.maxNumSamples >= frames * kChannels)
     {
       memcpy(h.samples, stereo, frames * kChannels * sizeof(int16_t));
-      if (h.commit(state, beginBeats, kQuantum, frames, kChannels, kSampleRate))
+      if (h.commit(state, beginBeats, kQuantum, frames, kChannels, rate))
         ++committed;
       else
         ++skipped;
@@ -199,7 +253,7 @@ extern "C" void app_main()
 
   // ES8311 + full-duplex I2S (P4-020's shared bus: TX enabled as clock driver,
   // mic PGA 24dB, analog mic mode). Must precede the capture loop's RX enable.
-  audio_bus_init(kSampleRate);
+  audio_bus_init(kDefaultRate);
   if (!audio_bus_ready())
   {
     printf("[link_poc] audio bus failed -- Tier 3 needs the mic\n");

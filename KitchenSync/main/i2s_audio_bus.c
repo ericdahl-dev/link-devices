@@ -151,6 +151,34 @@ void audio_bus_init(uint32_t sample_rate) {
 
 bool audio_bus_ready(void) { return s_ready; }
 uint32_t audio_bus_sample_rate(void) { return s_rate; }
+
+bool audio_bus_reclock(uint32_t sample_rate) {
+    if (!s_ready) return false;
+    if (sample_rate == s_rate) return true;
+
+    // Both directions share one clock generator; both must be down to touch it.
+    i2s_channel_disable(s_tx);
+    i2s_channel_disable(s_rx);
+
+    i2s_std_clk_config_t clk = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate);
+    clk.mclk_multiple = (i2s_mclk_multiple_t)mclk_multiple_for(sample_rate);
+    esp_err_t e = i2s_channel_reconfig_std_clock(s_tx, &clk);
+    if (e == ESP_OK) e = i2s_channel_reconfig_std_clock(s_rx, &clk);
+    if (e == ESP_OK)
+        e = es8311_sample_frequency_config(s_codec,
+                sample_rate * mclk_multiple_for(sample_rate), sample_rate);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "reclock to %u failed: %s", (unsigned)sample_rate, esp_err_to_name(e));
+        i2s_channel_enable(s_tx);   // keep the clock driver alive regardless
+        return false;
+    }
+
+    e = i2s_channel_enable(s_tx);   // clock driver back first
+    if (e != ESP_OK) { ESP_LOGE(TAG, "TX re-enable failed: %s", esp_err_to_name(e)); return false; }
+    s_rate = sample_rate;
+    ESP_LOGI(TAG, "reclocked to %u Hz", (unsigned)sample_rate);
+    return true;
+}
 i2s_chan_handle_t audio_bus_tx(void) { return s_tx; }
 i2s_chan_handle_t audio_bus_rx(void) { return s_rx; }
 es8311_handle_t   audio_bus_codec(void) { return s_codec; }
