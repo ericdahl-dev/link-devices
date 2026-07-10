@@ -7,6 +7,7 @@
 #include <string>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_http_server.h"
@@ -27,11 +28,17 @@
 #include "ks_form.h"
 #include "ks_web.h"
 #include "metronome_audio.h"   // P4-029: live vol/voice re-apply
+#include "transport_intent.h"   // ESP-011: quantized launch presses
 
 static const char *TAG = "ks_web";
 static KsConfig *s_cfg = nullptr;
 static volatile uint32_t *s_gen = nullptr;   // bumped on /live so the clock task re-primes
 static SemaphoreHandle_t s_cfg_mutex = nullptr;  // ARC-016: guards the /live patch
+// ESP-011: last-seen per-output launch state, published by the clock task.
+static volatile int s_launch[KS_CLOCK_OUTPUTS] = {0,0,0,0};
+void ks_web_publish_launch(const int st[KS_CLOCK_OUTPUTS]) {
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) s_launch[i] = st[i];
+}
 
 // %SSID% / %MCKCHK% / %CABLE% are filled per-request from the live config.
 static const char PAGE[] = R"HTML(<!doctype html>
@@ -105,6 +112,12 @@ justify-content:center;user-select:none;-webkit-user-select:none;touch-action:ma
    (two classes) otherwise out-specifies this single-class rule, leaving the MIDI
    Clock Out group unable to collapse above 760px while every other group could. */
 .hide{display:none!important}
+.tp{font-family:var(--mono);font-size:11px;letter-spacing:.14em;padding:6px 12px;margin-left:6px;
+border-radius:7px;border:1px solid var(--line);background:linear-gradient(180deg,#1a1f25,#12161b);
+color:var(--ink);cursor:pointer}
+.tp:active{transform:translateY(1px);border-color:#4a5a2c}
+.tp.armed{border-color:var(--amber);color:var(--amber)}
+.tp.running{border-color:#7fbf1f;color:var(--led)}
 .frow.head{padding:18px 0 12px}
 .frow.head .cap{font-family:var(--disp);font-weight:600;font-size:12.5px;letter-spacing:.12em;color:var(--ink);margin-bottom:12px}
 .frow.head .cap::before{content:"";display:inline-block;width:6px;height:6px;border-radius:1px;background:var(--led-dim);margin-right:10px;vertical-align:2px}
@@ -178,6 +191,7 @@ background:linear-gradient(180deg,#d2ff63,#9be32a);box-shadow:0 6px 0 #5e8a16,0 
 <div class="row"><label>MIDI Clock In</label><span class="val" id="min">&mdash;&mdash;.&mdash; BPM</span></div>
 <div class="row"><label>Clock Out</label><span class="val" id="tx">0 pulses</span></div>
 <div class="row"><label>Follow Beat</label><span class="val" id="follow">off</span></div>
+<div class="row"><label>Transport</label><span class="val"><button type="button" class="tp" data-out="all" data-play="1">PLAY</button><button type="button" class="tp" data-out="all" data-play="0">STOP</button></span></div>
 </div>
 <form method="POST" action="/save">
 <div class="formcols">
@@ -220,12 +234,22 @@ function poll(){fetch('/status',{cache:'no-store'}).then(function(r){return r.js
 if(typeof d.bpm==='number')showBpm(d.bpm);peersEl.textContent=d.peers;
 usbEl.textContent=d.usb?'Connected':'Waiting';usbEl.className='pill'+(d.usb?' on':'');
 minEl.textContent=(d.min>0)?d.min.toFixed(1)+' BPM':'——.— BPM';
-txEl.textContent=(d.tx||0)+' pulses';
+txEl.textContent=(d.tx||0)+' pulses';showLaunch(d.launch);
 if(typeof d.follow_enabled!=='undefined'){
   followEl.textContent=!d.follow_enabled?'off':(d.follow_valid?(d.follow_bpm.toFixed(1)+' BPM'):'listening...');
 }
 }).catch(function(){})}
 poll();setInterval(poll,1000);
+// ESP-011: transport presses. Start is quantized on the device (fires on the
+// next bar line); stop is immediate. The button only posts the intent.
+Array.prototype.forEach.call(document.querySelectorAll('.tp'),function(b){
+b.addEventListener('click',function(){
+fetch('/transport?out='+b.dataset.out+'&play='+b.dataset.play,{method:'POST'}).catch(function(){})})});
+function showLaunch(a){if(!a)return;
+Array.prototype.forEach.call(document.querySelectorAll('.tp[data-play="1"]'),function(b){
+var o=b.dataset.out; if(o==='all')return;
+var st=a[+o]|0; b.classList.toggle('armed',st===1); b.classList.toggle('running',st===2);
+b.textContent=st===1?'ARMED':'PLAY'})}
 // Live controls (P4-015): POST the changed field to /live so timing/division are
 // audible immediately, no reboot. Save still persists everything via /save.
 function postLive(el){var n=el.name;if(!n)return;
@@ -277,6 +301,9 @@ static std::string build_outputs()
         s += "<label class=\"sw\"><input type=\"checkbox\" class=\"live\" name=\"clk" + N + "_en\" value=\"1\""
              + (c->enable ? " checked" : "")
              + "><span class=\"track\"><span class=\"knob\"></span></span><span class=\"swlbl\"></span></label>";
+        s += std::string("<div class=\"fld\"><span class=\"pre\">RUN</span>")
+             + "<button type=\"button\" class=\"tp\" data-out=\"" + N + "\" data-play=\"1\">PLAY</button>"
+             + "<button type=\"button\" class=\"tp\" data-out=\"" + N + "\" data-play=\"0\">STOP</button></div>";
         s += "<div class=\"fld\"><span class=\"pre\">CABLE</span><select class=\"live\" name=\"clk" + N + "_cable\">";
         for (int p = 0; p < 4; p++)
             s += "<option value=\"" + std::to_string(p) + "\"" + (c->cable == p ? " selected" : "")
@@ -363,13 +390,15 @@ static esp_err_t root_handler(httpd_req_t *req)
 
 static esp_err_t status_handler(httpd_req_t *req)
 {
-    char buf[220];   // grew from 128 -- four more fields (P4-020); matches test_ks_status.c's margin
+    char buf[280];   // grew again for launch[] (ESP-011) -- four more fields (P4-020); matches test_ks_status.c's margin
     bool fb_enabled = s_cfg && s_cfg->follow_beat_enable;
     FollowBeatOut fb = fb_enabled ? follow_beat_io_status() : FollowBeatOut{};
+    int ls[KS_CLOCK_OUTPUTS];
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) ls[i] = s_launch[i];
     ks_status_json(buf, sizeof(buf),
                       (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
                       wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx(),
-                      FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid);
+                      FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid, ls);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }
@@ -426,6 +455,32 @@ static esp_err_t save_handler(httpd_req_t *req)
 // moment a control moves. The body is a PARTIAL form, so it's applied as a patch
 // (only present keys change). wifi + metronome enable/volume/voice are NOT touched
 // here — they need a reconnect / codec re-init and only /save changes them.
+// ESP-011: POST /transport?out=N&play=1|0  (out=all for every enabled output).
+// A press, not a level -- the clock task consumes it exactly once, and the pure
+// transport_launch decides WHEN it becomes MIDI Start (next bar line) vs Stop
+// (immediately).
+static esp_err_t transport_handler(httpd_req_t *req)
+{
+    char q[64];
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_send(req, "need ?out=N|all&play=1|0", HTTPD_RESP_USE_STRLEN);
+    }
+    char out_s[8] = {0}, play_s[4] = {0};
+    httpd_query_key_value(q, "out",  out_s,  sizeof(out_s));
+    httpd_query_key_value(q, "play", play_s, sizeof(play_s));
+
+    int out = (strcmp(out_s, "all") == 0) ? -1 : atoi(out_s);
+    if (out >= KS_CLOCK_OUTPUTS) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_send(req, "bad out", HTTPD_RESP_USE_STRLEN);
+    }
+    transport_intent_post(out, play_s[0] == '1' ? TL_INTENT_PLAY : TL_INTENT_STOP);
+
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, "ok", HTTPD_RESP_USE_STRLEN);
+}
+
 static esp_err_t live_handler(httpd_req_t *req)
 {
     char body[1024];
@@ -587,8 +642,10 @@ void ks_web_start(KsConfig* cfg, volatile uint32_t* gen, SemaphoreHandle_t cfg_m
     httpd_uri_t status     = { .uri = "/status", .method = HTTP_GET,  .handler = status_handler,      .user_ctx = NULL };
     httpd_uri_t save       = { .uri = "/save",   .method = HTTP_POST, .handler = save_handler,        .user_ctx = NULL };
     httpd_uri_t live       = { .uri = "/live",   .method = HTTP_POST, .handler = live_handler,         .user_ctx = NULL };
+    httpd_uri_t transport  = { .uri = "/transport", .method = HTTP_POST, .handler = transport_handler, .user_ctx = NULL };
     httpd_uri_t update_get = { .uri = "/update", .method = HTTP_GET,  .handler = update_page_handler,  .user_ctx = NULL };
     httpd_uri_t update_post= { .uri = "/update", .method = HTTP_POST, .handler = update_handler,       .user_ctx = NULL };
+    httpd_register_uri_handler(server, &transport);
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &status);
     httpd_register_uri_handler(server, &save);
