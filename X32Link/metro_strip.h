@@ -36,6 +36,14 @@ typedef struct {
 void metro_strip_render(double beats, int quantum, int npix,
                         const MetroStripCfg* cfg, RGB out[]);
 
+// Standby breath (ESP-009): session joined, transport stopped. `phase` is a
+// free-running 0..1 ramp (one full breath per period; the caller picks the
+// rate). Every pixel pulses together in the beat colour, dim and never fully
+// dark -- a strip that reaches zero looks like a board that crashed between
+// blinks, which is the exact confusion this exists to prevent. Carries no beat
+// information: in standby there is no beat.
+void metro_strip_standby(double phase, int npix, const MetroStripCfg* cfg, RGB out[]);
+
 #ifdef __cplusplus
 }
 #endif

@@ -46,13 +46,15 @@
 #include "link_measurement.h"   /* GhostXForm accessor (link_measurement_current_xform) */
 #include "link_measure_io.h"    /* unicast ping/pong measurement client */
 #include "clock_output.h"       /* per-output division + phase-nudge (P4-010) */
-#include "ks_tick.h"            /* ARC-015: pure clock-tick orchestration */
+#include "ks_tick.h"
+#include "transport_intent.h"   /* ESP-011: web UI launch presses */            /* ARC-015: pure clock-tick orchestration */
 
 static const char *TAG = "kitchensync";
 
 /* Tick-loop policy constants moved to ks_tick.h (KS_TICK_*, ARC-015). */
 #define LED_GPIO        2    /* WS2812 data pin (P4-018); external strip + 5V/GND */
 #define LED_PIXELS      METRO_STRIP_PIXELS
+#define STANDBY_PERIOD_US 2000000   /* one standby breath = 2s (ESP-009) */
 #define LED_FRAME_US    20000 /* ~50 fps strip refresh, decoupled from the 1 ms clock */
 
 /* Phase debug (LNK-026 offset hunt): log the P4's computed session phase + the raw
@@ -113,7 +115,13 @@ static void clock_out_task(void *arg)
             .start_stop_seen = link_proto_start_stop_seen(),
             .playing = link_proto_playing(), .usb_ready = usb_midi_host_ready(),
         };
+        transport_intent_take(in.launch);   /* ESP-011: one press, one action */
         KsTickPlan plan = ks_tick_step(&ts, &in);
+        {   /* ESP-011: surface arming state to the web UI. */
+            int ls[KS_CLOCK_OUTPUTS];
+            for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) ls[o] = (int)plan.launch_state[o];
+            ks_web_publish_launch(ls);
+        }
 
         /* Execute the clock fan-out: plan.pulses[o] 0xF8 packets on output o's cable. */
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
@@ -124,16 +132,16 @@ static void clock_out_task(void *arg)
                 pulses++;
             }
         }
-        /* Transport: fan Start/Stop to every enabled output's cable (P4-008). */
-        if (plan.transport != TRANSPORT_NONE) {
-            uint8_t status = (plan.transport == TRANSPORT_START) ? 0xFA : 0xFC;
-            for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
-                if (!cfg.clock[o].enable) continue;
-                uint8_t pkt[4];
-                usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
-                usb_midi_host_send(pkt, 4);
-            }
-            ESP_LOGI(TAG, "transport %s", plan.transport == TRANSPORT_START ? "START" : "STOP");
+        /* Transport, per output (P4-008 + ESP-011): each output runs its own
+         * Start/Stop, so gear can be armed onto different bars. */
+        for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
+            if (plan.transport[o] == TRANSPORT_NONE) continue;
+            uint8_t status = (plan.transport[o] == TRANSPORT_START) ? 0xFA : 0xFC;
+            uint8_t pkt[4];
+            usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
+            usb_midi_host_send(pkt, 4);
+            ESP_LOGI(TAG, "transport out%d %s", o + 1,
+                     plan.transport[o] == TRANSPORT_START ? "START" : "STOP");
         }
         /* Metronome click on the onboard speaker (P4-006). */
         if (plan.click) {
@@ -151,7 +159,7 @@ static void clock_out_task(void *arg)
          * (its own led_enable switch); clears once when disabled or idle. */
         if (now - last_led >= LED_FRAME_US) {
             last_led = now;
-            if (cfg.led_enable && plan.active && tp_playing) {   /* off when stopped (see tp_playing above) */
+            if (cfg.led_enable && plan.active) {
                 MetroStripCfg lc = {
                     .beat   = { (uint8_t)(cfg.led_beat_color   >> 16), (uint8_t)(cfg.led_beat_color   >> 8), (uint8_t)cfg.led_beat_color   },
                     .accent = { (uint8_t)(cfg.led_accent_color >> 16), (uint8_t)(cfg.led_accent_color >> 8), (uint8_t)cfg.led_accent_color },
@@ -160,7 +168,16 @@ static void clock_out_task(void *arg)
                     .fade   = (uint8_t)cfg.led_fade,
                 };
                 RGB frame[LED_PIXELS];
-                metro_strip_render(plan.beats, (int)KS_TICK_METRO_QUANTUM, LED_PIXELS, &lc, frame);
+                if (plan.standby) {
+                    /* Joined but waiting for transport (ESP-009): breathe instead of
+                     * going dark, which is indistinguishable from a dead board. The
+                     * phase is wall-clock, not beat-derived -- in standby there is no
+                     * beat to derive it from. */
+                    double ph = (double)(now % STANDBY_PERIOD_US) / (double)STANDBY_PERIOD_US;
+                    metro_strip_standby(ph, LED_PIXELS, &lc, frame);
+                } else {
+                    metro_strip_render(plan.beats, (int)KS_TICK_METRO_QUANTUM, LED_PIXELS, &lc, frame);
+                }
                 ks_led_show(frame, LED_PIXELS);
                 led_showing = true;
             } else if (led_showing) {
