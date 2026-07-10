@@ -6,12 +6,14 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <math.h>
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 #include "app_config.h"
 #include "tempo_source.h"
 
 extern AppConfig g_config;
+extern char g_ks_host[];   // mDNS hostname, set by the .ino (e.g. "kstouch-1a2b")
 
 // Panel: JD9853 via LovyanGFX Panel_ST7789 (validated on glass, LNK-014). Same
 // pins/geometry as X32Link/touch_display.cpp. 172x320 visible in 240x320 RAM.
@@ -37,60 +39,83 @@ public:
     }
 };
 
-#define LCD_BL 46
+#define LCD_BL   46
+// Phase/sync wheel (leaves the lower third free for the PLAY/STOP buttons, Inc2).
+#define WHEEL_CX 86
+#define WHEEL_CY 150
+#define WHEEL_R  42
 
 static LGFX     s_lcd;
 static float    s_shown_bpm = -1.0f;
-static int      s_shown_sync = -1;
-static uint32_t s_last_ms = 0;
+static int      s_shown_sync = -2;
+static int      s_prev_mx = -1, s_prev_my = -1;
+static uint32_t s_last_text = 0;
 
 static void backlight_on(void) { pinMode(LCD_BL, OUTPUT); digitalWrite(LCD_BL, HIGH); }
+
+// Static frame: header, wheel outline, "BPM" label. Redrawn on a sync-state change.
+static void draw_frame(int sync) {
+    s_lcd.fillScreen(TFT_BLACK);
+    s_lcd.setTextColor(0x838d95u, TFT_BLACK); s_lcd.setTextSize(1);
+    s_lcd.setCursor(8, 8); s_lcd.println("KITCHENSYNC TOUCH");
+    s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);
+    s_lcd.setTextColor(0x6f8a4du, TFT_BLACK); s_lcd.setTextSize(1);
+    s_lcd.setCursor(WHEEL_CX - 24, WHEEL_CY + WHEEL_R + 8); s_lcd.println("SYNC");
+    s_prev_mx = s_prev_my = -1;
+    (void)sync;
+}
 
 void ktouch_display_begin(void) {
     s_lcd.init();
     s_lcd.setRotation(6);   // LNK-035: USB exits downward when hand-held
     backlight_on();
-    s_lcd.fillScreen(TFT_BLACK);
-    s_lcd.setTextColor(0xB6FF36u, TFT_BLACK);   // KitchenSync green
-    s_lcd.setTextSize(2);
-    s_lcd.setCursor(8, 40);  s_lcd.println("KITCHEN");
-    s_lcd.setCursor(8, 62);  s_lcd.println("SYNC");
-    s_lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-    s_lcd.setTextSize(1);
-    s_lcd.setCursor(8, 100); s_lcd.println("TOUCH -- booting");
+    draw_frame(-1);
+    s_lcd.setTextColor(0xB6FF36u, TFT_BLACK); s_lcd.setTextSize(1);
+    s_lcd.setCursor(8, 300); s_lcd.println("booting...");
 }
 
-// Redraw only when a value changed (cheap; no flicker). ~5 Hz.
 void ktouch_display_tick(void) {
-    uint32_t now = millis();
-    if (now - s_last_ms < 200) return;
-    s_last_ms = now;
-
-    float bpm = tempo_source_bpm();
+    float bpm  = tempo_source_bpm();
     int   sync = tempo_source_phase_valid() ? 1 : (tempo_source_active() ? 0 : -1);
+    uint32_t now = millis();
 
-    if (fabsf(bpm - s_shown_bpm) < 0.05f && sync == s_shown_sync) return;
-    s_shown_bpm = bpm; s_shown_sync = sync;
+    // Text (BPM number + sync line + IP): throttled, redraw on change.
+    if (now - s_last_text >= 200 &&
+        (fabsf(bpm - s_shown_bpm) >= 0.05f || sync != s_shown_sync)) {
+        s_last_text = now;
+        if (sync != s_shown_sync) draw_frame(sync);  // clears wheel interior too
+        s_shown_bpm = bpm; s_shown_sync = sync;
 
-    s_lcd.fillScreen(TFT_BLACK);
-    // header
-    s_lcd.setTextColor(0x838d95u, TFT_BLACK); s_lcd.setTextSize(1);
-    s_lcd.setCursor(8, 10); s_lcd.println("KITCHENSYNC TOUCH");
-    // big BPM
-    s_lcd.setTextColor(0xB6FF36u, TFT_BLACK); s_lcd.setTextSize(6);
-    s_lcd.setCursor(8, 120);
-    if (bpm > 0.0f) s_lcd.printf("%3.0f", bpm); else s_lcd.print("---");
-    s_lcd.setTextSize(2); s_lcd.setTextColor(0x6f8a4du, TFT_BLACK);
-    s_lcd.setCursor(120, 180); s_lcd.println("BPM");
-    // sync + ip
-    s_lcd.setTextSize(1);
-    const char* st = sync == 1 ? "SYNCED" : sync == 0 ? "linking..." : "no link";
-    uint32_t sc = sync == 1 ? 0xB6FF36u : 0xFF9D3Bu;
-    s_lcd.setTextColor(sc, TFT_BLACK);
-    s_lcd.setCursor(8, 250); s_lcd.println(st);
-    s_lcd.setTextColor(0x838d95u, TFT_BLACK);
-    s_lcd.setCursor(8, 280);
-    s_lcd.println(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "no wifi");
+        s_lcd.fillRect(0, 40, 172, 46, TFT_BLACK);   // BPM area
+        s_lcd.setTextColor(0xB6FF36u, TFT_BLACK); s_lcd.setTextSize(6);
+        s_lcd.setCursor(8, 42);
+        if (bpm > 0.0f) s_lcd.printf("%3.0f", bpm); else s_lcd.print("---");
+
+        s_lcd.fillRect(0, 250, 172, 60, TFT_BLACK);
+        const char* st = sync == 1 ? "SYNCED" : sync == 0 ? "linking..." : "no link";
+        s_lcd.setTextColor(sync == 1 ? 0xB6FF36u : 0xFF9D3Bu, TFT_BLACK); s_lcd.setTextSize(2);
+        s_lcd.setCursor(8, 258); s_lcd.println(st);
+        // Reach it by name, not a faint IP. Brighter: white on black.
+        s_lcd.setTextColor(TFT_WHITE, TFT_BLACK); s_lcd.setTextSize(1);
+        s_lcd.setCursor(8, 292);
+        if (WiFi.status() == WL_CONNECTED) { s_lcd.print(g_ks_host); s_lcd.println(".local"); }
+        else s_lcd.println("no wifi");
+    }
+
+    // Wheel marker: sweeps every tick so the beat/downbeat is visible in motion.
+    float phase = tempo_source_phase((float)g_config.quantum_beats);
+    if (phase >= 0.0f && g_config.quantum_beats > 0) {
+        float ang = fmodf(phase / (float)g_config.quantum_beats, 1.0f) * 360.0f;
+        float rad = (ang - 90.0f) * 0.01745329f;   // 0deg at top
+        int mx = WHEEL_CX + (int)(cosf(rad) * (WHEEL_R - 8));
+        int my = WHEEL_CY + (int)(sinf(rad) * (WHEEL_R - 8));
+        if (mx != s_prev_mx || my != s_prev_my) {
+            if (s_prev_mx >= 0) s_lcd.fillCircle(s_prev_mx, s_prev_my, 7, TFT_BLACK);
+            s_lcd.drawCircle(WHEEL_CX, WHEEL_CY, WHEEL_R, TFT_DARKGREEN);  // repair outline
+            s_lcd.fillCircle(mx, my, 6, TFT_GREEN);
+            s_prev_mx = mx; s_prev_my = my;
+        }
+    }
 }
 
 #else  // no touch display on this board -> no-ops

@@ -7,6 +7,7 @@
 // clock task via the Link-only tempo seam (ktouch_tempo). Display (1c), transport
 // (Inc2), web/captive-portal (Inc3) layer on next.
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include "config.h"
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -20,6 +21,7 @@
 #include "ktouch_display.h"   // status screen (no-op on screenless builds)
 
 AppConfig g_config;   // the one config instance; ktouch_tempo reads it
+char      g_ks_host[32] = "kstouch";   // mDNS name; per-unit suffix set at boot
 
 static uint32_t s_last_log = 0;
 
@@ -46,8 +48,14 @@ void setup() {
     }
     Serial.println();
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.printf("[KSTouch] ip %s\n", WiFi.localIP().toString().c_str());
-        tempo_source_begin();   // Link multicast + measurement + the DIN/USB clock task
+        // Per-unit mDNS name so two units don't collide and you reach it by name,
+        // not a DHCP address. S3's WiFi MAC is on-die (esp_read_mac works here).
+        uint8_t mac[6]; WiFi.macAddress(mac);
+        snprintf(g_ks_host, sizeof(g_ks_host), "kstouch-%02x%02x", mac[4], mac[5]);
+        if (MDNS.begin(g_ks_host)) MDNS.addService("http", "tcp", 80);
+        Serial.printf("[KSTouch] ip %s  http://%s.local\n",
+                      WiFi.localIP().toString().c_str(), g_ks_host);
+        tempo_source_begin();   // Link multicast + measurement + the DIN clock task
     } else {
         Serial.println("[KSTouch] WiFi failed (Inc1 has no captive portal yet)");
     }
