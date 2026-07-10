@@ -11,9 +11,8 @@
 #include "link_protocol.h"
 #include "link_measurement.h"
 #include "link_phase.h"
-#include "midi_clock.h"          // midi_clock_usb_begin()
-#include "midi_clock_out_io.h"   // midi_clock_out_io_begin() — the DIN+USB clock task
-#include <USB.h>
+#include "din_midi_out.h"        // MIDI_TX_GPIO
+#include "ktouch_midi_out.h"     // DIN-only clock writer (no USB-MIDI composite)
 #include <Arduino.h>
 #include "esp_timer.h"
 
@@ -21,21 +20,15 @@ extern AppConfig g_config;   // owned by the .ino
 
 extern "C" void tempo_source_select(int /*kind*/) { /* Link-only product */ }
 
-// USB MIDI must enumerate BEFORE WiFi so the host sees the port. Only bother if the
-// clock is on. midi_clock_usb_begin() starts the endpoint WITHOUT a MIDI-in poll task.
-extern "C" void tempo_source_pre_net(void) {
-    if (g_config.clock_enable) {
-        USB.manufacturerName("KitchenSync");
-        midi_clock_usb_begin();
-        USB.begin();
-    }
-}
+// DIN-only product: no USB-MIDI, so nothing to enumerate before WiFi. Leaving USB
+// as plain CDC keeps the serial/upload port stable (a composite CDC+MIDI drops it).
+extern "C" void tempo_source_pre_net(void) { /* no USB-MIDI (see ktouch_midi_out) */ }
 
 // Link joins multicast after WiFi; the measurement client keeps a GhostXForm warm.
 extern "C" void tempo_source_begin(void) {
     link_listener_begin();
     link_measurement_io_begin();
-    if (g_config.clock_enable) midi_clock_out_io_begin();   // DIN+USB 0xF8 task
+    if (g_config.clock_enable) ktouch_midi_out_begin(MIDI_TX_GPIO);   // DIN 0xF8 task
 }
 
 extern "C" void tempo_source_poll(void) {
