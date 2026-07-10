@@ -3,6 +3,9 @@
 #include "fw_version.h"
 #include "web_status_json.h"
 #include "tempo_snapshot.h"
+#ifdef HAS_BATTERY_GAUGE
+#include "battery_snapshot.h"
+#endif
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -66,6 +69,7 @@ box-shadow:inset 0 0 32px rgba(0,0,0,.9)}
 .bignum{font-size:58px}
 .unit-bpm{font-family:var(--mono);font-size:13px;color:#6f8a4d;letter-spacing:.2em;margin-left:6px}
 .scr-foot{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:#5e7044;letter-spacing:.14em}
+.batt{display:none}
 form{padding:6px 26px 26px}
 .row{padding:15px 0;border-top:1px solid var(--line)}.row:first-child{border-top:none}
 .cap{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px}
@@ -113,7 +117,7 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 <div class="scr">
 <div class="scr-top"><span class="beat" id="beat"></span><span class="scr-lbl">Session Tempo</span><span class="scr-src" id="srcLbl">Ableton Link</span></div>
 <div class="readout"><span class="ghost bignum">188.8</span><span class="live"><span class="bignum" id="bpm">%BPM%</span><span class="unit-bpm">BPM</span></span></div>
-<div class="scr-foot"><span id="srcFoot">SOURCE&middot;LINK</span><span>OUT&middot;/fx/&middot;/par/01</span></div>
+<div class="scr-foot"><span id="srcFoot">SOURCE&middot;LINK</span><span id="battFoot" class="batt"></span><span>OUT&middot;/fx/&middot;/par/01</span></div>
 </div>
 <form method="POST" action="/save">
 <input type="hidden" name="input_source" id="h_src" value="%SRC%">
@@ -183,7 +187,7 @@ document.getElementById('slotHint').textContent='1 – '+maxSlot;
 document.getElementById('portHint').textContent='OSC·:'+(v==='1'?'10024':'10023');
 if(curSlot>maxSlot){curSlot=maxSlot;hSlot.value=maxSlot}renderSlots()});
 renderSlots();
-var bpmEl=document.getElementById('bpm'),beatEl=document.getElementById('beat');
+var bpmEl=document.getElementById('bpm'),beatEl=document.getElementById('beat'),battFootEl=document.getElementById('battFoot');
 var seedBpm=parseFloat(bpmEl.textContent)||0,beatTimer=null,shownBpm=-1;
 // Free-running fallback blink (pre-LNK-022 behaviour) — used whenever the
 // server says phase isn't valid yet (sync gap / no source). Unchanged.
@@ -194,11 +198,11 @@ function flashBeat(){beatEl.classList.add('on');setTimeout(function(){beatEl.cla
 // /status is 1Hz (intentionally — see ticket notes), too coarse to *drive*
 // a smooth dot directly. Each poll that reports valid:true snaps a local
 // anchor {phase,pollMs,bpm,quantum}; a requestAnimationFrame loop
-// extrapolates phase_now between polls and flashes on each wrap
-// (phase_now < prevPhase), same wrap-detection shape as the LED's
-// led_phase_should_flash (LNK-021), just reimplemented client-side since
-// there's no host-JS test harness here (see web_status_json.c/.h for the
-// part of this ticket that *is* host-tested). Visual (size/color/glow) is
+// extrapolates phase_now between polls. anchor.phase/quantum are the
+// *bar*-quantized reading (see handle_status() below) — beats within the
+// bar are its integer part, so we wrap-detect on phase%1 to flash every
+// beat, same as the LED's per-beat led_phase_should_flash (LNK-021), not
+// only on the once-per-bar quantum wrap. Visual (size/color/glow) is
 // untouched — only the timing source changes.
 var phaseLocked=false,anchor=null,prevPhase=-1,rafId=null;
 function phaseTick(){
@@ -206,8 +210,9 @@ if(!anchor){rafId=null;return}
 var elapsedS=(Date.now()-anchor.pollMs)/1000;
 var phase=(anchor.phase+elapsedS*anchor.bpm/60)%anchor.quantum;
 if(phase<0)phase+=anchor.quantum;
-if(prevPhase>=0&&phase<prevPhase)flashBeat();
-prevPhase=phase;
+var beatPhase=phase%1;
+if(prevPhase>=0&&beatPhase<prevPhase)flashBeat();
+prevPhase=beatPhase;
 rafId=requestAnimationFrame(phaseTick);
 }
 function showBpm(bpm){if(Math.abs(bpm-shownBpm)<0.05)return;shownBpm=bpm;
@@ -215,6 +220,7 @@ bpmEl.textContent=bpm>0?bpm.toFixed(1):'--.-';if(!phaseLocked)setBeat(bpm)}
 function poll(){fetch('/status',{cache:'no-store'}).then(function(r){return r.json()})
 .then(function(d){
 if(typeof d.bpm==='number')showBpm(d.bpm);
+if(typeof d.batt_pct==='number'){battFootEl.textContent='BATT·'+d.batt_pct.toFixed(0)+'%';battFootEl.style.display=''}
 var valid=d.valid===true&&typeof d.phase==='number'&&typeof d.quantum==='number'&&d.quantum>0;
 if(valid){
 anchor={phase:d.phase,pollMs:Date.now(),bpm:d.bpm,quantum:d.quantum};
@@ -324,8 +330,15 @@ static void handle_update_upload() {
 // tempo_snapshot_read() (ARC-001 seam) — never tempo_source_* directly.
 static void handle_status() {
     TempoSnapshot ts; tempo_snapshot_read(&ts);
-    char buf[96];
-    web_status_json(buf, sizeof(buf), ts.bpm, ts.phase, ts.valid, ts.quantum, FW_VERSION);
+    char buf[128];
+#ifdef HAS_BATTERY_GAUGE
+    BatterySnapshot bs; battery_snapshot_read(&bs);
+    web_status_json(buf, sizeof(buf), ts.bpm, ts.phase, ts.valid, ts.quantum, FW_VERSION,
+                     bs.present, bs.volts, bs.percent);
+#else
+    web_status_json(buf, sizeof(buf), ts.bpm, ts.phase, ts.valid, ts.quantum, FW_VERSION,
+                     false, 0.0f, 0.0f);
+#endif
     server.send(200, "application/json", buf);
 }
 

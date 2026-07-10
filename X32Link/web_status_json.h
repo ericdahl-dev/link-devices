@@ -16,11 +16,15 @@ extern "C" {
 // doesn't special-case it, it just prints whatever float it's given;
 // `valid` is the field JS actually gates on). `fw` is the firmware version
 // string (LNK-038) — caller-supplied (glue passes FW_VERSION) so this builder
-// stays pure and version-agnostic. Returns the snprintf() return value (bytes
-// that would have been written, excluding the terminator), so the caller can
-// detect truncation the same way any snprintf caller would.
+// stays pure and version-agnostic. `has_batt` gates two extra fields,
+// `"batt_v":F,"batt_pct":F` — omitted entirely when false, so boards with no
+// fuel gauge (i.e. most of them) get the same schema as before this field
+// existed; the web JS feature-detects on `typeof d.batt_pct`. Returns the
+// snprintf() return value (bytes that would have been written, excluding the
+// terminator), so the caller can detect truncation the same way any snprintf
+// caller would.
 int web_status_json(char* buf, size_t buf_len, float bpm, float phase, bool valid, int quantum,
-                    const char* fw);
+                    const char* fw, bool has_batt, float batt_v, float batt_pct);
 
 #ifdef __cplusplus
 }
