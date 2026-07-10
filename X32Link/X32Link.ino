@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include "config.h"
 #include "fw_version.h"      // LNK-038: FW_VERSION / FW_BUILD identity
 #include "app_config.h"
@@ -238,18 +239,59 @@ static void battery_task(void*) {
 
 static int64_t now_us_ms() { return (int64_t)millis() * 1000; }
 
-// Cold-start connect. The give-up budget lives in the shared wifi_conn_policy now,
-// not an inline `> 30000`. Returns true once connected, false when the policy trips
-// the budget (caller starts the config AP).
-static bool wifi_try_connect() {
-    Serial.printf("[X32Link] connecting to %s\n", g_config.wifi_ssid);
+// Last esp_wifi disconnect reason (201=NO_AP_FOUND, 15=4WAY_HANDSHAKE, 2=AUTH_EXPIRE…).
+static int s_wifi_disc_reason = -1;
+
+static void on_wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
+    if (event == ARDUINO_EVENT_WIFI_STA_START) {
+        esp_wifi_connect();
+    } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+        s_wifi_disc_reason = (int)info.wifi_sta_disconnected.reason;
+        Serial.printf("[X32Link] WiFi disconnect reason=%d\n", s_wifi_disc_reason);
+        if (g_wifi_pol.state == WCS_AP) return;
+        WifiConnAction a = wifi_conn_policy_step(&g_wifi_pol, WCE_DISCONNECTED, now_us_ms());
+        if (a == WCA_CONNECT) {
+            delay(500);
+            esp_wifi_connect();
+        }
+    } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+        wifi_conn_policy_step(&g_wifi_pol, WCE_GOT_IP, now_us_ms());
+    }
+}
+
+// STA connect. Hidden SSIDs need WIFI_ALL_CHANNEL_SCAN on the wifi_config before
+// connect; visible SSIDs work with WiFi.begin() after patching scan_method.
+static void wifi_sta_connect(const char* ssid, const char* pass) {
+    WiFi.persistent(false);   // creds live in our NVS (x32link), not SDK wlan
     WiFi.mode(WIFI_STA);
-    WiFi.begin(g_config.wifi_ssid, g_config.wifi_pass);
+    WiFi.disconnect(true);
+    delay(100);
+
+    wifi_config_t wc = {};
+    strlcpy((char*)wc.sta.ssid, ssid, sizeof(wc.sta.ssid));
+    if (pass) strlcpy((char*)wc.sta.password, pass, sizeof(wc.sta.password));
+    wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    esp_wifi_set_config(WIFI_IF_STA, &wc);
+    WiFi.begin(ssid, pass);
+}
+
+// Cold-start connect. Poll for WL_CONNECTED / timeout only — do NOT feed
+// WCE_DISCONNECTED into the policy each poll (that spams esp_wifi_connect() and
+// can make routers reject the STA). Mid-session drops are handled in on_wifi_event.
+static bool wifi_try_connect() {
+    Serial.printf("[X32Link] connecting to '%s'\n", g_config.wifi_ssid);
+    if (g_config.wifi_pass[0] == '\0')
+        Serial.println("[X32Link] WARN: empty wifi_pass in NVS — re-enter PASS on save");
+
+    s_wifi_disc_reason = -1;
+    wifi_sta_connect(g_config.wifi_ssid, g_config.wifi_pass);
     wifi_conn_policy_reset(&g_wifi_pol, now_us_ms());
     while (WiFi.status() != WL_CONNECTED) {
-        // WCA_CONNECT here is a no-op — WiFi.begin() is already in flight; we only
-        // act on the budget's WCA_GIVE_UP_TO_AP.
-        if (wifi_conn_policy_step(&g_wifi_pol, WCE_DISCONNECTED, now_us_ms()) == WCA_GIVE_UP_TO_AP) {
+        if ((now_us_ms() - g_wifi_pol.connect_start_us) >= WIFI_CONN_TIMEOUT_US) {
+            g_wifi_pol.state = WCS_AP;   // stop on_wifi_event re-connect attempts first
+            Serial.printf("[X32Link] WiFi timeout (last_reason=%d)\n", s_wifi_disc_reason);
+            WiFi.setAutoReconnect(false); // stop the core's own retry loop too
             WiFi.disconnect(true);
             return false;
         }
@@ -326,6 +368,7 @@ void setup() {
     xTaskCreatePinnedToCore(battery_task, "batt", 2048, NULL, 1, NULL, 0);
 #endif
 
+    WiFi.onEvent(on_wifi_event);
     bool wifi_ok = wifi_try_connect();
     if (wifi_ok) {
         tempo_source_begin();    // Link joins multicast here; no-op for MIDI
@@ -349,17 +392,17 @@ void loop() {
     // iteration and fight the AP radio config. AP mode is terminal until a
     // reboot (handle_save()), so this intentionally never re-enters STA on
     // its own — see start_config_ap()'s comment / ticket Notes.
-    if (g_wifi_pol.state != WCS_AP && WiFi.status() != WL_CONNECTED) {
-        // Creds are proven (we had an IP), so the policy retries forever — never AP.
-        if (wifi_conn_policy_step(&g_wifi_pol, WCE_DISCONNECTED, now_us_ms()) == WCA_CONNECT) {
-            Serial.println("[X32Sync] WiFi lost — reconnecting");
-            WiFi.reconnect();
-            while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
-            wifi_conn_policy_step(&g_wifi_pol, WCE_GOT_IP, now_us_ms());
-            Serial.println();
-            tempo_source_begin();
-            osc_sender_begin();
-        }
+    // Mid-session reconnect is event-driven (on_wifi_event). After GOT_IP once,
+    // bring Link/OSC back when DHCP returns — don't block loop() on reconnect.
+    static bool s_need_link_restart = false;
+    if (WiFi.status() == WL_CONNECTED && s_need_link_restart) {
+        s_need_link_restart = false;
+        tempo_source_begin();
+        osc_sender_begin();
+        Serial.printf("[X32Link] WiFi back — IP: %s\n", WiFi.localIP().toString().c_str());
+    } else if (g_wifi_pol.got_ip_once && g_wifi_pol.state != WCS_AP &&
+               WiFi.status() != WL_CONNECTED) {
+        s_need_link_restart = true;
     }
     web_config_handle();  // service the web server every ~20 ms so /status polling is live
 
