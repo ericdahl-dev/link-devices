@@ -34,12 +34,14 @@ schematic/silk check; the forbidden set is certain.**
 | MIDI OUT (UART1 TX, 31250) | 1 | GPIO20 | 39-48 block |
 | Downbeat strobe (analyzer trigger) | 1 | GPIO21 | " |
 | MIDI IN (UART1 RX, 31250) | 2 | GPIO22 | " |
-| Analog clock out A / B | 3 | GPIO23 / 24 | " |
-| Analog reset out | 3 | GPIO25 | " |
+| Analog clock out A / B | 3 | GPIO23 / 32 | 33, 45-48 |
+| Analog reset out | 3 | GPIO33 | " |
 
-All route through the GPIO matrix, so the assignment is arbitrary among free
-pins. Verification: boot with WiFi up, drive each candidate high/low, confirm on
-the analyzer AND that WiFi survives. 10-minute sweep, turns candidates into facts.
+**Confirmed against the P4-NANO pinout (2026-07-10).** Header-broken-out and free:
+GPIO 5, 20, 21, 22, 23, 32, 33, 36, 45, 46, 47, 48. GPIO20/21/22 verified for
+PR1/PR2. **Do NOT use GPIO24-27 — they are the USB1 PHY (`USB1P1_N0/P0/N1/P1`),
+i.e. the USB-MIDI host port; driving them kills USB.** Also avoid GPIO0/1 (XTAL_32K
+RTC clock source), GPIO2/3/4/6 (touch), and the C6 pins (C6_IO9/12/13, C6_U0RXD/TXD).
 
 ## PR sequence
 
