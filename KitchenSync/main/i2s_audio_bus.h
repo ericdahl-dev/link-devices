@@ -54,6 +54,14 @@ bool audio_bus_ready(void);
 // The rate audio_bus_init() was called with (0 before init).
 uint32_t audio_bus_sample_rate(void);
 
+// Reclock the running bus to a new sample rate (P4-032: adapt to the Link
+// session's rate discovered off a received buffer). Disables both channels,
+// reconfigures I2S clocks + the ES8311, re-enables TX (the shared clock
+// driver -- see the header comment); the RX consumer re-enables its own side.
+// Returns false (bus left ready at the OLD rate's config, channels disabled
+// except TX best-effort) on failure.
+bool audio_bus_reclock(uint32_t sample_rate);
+
 // TX (speaker out) / RX (mic in) channel handles. NULL if audio_bus_init()
 // hasn't run or failed -- callers must check audio_bus_ready() first.
 i2s_chan_handle_t audio_bus_tx(void);
