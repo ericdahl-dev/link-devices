@@ -7,16 +7,16 @@
 void setUp(void) {}
 void tearDown(void) {}
 
-// Tracer: a tap inside the PLAY button reports PLAY.
+// Landscape 320x172: PLAY left, STOP right, across the bottom.
 void test_tap_in_play_reports_play(void) {
-    TEST_ASSERT_EQUAL_INT(KTOUCH_BTN_PLAY, ktouch_ui_hit(80, 210));
+    TEST_ASSERT_EQUAL_INT(KTOUCH_BTN_PLAY, ktouch_ui_hit(80, 128));
 }
 
 void test_tap_in_stop_reports_stop(void) {
-    TEST_ASSERT_EQUAL_INT(KTOUCH_BTN_STOP, ktouch_ui_hit(80, 285));
+    TEST_ASSERT_EQUAL_INT(KTOUCH_BTN_STOP, ktouch_ui_hit(238, 128));
 }
 
-// The BPM/status area up top is not a button -- a tap there does nothing (no
+// The BPM/wheel strip up top is not a button -- a tap there does nothing (no
 // accidental transport, and there is no settings screen to reach at all).
 void test_tap_in_status_area_reports_none(void) {
     TEST_ASSERT_EQUAL_INT(KTOUCH_BTN_NONE, ktouch_ui_hit(80, 40));
@@ -25,7 +25,7 @@ void test_tap_in_status_area_reports_none(void) {
 // The gap between the two buttons is dead space -- prevents a fat-finger on the
 // PLAY/STOP border from firing the wrong one.
 void test_tap_in_gap_reports_none(void) {
-    TEST_ASSERT_EQUAL_INT(KTOUCH_BTN_NONE, ktouch_ui_hit(80, 254));
+    TEST_ASSERT_EQUAL_INT(KTOUCH_BTN_NONE, ktouch_ui_hit(160, 128));
 }
 
 int main(void) {
