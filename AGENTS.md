@@ -121,9 +121,19 @@ LNK-024 (2026-07-08); its `midi_*` files moved into `X32Link/`.
   buffered multicast and Link silently never receives. (`X32Link.ino`)
 - **Hidden SSIDs:** STA connect uses `esp_wifi_set_config` with
   `WIFI_ALL_CHANNEL_SCAN` (not plain `WiFi.begin`) so the device probes with the
-  saved SSID on every channel. If connect still fails after 30 s it falls back
-  to AP `X32Link-Config` — join that, re-enter SSID/pass at `http://192.168.4.1`,
-  Write & Reboot. ESP32 is **2.4 GHz only**.
+  saved SSID on every channel. If every saved network fails within
+  `WIFI_CONN_TIMEOUT_US` (45 s **total**) it falls back to the config AP
+  (`X32Link-Config` / `KitchenSync-Setup`) — join that, re-enter SSID/pass at
+  `http://192.168.4.1`, Write & Reboot. ESP32 is **2.4 GHz only**.
+- **Multi-network (ESP-013, KitchenSync):** `KsConfig` holds `KS_WIFI_SLOTS`
+  saved networks. `wifi_conn_policy` walks them, giving each `45 s / nslots`, so
+  adding networks never delays reaching the config AP. The policy is SSID-blind:
+  `ks_config_wifi_slots()` compacts empty slots away and hands it a count.
+  `wifi_link` logs the joined SSID next to the IP — a device that silently joined
+  a different saved network looks exactly like a routing fault.
+- The `httpd` task stack is ~4 KB. Request bodies (`/save`) are **heap**
+  allocated; a multi-KB buffer as a stack local panics with a stack-protection
+  fault on the first save.
 - USB MIDI must enumerate **before** WiFi; Link joins multicast **after**.
   Captured by `tempo_source_pre_net()` / `tempo_source_begin()`.
 

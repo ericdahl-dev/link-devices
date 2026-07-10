@@ -84,6 +84,24 @@ static void link_task(void *arg)
  * translates esp_wifi events and executes the returned action. */
 static WifiConnPolicy s_pol;
 
+/* ESP-013: the compacted saved networks, copied at start so the caller's KsConfig
+ * need not outlive us. s_pol.slot indexes this array. */
+static WifiCred s_creds[KS_WIFI_SLOTS];
+static int      s_ncreds;
+
+/* Point the STA at slot `i` without restarting the WiFi stack. Called for the cold
+ * start and again on every WCA_TRY_SLOT. */
+static void apply_slot(int i)
+{
+    wifi_config_t wc = {0};
+    strncpy((char *)wc.sta.ssid,     s_creds[i].ssid, sizeof(wc.sta.ssid) - 1);
+    strncpy((char *)wc.sta.password, s_creds[i].pass, sizeof(wc.sta.password) - 1);
+    wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+    ESP_LOGI(TAG, "connecting to SSID:%s (slot %d/%d)", s_creds[i].ssid, i + 1, s_ncreds);
+}
+
 /* SoftAP config fallback — reached either from a first-boot empty ssid, or from
  * give_up_and_start_ap() once the policy's budget trips. Does not re-init the WiFi
  * stack or re-register events — wifi_link_start() did that once. */
@@ -126,8 +144,12 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         WifiConnAction a = wifi_conn_policy_step(&s_pol, WCE_DISCONNECTED, esp_timer_get_time());
         if (a == WCA_GIVE_UP_TO_AP) {
             give_up_and_start_ap();
-        } else {  // WCA_CONNECT
+        } else {  // WCA_CONNECT (same slot) or WCA_TRY_SLOT (next saved network)
             ESP_LOGW(TAG, "disconnected (reason=%d), retrying", dc ? dc->reason : -1);
+            /* ESP-013: this slot's share of the budget ran out — re-point the STA at
+             * the next saved network before reconnecting. Safe while started; only
+             * the config changes, the stack keeps running. */
+            if (a == WCA_TRY_SLOT) apply_slot(s_pol.slot);
             /* Backoff before reconnecting: without it the C6 posts DISCONNECTED as
              * fast as it fails (reason 201 while a hotspot wakes), spinning the hosted
              * RPC. Runs in the event-loop task, not an ISR, so a short delay is safe. */
@@ -136,7 +158,11 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;
-        ESP_LOGI(TAG, "got ip " IPSTR, IP2STR(&e->ip_info.ip));
+        /* Name the network, not just the address. A device that silently joined a
+         * different saved SSID than expected looks like a routing fault. */
+        ESP_LOGI(TAG, "got ip " IPSTR " on SSID:%s (slot %d/%d)", IP2STR(&e->ip_info.ip),
+                 s_pol.slot < s_ncreds ? s_creds[s_pol.slot].ssid : "?",
+                 s_pol.slot + 1, s_ncreds);
         /* Multicast must not be dropped by modem sleep (the P4 equivalent of the
          * S3's WiFi.setSleep(false)). */
         esp_wifi_set_ps(WIFI_PS_NONE);
@@ -146,24 +172,21 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     }
 }
 
-static void start_sta(const char* ssid, const char* pass)
+static void start_sta(void)
 {
     esp_netif_create_default_wifi_sta();
-
-    wifi_config_t wc = {0};
-    strncpy((char *)wc.sta.ssid,     ssid, sizeof(wc.sta.ssid) - 1);
-    strncpy((char *)wc.sta.password, pass ? pass : "", sizeof(wc.sta.password) - 1);
-    wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
-    wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
-    wifi_conn_policy_reset(&s_pol, esp_timer_get_time());
+    apply_slot(0);
+    wifi_conn_policy_reset(&s_pol, esp_timer_get_time(), s_ncreds);
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "connecting to SSID:%s", ssid);
 }
 
-void wifi_link_start(const char* ssid, const char* pass)
+void wifi_link_start(const WifiCred* creds, int n)
 {
+    if (n > KS_WIFI_SLOTS) n = KS_WIFI_SLOTS;
+    s_ncreds = (n < 0) ? 0 : n;
+    for (int i = 0; i < s_ncreds; i++) s_creds[i] = creds[i];
+
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -174,8 +197,8 @@ void wifi_link_start(const char* ssid, const char* pass)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi_event, NULL));
 
-    if (ssid && ssid[0] != '\0') start_sta(ssid, pass);
-    else                         start_ap();
+    if (s_ncreds > 0) start_sta();
+    else              start_ap();
 }
 
 bool wifi_link_ap_mode(void)               { return s_pol.state == WCS_AP; }
