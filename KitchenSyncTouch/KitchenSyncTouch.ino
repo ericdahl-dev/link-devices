@@ -17,6 +17,7 @@
 #include "fw_version.h"
 #include "app_config.h"
 #include "tempo_source.h"
+#include "ktouch_display.h"   // status screen (no-op on screenless builds)
 
 AppConfig g_config;   // the one config instance; ktouch_tempo reads it
 
@@ -28,6 +29,7 @@ void setup() {
     Serial.printf("\n[KSTouch] KitchenSync Touch fw:%s -- booting\n", FW_VERSION);
 
     config_defaults(&g_config);
+    ktouch_display_begin();   // splash on the LCD before WiFi
 
     // USB MIDI must enumerate before WiFi (host sees the port); ktouch_tempo does
     // it iff the clock is enabled.
@@ -53,6 +55,7 @@ void setup() {
 
 void loop() {
     tempo_source_poll();
+    ktouch_display_tick();
     uint32_t now = millis();
     if (now - s_last_log >= 1000) {
         s_last_log = now;
