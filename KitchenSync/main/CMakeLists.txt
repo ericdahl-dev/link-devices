@@ -24,6 +24,7 @@ idf_component_register(
          "follow_beat.c"
          "follow_beat_io.c"
          "ks_led.c"
+         "${X32LINK_DIR}/ui_chrome.c"
          "${X32LINK_DIR}/metro_strip.c"
          "${X32LINK_DIR}/clock_ticker.c"
          "${X32LINK_DIR}/clock_output.c"
