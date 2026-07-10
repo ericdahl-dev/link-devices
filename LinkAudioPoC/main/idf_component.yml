@@ -1,0 +1,12 @@
+dependencies:
+  # asio: the Link SDK's esp32 platform layer expects the IDF-managed asio
+  # component (same dep as the SDK's own examples/esp32).
+  espressif/asio: "*"
+  # WiFi on the P4 comes from the onboard ESP32-C6 over ESP-Hosted -- identical
+  # recipe to KitchenSync/main/idf_component.yml.
+  espressif/esp_hosted: "~2"
+  espressif/es8311: "^1.0.0"
+  espressif/esp_wifi_remote:
+    version: ">=0.10,<2.0"
+  idf:
+    version: ">=5.5.0"

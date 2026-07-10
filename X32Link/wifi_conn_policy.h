@@ -16,8 +16,9 @@ extern "C" {
 #endif
 
 // STA association budget: give the configured network this long to connect on a cold
-// start before falling back to the config AP. (Parity with the old 30 s literal.)
-#define WIFI_CONN_TIMEOUT_US (30LL * 1000000LL)
+// start before falling back to the config AP. Hidden SSIDs + Wi-Fi 6 routers can
+// take longer than a visible beacon scan.
+#define WIFI_CONN_TIMEOUT_US (45LL * 1000000LL)
 
 typedef enum {
     WCS_CONNECTING = 0,   // trying to associate (initial or retry)

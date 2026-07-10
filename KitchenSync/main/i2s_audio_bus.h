@@ -29,6 +29,7 @@
 // today because init() has no retry caller and runs once at boot; revisit if
 // Task 9's hardware bring-up needs a retry/reinit path.
 #include <stdbool.h>
+#include <stdint.h>
 #include "driver/i2s_std.h"
 #include "es8311.h"
 
@@ -36,6 +37,9 @@
 extern "C" {
 #endif
 
+// KitchenSync's rate (metronome bursts + follow_beat are built around it).
+// The bus itself is rate-parametric since P4-032: LinkAudioPoC runs the same
+// codec at 44.1k. Callers that need the live rate use audio_bus_sample_rate().
 #define AUDIO_BUS_SAMPLE_RATE   16000
 #define AUDIO_BUS_MCLK_MULTIPLE 384
 
@@ -43,9 +47,20 @@ extern "C" {
 // once at boot, before either metronome_audio_start() or follow_beat_io_start()
 // -- both now require this to have already run. Idempotent: a second call is a
 // no-op (logs and returns) if already ready.
-void audio_bus_init(void);
+void audio_bus_init(uint32_t sample_rate);
 
 bool audio_bus_ready(void);
+
+// The rate audio_bus_init() was called with (0 before init).
+uint32_t audio_bus_sample_rate(void);
+
+// Reclock the running bus to a new sample rate (P4-032: adapt to the Link
+// session's rate discovered off a received buffer). Disables both channels,
+// reconfigures I2S clocks + the ES8311, re-enables TX (the shared clock
+// driver -- see the header comment); the RX consumer re-enables its own side.
+// Returns false (bus left ready at the OLD rate's config, channels disabled
+// except TX best-effort) on failure.
+bool audio_bus_reclock(uint32_t sample_rate);
 
 // TX (speaker out) / RX (mic in) channel handles. NULL if audio_bus_init()
 // hasn't run or failed -- callers must check audio_bus_ready() first.

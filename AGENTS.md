@@ -26,6 +26,8 @@ bridge and emulator only. Don't edit `cli/` when working here.
 | Compile | `arduino-cli compile --fqbn esp32:esp32:adafruit_qtpy_esp32s3_n4r2:PartitionScheme=min_spiffs X32Link` |
 | Flash   | `arduino-cli upload  --fqbn esp32:esp32:adafruit_qtpy_esp32s3_n4r2:PartitionScheme=min_spiffs -p /dev/ttyACM0 X32Link` |
 | Host tests | `cd test && make`  (Unity; pure-logic suites, runs on the dev box) |
+| Emulator seam tests | `cd tests && make run` (native gcc — `x32_port`) |
+| Emulator compile | `arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc X32_emulator` |
 
 Notes:
 - **Board:** ESP32-S3 Super Mini (and XIAO), or a genuine Adafruit QT Py
@@ -41,6 +43,13 @@ Notes:
   runtime board detection — set the right one in `X32Link/build_opt.h`
   (tracked but meant to stay empty at HEAD; edit it locally for the unit in
   hand, don't commit board-specific flags there) before compiling.
+- **Battery (QT Py only):** if the unit has Adafruit's "LiPo BFF" (MAX17048
+  fuel gauge, STEMMA QT) stacked under it, also define `HAS_BATTERY_GAUGE` in
+  `build_opt.h` alongside `BOARD_QTPY_ESP32S3` — separate flag, since not
+  every QT Py has one attached. Reads over I2C on the STEMMA QT bus (SDA=7,
+  SCL=6 — the real board's default `Wire` pins), surfaced in `/status` as
+  `batt_v`/`batt_pct` and shown in the web UI panel footer. See
+  `battery_gauge.{h,c}` / `battery_gauge_io.{h,cpp}` / `battery_snapshot.{h,c}`.
 - Native-USB boards re-enumerate `/dev/ttyACM0` on reset; serial capture is
   flaky right after flashing. The web UI `/status` endpoint is the reliable
   way to read live BPM.
@@ -60,6 +69,13 @@ Notes:
   (`"fw"` field — use this to audit deployed units), and the `/update` OTA
   page. Release = bump `FW_VERSION` + `git tag v<FW_VERSION>` on that commit,
   so any distributed .bin traces back to source.
+- **OTA deployment (LNK-034 / P4-017):** once a unit is on WiFi, push firmware
+  **without USB** via `http://<device-ip>/update`. X32Link:
+  `curl -F 'update=@X32Link/build/.../X32Link.ino.bin' http://<ip>/update`
+  (needs `PartitionScheme=min_spiffs` on first USB flash). KitchenSync:
+  `curl --data-binary @KitchenSync/build/kitchensync.bin http://<ip>/update`.
+  Audit before/after with `/status` → `"fw"`. Full agent playbook:
+  [`docs/ota-deployment.md`](docs/ota-deployment.md).
 
 ## Mixer output
 
@@ -89,6 +105,7 @@ Notes:
 | `config.h` | per-firmware constants (Link/MIDI timing, first-boot defaults) |
 | `touch_display.{h,cpp}` | on-device 1.47" LCD + touch UI (raw LovyanGFX, no LVGL): status / settings / IP-keypad screens. X32Link-only, gated `HAS_TOUCH_DISPLAY` (LNK-014/015) |
 | `touch_ui.{h,c}` + `axs5106l.{h,c}` | pure, host-tested UI logic: `touch_ui` = hit-testing / value formatting / config-field taps / keypad buffer; `axs5106l` = AXS5106L touch-report parser |
+| `battery_gauge.{h,c}` + `battery_gauge_io.{h,cpp}` + `battery_snapshot.{h,c}` | MAX17048 fuel gauge on the QT Py's STEMMA QT bus (Adafruit "LiPo BFF"), gated `HAS_BATTERY_GAUGE` (opt-in per unit — not every QT Py has one attached). `battery_gauge` = pure VCELL/SOC register decode, host-tested; `battery_gauge_io` = thin Wire glue (SDA=7/SCL=6, addr 0x36); `battery_snapshot` = ARC-001-shaped one-writer/many-reader seam, same as `tempo_snapshot`. Surfaced in `/status` as `batt_v`/`batt_pct` (`web_status_json`'s `has_batt` param), web UI feature-detects and shows them in the panel footer |
 | `X32_emulator/` | X32 on-device emulator for integration tests |
 
 Shared pure C lives real in `X32Link/` (ADR-0007 — arduino-cli compiles only the
@@ -102,6 +119,11 @@ LNK-024 (2026-07-08); its `midi_*` files moved into `X32Link/`.
 
 - WiFi setup must call `WiFi.setSleep(false)` — modem power-save drops the
   buffered multicast and Link silently never receives. (`X32Link.ino`)
+- **Hidden SSIDs:** STA connect uses `esp_wifi_set_config` with
+  `WIFI_ALL_CHANNEL_SCAN` (not plain `WiFi.begin`) so the device probes with the
+  saved SSID on every channel. If connect still fails after 30 s it falls back
+  to AP `X32Link-Config` — join that, re-enter SSID/pass at `http://192.168.4.1`,
+  Write & Reboot. ESP32 is **2.4 GHz only**.
 - USB MIDI must enumerate **before** WiFi; Link joins multicast **after**.
   Captured by `tempo_source_pre_net()` / `tempo_source_begin()`.
 
