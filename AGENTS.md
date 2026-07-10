@@ -106,7 +106,6 @@ Notes:
 | `config.h` | per-firmware constants (Link/MIDI timing, first-boot defaults) |
 | `touch_display.{h,cpp}` | on-device 1.47" LCD + touch UI (raw LovyanGFX, no LVGL): status / settings / IP-keypad screens. X32Link-only, gated `HAS_TOUCH_DISPLAY` (LNK-014/015) |
 | `touch_ui.{h,c}` + `axs5106l.{h,c}` | pure, host-tested UI logic: `touch_ui` = hit-testing / value formatting / config-field taps / keypad buffer; `axs5106l` = AXS5106L touch-report parser |
-| `midi_uart_out.{h,c}` | ESP-015 hardware MIDI OUT: UART1 TX @31250 8N1 mirroring output 0's 0xF8/0xFA/0xFC onto a GPIO alongside USB, + a once-per-bar downbeat strobe GPIO (analyzer trigger for ESP-011). Impure glue; the bytes + `plan.downbeat` are pure/tested |
 | `battery_gauge.{h,c}` + `battery_gauge_io.{h,cpp}` + `battery_snapshot.{h,c}` | MAX17048 fuel gauge on the QT Py's STEMMA QT bus (Adafruit "LiPo BFF"), gated `HAS_BATTERY_GAUGE` (opt-in per unit — not every QT Py has one attached). `battery_gauge` = pure VCELL/SOC register decode, host-tested; `battery_gauge_io` = thin Wire glue (SDA=7/SCL=6, addr 0x36); `battery_snapshot` = ARC-001-shaped one-writer/many-reader seam, same as `tempo_snapshot`. Surfaced in `/status` as `batt_v`/`batt_pct` (`web_status_json`'s `has_batt` param), web UI feature-detects and shows them in the panel footer |
 | `X32_emulator/` | X32 on-device emulator for integration tests |
 
