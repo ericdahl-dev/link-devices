@@ -109,8 +109,15 @@ static void wifi_connect_blocking()
 // (after patching the SDK's 8K asio task stack, see Context.hpp). Tier 3:
 // stream the onboard mic into the sink with beat_stamper-continuous
 // beatsAtBufferBegin; success = Live plays the mic audio in sync.
-static constexpr uint32_t kBlockFrames = 256;                       // ~16ms @ 16k
-static constexpr size_t kMaxSinkSamples = kBlockFrames;             // mono blocks
+// 44.1kHz stereo requirement (2026-07-10). 512 frames = ~11.6ms blocks.
+// "Stereo" here is FORMAT, not capture: the ES8311's ADC is mono and the
+// codec mirrors it into both I2S slots (P4-020 finding), so both channels
+// carry the same mic. True 2-channel capture needs different input hardware
+// (Tier 4 USB audio interface, or an external stereo ADC).
+static constexpr uint32_t kSampleRate  = 44100;
+static constexpr uint32_t kBlockFrames = 512;
+static constexpr uint32_t kChannels    = 2;
+static constexpr size_t kMaxSinkSamples = kBlockFrames * kChannels;
 static constexpr double kQuantum = 4.0;
 
 static void link_task(void*)
@@ -131,8 +138,7 @@ static void link_task(void*)
     vTaskDelete(nullptr);
   }
 
-  static int16_t stereo[kBlockFrames * 2];
-  static int16_t mono[kBlockFrames];
+  static int16_t stereo[kBlockFrames * kChannels];
   BeatStamper stamper;
   beat_stamper_reset(&stamper);
 
@@ -146,8 +152,7 @@ static void link_task(void*)
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
-    const uint32_t frames = bytes / sizeof(int16_t) / 2;
-    for (uint32_t i = 0; i < frames; i++) mono[i] = stereo[2 * i];
+    const uint32_t frames = bytes / sizeof(int16_t) / kChannels;
 
     // Stamp at the block's END (the read just returned), then commit.
     const auto state = link.captureAudioSessionState();
@@ -155,13 +160,13 @@ static void link_task(void*)
       state.beatAtTime(link.clock().micros(), kQuantum);
     const double bps = state.tempo() / 60.0;
     const double beginBeats =
-      beat_stamper_stamp(&stamper, endBeats, bps, frames, AUDIO_BUS_SAMPLE_RATE);
+      beat_stamper_stamp(&stamper, endBeats, bps, frames, kSampleRate);
 
     ableton::LinkAudioSink::BufferHandle h(sink);
-    if (h && h.maxNumSamples >= frames)
+    if (h && h.maxNumSamples >= frames * kChannels)
     {
-      memcpy(h.samples, mono, frames * sizeof(int16_t));
-      if (h.commit(state, beginBeats, kQuantum, frames, 1, AUDIO_BUS_SAMPLE_RATE))
+      memcpy(h.samples, stereo, frames * kChannels * sizeof(int16_t));
+      if (h.commit(state, beginBeats, kQuantum, frames, kChannels, kSampleRate))
         ++committed;
       else
         ++skipped;
@@ -194,7 +199,7 @@ extern "C" void app_main()
 
   // ES8311 + full-duplex I2S (P4-020's shared bus: TX enabled as clock driver,
   // mic PGA 24dB, analog mic mode). Must precede the capture loop's RX enable.
-  audio_bus_init();
+  audio_bus_init(kSampleRate);
   if (!audio_bus_ready())
   {
     printf("[link_poc] audio bus failed -- Tier 3 needs the mic\n");

@@ -219,7 +219,7 @@ void app_main(void)
     wifi_link_start(g_cfg.wifi_ssid, g_cfg.wifi_pass);
     ks_web_start(&g_cfg, &g_cfg_gen, g_cfg_mutex);
     if (g_cfg.metronome_enable || g_cfg.follow_beat_enable)
-        audio_bus_init();   /* shared I2S_NUM_0 + ES8311 codec owner (P4-020) -- once, before either consumer */
+        audio_bus_init(AUDIO_BUS_SAMPLE_RATE);   /* shared I2S_NUM_0 + ES8311 codec owner (P4-020) -- once, before either consumer */
     if (g_cfg.metronome_enable)
         metronome_audio_start(g_cfg.metronome_volume, g_cfg.metronome_voice);   /* codec/I2S only when used */
     if (g_cfg.follow_beat_enable)
