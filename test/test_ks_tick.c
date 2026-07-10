@@ -38,6 +38,30 @@ void test_free_run_is_active(void) {
     TEST_ASSERT_TRUE(ks_tick_step(&st, &in).active);
 }
 
+// ESP-015: plan.downbeat fires exactly once per bar (KS_TICK_METRO_QUANTUM beats),
+// on the crossing into a new bar. The analyzer triggers on this to measure the
+// 0xFA-vs-downbeat offset (ESP-011). The first active tick primes and does not fire.
+void test_downbeat_fires_once_per_bar(void) {
+    int fires = 0, first_active_fired = -1;
+    // Two bars, in quarter-beat steps. beats == t_now/MPB in free-run.
+    for (int k = 0; k <= 8 * 4; k++) {
+        KsTickInputs in = mk((int64_t)k * (MPB / 4), 0, true, true);
+        KsTickPlan p = ks_tick_step(&st, &in);
+        if (k == 0) first_active_fired = p.downbeat ? 1 : 0;
+        if (p.downbeat) fires++;
+    }
+    TEST_ASSERT_EQUAL_INT(0, first_active_fired);   // priming tick never fires
+    TEST_ASSERT_EQUAL_INT(2, fires);                // one per bar crossing (bars 1 and 2)
+}
+
+// A stopped/no-session tick must not emit a downbeat: no grid to sit on.
+void test_no_downbeat_without_session(void) {
+    KsTickInputs in; memset(&in, 0, sizeof in);
+    in.have_session = false; in.xform = no_xform(); in.tl = TL;
+    in.cfg = &cfg; in.usb_ready = true;
+    TEST_ASSERT_FALSE(ks_tick_step(&st, &in).downbeat);
+}
+
 void test_cfg_gen_change_reprimes(void) {
     KsTickInputs a = mk(MPB, 0, true, true);  ks_tick_step(&st, &a);   // settle at gen 0
     KsTickInputs b = mk(2*MPB, 1, true, true);                          // gen bumped
@@ -61,8 +85,11 @@ void test_enabled_output_emits_pulses(void) {
     TEST_ASSERT_GREATER_THAN_INT(0, run_pulses(true, 1, 1));   // usb ready, clock on, out on
 }
 
-void test_clock_gated_by_usb_ready(void) {
-    TEST_ASSERT_EQUAL_INT(0, run_pulses(false, 1, 1));         // no USB host -> nothing
+// ESP-015: pulses are a musical decision, NOT gated on a USB host -- the DIN MIDI
+// output must clock with no USB device attached. (The USB *send* is gated in the
+// glue, not here.) This replaces the old "no USB -> no pulses" behavior.
+void test_clock_not_gated_by_usb_ready(void) {
+    TEST_ASSERT_GREATER_THAN_INT(0, run_pulses(false, 1, 1));  // no USB host -> DIN still clocks
 }
 
 void test_clock_gated_by_master_switch(void) {
@@ -227,9 +254,11 @@ int main(void) {
     RUN_TEST(test_no_standby_without_session);
     RUN_TEST(test_standby_is_silent);
     RUN_TEST(test_free_run_is_active);
+    RUN_TEST(test_downbeat_fires_once_per_bar);
+    RUN_TEST(test_no_downbeat_without_session);
     RUN_TEST(test_cfg_gen_change_reprimes);
     RUN_TEST(test_enabled_output_emits_pulses);
-    RUN_TEST(test_clock_gated_by_usb_ready);
+    RUN_TEST(test_clock_not_gated_by_usb_ready);
     RUN_TEST(test_clock_gated_by_master_switch);
     RUN_TEST(test_disabled_output_never_pulses);
     RUN_TEST(test_metronome_silent_when_stopped);
