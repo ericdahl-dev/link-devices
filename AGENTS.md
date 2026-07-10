@@ -134,6 +134,12 @@ LNK-024 (2026-07-08); its `midi_*` files moved into `X32Link/`.
 - The `httpd` task stack is ~4 KB. Request bodies (`/save`) are **heap**
   allocated; a multi-KB buffer as a stack local panics with a stack-protection
   fault on the first save.
+- **mDNS (ESP-012, KitchenSync):** the board answers at
+  `kitchensync-XXXX.local` (last two MAC bytes) plus a delegated `kitchensync.local`
+  alias. The WiFi MAC lives on the **C6**, not the P4's efuse, so
+  `esp_read_mac(ESP_MAC_WIFI_STA)` FAILS — use `esp_wifi_get_mac()` or every unit
+  names itself `-0000`. mDNS is link-local: it fixes "which address today", never
+  "the laptop is on another subnet". Costs ~48 KB of flash.
 - USB MIDI must enumerate **before** WiFi; Link joins multicast **after**.
   Captured by `tempo_source_pre_net()` / `tempo_source_begin()`.
 
