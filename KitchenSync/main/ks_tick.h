@@ -36,6 +36,7 @@ typedef struct {
     // 0xFA/0xFC per transition.
     Transport       tr[KS_CLOCK_OUTPUTS];
     TransportLaunch tl[KS_CLOCK_OUTPUTS];
+    BarReset    bar;                     // ESP-015: fires plan.downbeat once per bar
     uint32_t    seen_gen;                // last config-generation acted on (P4-015)
 } KsTickState;
 
@@ -69,6 +70,10 @@ typedef struct {
     TransportLaunchState launch_state[KS_CLOCK_OUTPUTS];  // stopped/armed/running, for the UI
     bool            click;                      // emit a metronome click
     bool            click_accent;               // ...as the bar-1 accent
+    bool            downbeat;   // ESP-015: crossed into a new bar this tick. The
+                                // caller strobes a GPIO so the logic analyzer can
+                                // measure the 0xFA-vs-downbeat offset (ESP-011).
+                                // Also the reset-pulse source for analog sync (P4-021).
     bool            standby;    // session up, transport stopped: show a heartbeat,
                                 // stay silent. Without it, "waiting for play" looks
                                 // exactly like a dead board (ESP-009).

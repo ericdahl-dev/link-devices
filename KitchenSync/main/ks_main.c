@@ -41,6 +41,7 @@
 #include "metro_strip.h"     /* pure WS2812 bar-position chase (P4-018) */
 #include "ks_led.h"       /* WS2812 strip glue (RMT) */
 #include "usb_midi_pack.h"
+#include "midi_uart_out.h"   /* ESP-015: DIN MIDI out mirror + downbeat strobe */
 #include "transport.h"        /* Link play/stop -> MIDI Start/Stop (P4-008) */
 #include "link_protocol.h"
 #include "link_measurement.h"   /* GhostXForm accessor (link_measurement_current_xform) */
@@ -54,6 +55,15 @@ static const char *TAG = "kitchensync";
 /* Tick-loop policy constants moved to ks_tick.h (KS_TICK_*, ARC-015). */
 #define LED_GPIO        2    /* WS2812 data pin (P4-018); external strip + 5V/GND */
 #define LED_PIXELS      METRO_STRIP_PIXELS
+
+/* ESP-015 hardware MIDI OUT + analyzer strobe. CANDIDATE pins -- confirm they are
+ * broken out on the P4-NANO header and clear of the MIPI/SD mux before wiring.
+ * Forbidden (verified): 7-13 (I2C/I2S), 14-19 + 54 (C6 SDIO -> WiFi), 37/38
+ * (console UART0), 53 (amp). GPIO20/21 are matrix-routed, any free pin works. */
+#define MIDI_TX_GPIO     20   /* UART1 TX, 31250 8N1 -- DIN MIDI out (+2 resistors) */
+#define MIDI_STROBE_GPIO 21   /* one pulse per bar; analyzer triggers here (ESP-011) */
+#define MIDI_MIRROR_OUT  0    /* which output's stream the wire carries (realtime
+                              * bytes are cable-agnostic, so mirror exactly one) */
 #define STANDBY_PERIOD_US 2000000   /* one standby breath = 2s (ESP-009) */
 #define LED_FRAME_US    20000 /* ~50 fps strip refresh, decoupled from the 1 ms clock */
 
@@ -123,12 +133,23 @@ static void clock_out_task(void *arg)
             ks_web_publish_launch(ls);
         }
 
+        /* One pulse per bar to the analyzer trigger line (ESP-015); high for this
+         * tick, low the next -- a clean rising edge on the Link bar boundary. */
+        midi_uart_out_strobe(plan.downbeat);
+
         /* Execute the clock fan-out: plan.pulses[o] 0xF8 packets on output o's cable. */
+        bool usb_ready = in.usb_ready;   /* gate USB sends; the DIN wire emits regardless */
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
             for (int i = 0; i < plan.pulses[o]; i++) {
-                uint8_t pkt[4];
-                usb_midi_pack_single(cfg.clock[o].cable, 0xF8, pkt);
-                usb_midi_host_send(pkt, 4);
+                /* DIN MIDI out (ESP-015): the wire clocks whether or not a USB host
+                 * is attached -- emit first, from the same code point, so its timing
+                 * tracks the USB emit when a host is present. */
+                if (o == MIDI_MIRROR_OUT) midi_uart_out_byte(0xF8);
+                if (usb_ready) {
+                    uint8_t pkt[4];
+                    usb_midi_pack_single(cfg.clock[o].cable, 0xF8, pkt);
+                    usb_midi_host_send(pkt, 4);
+                }
                 pulses++;
             }
         }
@@ -137,9 +158,12 @@ static void clock_out_task(void *arg)
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
             if (plan.transport[o] == TRANSPORT_NONE) continue;
             uint8_t status = (plan.transport[o] == TRANSPORT_START) ? 0xFA : 0xFC;
-            uint8_t pkt[4];
-            usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
-            usb_midi_host_send(pkt, 4);
+            if (o == MIDI_MIRROR_OUT) midi_uart_out_byte(status);   /* DIN, always (ESP-015) */
+            if (usb_ready) {
+                uint8_t pkt[4];
+                usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
+                usb_midi_host_send(pkt, 4);
+            }
             ESP_LOGI(TAG, "transport out%d %s", o + 1,
                      plan.transport[o] == TRANSPORT_START ? "START" : "STOP");
         }
@@ -244,5 +268,6 @@ void app_main(void)
     if (g_cfg.follow_beat_enable)
         follow_beat_io_start();   /* mic-based tempo detection, display-only v1 (P4-020) */
     ks_led_start(LED_GPIO, LED_PIXELS);   /* WS2812 visual metronome; harmless if nothing wired (P4-018) */
+    midi_uart_out_start(MIDI_TX_GPIO, MIDI_STROBE_GPIO);   /* ESP-015: DIN MIDI out + analyzer strobe */
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
 }
