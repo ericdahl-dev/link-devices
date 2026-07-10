@@ -138,14 +138,18 @@ static void clock_out_task(void *arg)
         midi_uart_out_strobe(plan.downbeat);
 
         /* Execute the clock fan-out: plan.pulses[o] 0xF8 packets on output o's cable. */
+        bool usb_ready = in.usb_ready;   /* gate USB sends; the DIN wire emits regardless */
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
             for (int i = 0; i < plan.pulses[o]; i++) {
-                uint8_t pkt[4];
-                usb_midi_pack_single(cfg.clock[o].cable, 0xF8, pkt);
-                usb_midi_host_send(pkt, 4);
-                /* ESP-015: mirror one output onto the DIN wire, same code point so
-                 * the analyzer-decoded timing tracks the (undecodable) USB emit. */
+                /* DIN MIDI out (ESP-015): the wire clocks whether or not a USB host
+                 * is attached -- emit first, from the same code point, so its timing
+                 * tracks the USB emit when a host is present. */
                 if (o == MIDI_MIRROR_OUT) midi_uart_out_byte(0xF8);
+                if (usb_ready) {
+                    uint8_t pkt[4];
+                    usb_midi_pack_single(cfg.clock[o].cable, 0xF8, pkt);
+                    usb_midi_host_send(pkt, 4);
+                }
                 pulses++;
             }
         }
@@ -154,10 +158,12 @@ static void clock_out_task(void *arg)
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
             if (plan.transport[o] == TRANSPORT_NONE) continue;
             uint8_t status = (plan.transport[o] == TRANSPORT_START) ? 0xFA : 0xFC;
-            uint8_t pkt[4];
-            usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
-            usb_midi_host_send(pkt, 4);
-            if (o == MIDI_MIRROR_OUT) midi_uart_out_byte(status);   /* ESP-015 */
+            if (o == MIDI_MIRROR_OUT) midi_uart_out_byte(status);   /* DIN, always (ESP-015) */
+            if (usb_ready) {
+                uint8_t pkt[4];
+                usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
+                usb_midi_host_send(pkt, 4);
+            }
             ESP_LOGI(TAG, "transport out%d %s", o + 1,
                      plan.transport[o] == TRANSPORT_START ? "START" : "STOP");
         }
