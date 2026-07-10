@@ -67,6 +67,13 @@ Notes:
   (`"fw"` field — use this to audit deployed units), and the `/update` OTA
   page. Release = bump `FW_VERSION` + `git tag v<FW_VERSION>` on that commit,
   so any distributed .bin traces back to source.
+- **OTA deployment (LNK-034 / P4-017):** once a unit is on WiFi, push firmware
+  **without USB** via `http://<device-ip>/update`. X32Link:
+  `curl -F 'update=@X32Link/build/.../X32Link.ino.bin' http://<ip>/update`
+  (needs `PartitionScheme=min_spiffs` on first USB flash). KitchenSync:
+  `curl --data-binary @KitchenSync/build/kitchensync.bin http://<ip>/update`.
+  Audit before/after with `/status` → `"fw"`. Full agent playbook:
+  [`docs/ota-deployment.md`](docs/ota-deployment.md).
 
 ## Mixer output
 
