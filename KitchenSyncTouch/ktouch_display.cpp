@@ -19,6 +19,7 @@
 
 extern AppConfig g_config;
 extern char g_ks_host[];
+extern bool g_ap_mode;   // true = SoftAP setup: show how to connect, not a name
 
 // Panel: JD9853 via Panel_ST7789 (validated on glass, LNK-014). Same config as
 // X32Link/touch_display.cpp. 172x320 visible in 240x320 RAM.
@@ -153,7 +154,8 @@ void ktouch_display_tick(void) {
         s_lcd.setCursor(130, 16); s_lcd.println(sync == 1 ? "SYNCED" : sync == 0 ? "linking" : "no link");
         s_lcd.setTextColor(TFT_WHITE, TFT_BLACK); s_lcd.setTextSize(1);
         s_lcd.setCursor(130, 34);
-        if (WiFi.status() == WL_CONNECTED) { s_lcd.print(g_ks_host); s_lcd.println(".local"); }
+        if (g_ap_mode) { s_lcd.setTextColor(0xFF9D3Bu, TFT_BLACK); s_lcd.print("SETUP: join KSTouch-Config -> "); s_lcd.println(g_ks_host); }
+        else if (WiFi.status() == WL_CONNECTED) { s_lcd.print(g_ks_host); s_lcd.println(".local"); }
         else s_lcd.println("no wifi");
 
         if (sync_changed) s_prev_mx = -1;
