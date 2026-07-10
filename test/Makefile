@@ -47,6 +47,18 @@ LORAFRESH  = ../LoraLink/lora_freshness.c
 BATTGAUGE = ../X32Link/battery_gauge.c
 BEATSTAMP = ../LinkAudioPoC/main/beat_stamper.c
 
+# Every test depends on every header. Coarse on purpose: the rules below list
+# only .c prerequisites, so editing a header used to leave a stale binary that
+# passed locally while CI, building fresh, failed -- exactly how a broken
+# wifi_conn_policy test reached PR #47 (WIFI_CONN_TIMEOUT_US 30s -> 45s, tests
+# still asserting the old boundary). The whole suite builds in seconds, so
+# rebuilding all of it on any header change is the right trade.
+# (-MMD is no help here: these rules compile many .c straight to an executable,
+# so each source overwrites the same .d and only the last one's headers survive.)
+# Recipes use $(filter %.c,$^) so the header prerequisites never reach gcc.
+HEADERS = $(wildcard ../X32Link/*.h ../KitchenSync/main/*.h ../LoraLink/*.h \
+                     ../LinkAudioPoC/main/*.h ../lib/unity/src/*.h)
+
 .PHONY: all clean
 
 all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper
@@ -93,131 +105,131 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_beat_stamper
 	./check_docs.sh
 
-test_bpm_tracker: test_bpm_tracker.c $(TRACKER) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_bpm_tracker: test_bpm_tracker.c $(TRACKER) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_link_protocol: test_link_protocol.c $(PROTO) $(SESSIONTL) $(PHASE) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_link_protocol: test_link_protocol.c $(PROTO) $(SESSIONTL) $(PHASE) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_link_measurement: test_link_measurement.c $(MEAS) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_link_measurement: test_link_measurement.c $(MEAS) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_link_phase: test_link_phase.c $(PHASE) $(PROTO) $(SESSIONTL) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_link_phase: test_link_phase.c $(PHASE) $(PROTO) $(SESSIONTL) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_led_phase: test_led_phase.c $(LEDPHASE) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_led_phase: test_led_phase.c $(LEDPHASE) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_wifi_down_blink: test_wifi_down_blink.c $(WIFIBLINK) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_wifi_down_blink: test_wifi_down_blink.c $(WIFIBLINK) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_app_config: test_app_config.c $(CFG) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_app_config: test_app_config.c $(CFG) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_osc_out: test_osc_out.c $(OSC) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_osc_out: test_osc_out.c $(OSC) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_midi_bpm_calc: test_midi_bpm_calc.c $(MIDICALC) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_midi_bpm_calc: test_midi_bpm_calc.c $(MIDICALC) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_bpm_publisher: test_bpm_publisher.c $(PUB) $(BAR) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_bpm_publisher: test_bpm_publisher.c $(PUB) $(BAR) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_osc_in: test_osc_in.c $(OSCIN) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_osc_in: test_osc_in.c $(OSCIN) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_web_status_json: test_web_status_json.c $(STATUSJSON) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_web_status_json: test_web_status_json.c $(STATUSJSON) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_axs5106l: test_axs5106l.c $(AXS) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_axs5106l: test_axs5106l.c $(AXS) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_touch_ui: test_touch_ui.c $(TOUCHUI) $(CFG) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_touch_ui: test_touch_ui.c $(TOUCHUI) $(CFG) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_tempo_snapshot: test_tempo_snapshot.c $(SNAP) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_tempo_snapshot: test_tempo_snapshot.c $(SNAP) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_bar: test_bar.c $(BAR) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_bar: test_bar.c $(BAR) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_midi_clock_out: test_midi_clock_out.c $(MIDIOUT) $(CLOCKTICK) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_midi_clock_out: test_midi_clock_out.c $(MIDIOUT) $(CLOCKTICK) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_clock_ticker: test_clock_ticker.c $(CLOCKTICK) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_clock_ticker: test_clock_ticker.c $(CLOCKTICK) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_beat_synth: test_beat_synth.c $(BEATSYNTH) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_beat_synth: test_beat_synth.c $(BEATSYNTH) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_link_measurement_session: test_link_measurement_session.c $(SESSION) $(PHASE) $(PROTO) $(SESSIONTL) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_link_measurement_session: test_link_measurement_session.c $(SESSION) $(PHASE) $(PROTO) $(SESSIONTL) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_session_timeline: test_session_timeline.c $(SESSIONTL) $(PHASE) $(PROTO) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_session_timeline: test_session_timeline.c $(SESSIONTL) $(PHASE) $(PROTO) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_link_measure_pump: test_link_measure_pump.c $(PUMP) $(MEAS) $(SESSION) $(SESSIONTL) $(PHASE) $(PROTO) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_link_measure_pump: test_link_measure_pump.c $(PUMP) $(MEAS) $(SESSION) $(SESSIONTL) $(PHASE) $(PROTO) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_usb_midi_pack: test_usb_midi_pack.c $(USBMIDIPACK) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_usb_midi_pack: test_usb_midi_pack.c $(USBMIDIPACK) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_beat_clock: test_beat_clock.c $(BEATCLOCK) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_beat_clock: test_beat_clock.c $(BEATCLOCK) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_beat_source: test_beat_source.c $(BEATSOURCE) $(BEATCLOCK) $(PHASE) $(PROTO) $(MEAS) $(SESSIONTL) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_beat_source: test_beat_source.c $(BEATSOURCE) $(BEATCLOCK) $(PHASE) $(PROTO) $(MEAS) $(SESSIONTL) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_ks_status: test_ks_status.c $(P4STATUS) $(UNITY)
-	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@
+test_ks_status: test_ks_status.c $(P4STATUS) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $(filter %.c,$^) -o $@
 
-test_battery_gauge: test_battery_gauge.c $(BATTGAUGE) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_battery_gauge: test_battery_gauge.c $(BATTGAUGE) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
 clean:
 	rm -f test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_axs5106l test_touch_ui test_tempo_snapshot test_bar
 
-test_ks_config: test_ks_config.c $(P4CONFIG) $(UNITY)
-	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@
+test_ks_config: test_ks_config.c $(P4CONFIG) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $(filter %.c,$^) -o $@
 
-test_ks_form: test_ks_form.c $(P4FORM) $(P4CONFIG) $(UNITY)
-	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@
+test_ks_form: test_ks_form.c $(P4FORM) $(P4CONFIG) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $(filter %.c,$^) -o $@
 
-test_midi_clock_in: test_midi_clock_in.c $(MIDICLOCKIN) $(MIDICALC) $(UNITY)
-	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@ -lm
+test_midi_clock_in: test_midi_clock_in.c $(MIDICLOCKIN) $(MIDICALC) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $(filter %.c,$^) -o $@ -lm
 
-test_metronome: test_metronome.c $(METRO) $(CLOCKTICK) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_metronome: test_metronome.c $(METRO) $(CLOCKTICK) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_transport: test_transport.c $(TRANSPORT) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_transport: test_transport.c $(TRANSPORT) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_clock_output: test_clock_output.c $(CLOCKOUTPUT) $(CLOCKTICK) $(SWING) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_clock_output: test_clock_output.c $(CLOCKOUTPUT) $(CLOCKTICK) $(SWING) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_metronome_voice: test_metronome_voice.c $(MVOICE) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_metronome_voice: test_metronome_voice.c $(MVOICE) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_swing: test_swing.c $(SWING) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_swing: test_swing.c $(SWING) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_metro_strip: test_metro_strip.c $(METROSTRIP) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
+test_metro_strip: test_metro_strip.c $(METROSTRIP) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_wifi_conn_policy: test_wifi_conn_policy.c $(WIFICONNPOLICY) $(UNITY)
-	$(CC) $(CFLAGS) $^ -o $@
+test_wifi_conn_policy: test_wifi_conn_policy.c $(WIFICONNPOLICY) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_ks_tick: test_ks_tick.c $(KSTICK) $(BEATSOURCE) $(BEATCLOCK) $(CLOCKOUTPUT) $(CLOCKTICK) $(SWING) $(METRO) $(TRANSPORT) $(PHASE) $(PROTO) $(SESSIONTL) $(MEAS) $(UNITY)
-	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@ -lm
+test_ks_tick: test_ks_tick.c $(KSTICK) $(BEATSOURCE) $(BEATCLOCK) $(CLOCKOUTPUT) $(CLOCKTICK) $(SWING) $(METRO) $(TRANSPORT) $(PHASE) $(PROTO) $(SESSIONTL) $(MEAS) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $(filter %.c,$^) -o $@ -lm
 
-test_lora_bpm_packet: test_lora_bpm_packet.c $(LORAPKT) $(UNITY)
-	$(CC) $(CFLAGS) -I../LoraLink $^ -o $@
+test_lora_bpm_packet: test_lora_bpm_packet.c $(LORAPKT) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) -I../LoraLink $(filter %.c,$^) -o $@
 
-test_lora_freshness: test_lora_freshness.c $(LORAFRESH) $(UNITY)
-	$(CC) $(CFLAGS) -I../LoraLink $^ -o $@
+test_lora_freshness: test_lora_freshness.c $(LORAFRESH) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) -I../LoraLink $(filter %.c,$^) -o $@
 
-test_follow_beat: test_follow_beat.c $(FOLLOWBEAT) $(UNITY)
-	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@ -lm
+test_follow_beat: test_follow_beat.c $(FOLLOWBEAT) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $(filter %.c,$^) -o $@ -lm
 
-test_beat_stamper: test_beat_stamper.c $(BEATSTAMP) $(UNITY)
-	$(CC) $(CFLAGS) -I../LinkAudioPoC/main $^ -o $@ -lm
+test_beat_stamper: test_beat_stamper.c $(BEATSTAMP) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) -I../LinkAudioPoC/main $(filter %.c,$^) -o $@ -lm
