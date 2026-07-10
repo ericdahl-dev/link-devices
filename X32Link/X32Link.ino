@@ -288,7 +288,9 @@ static bool wifi_try_connect() {
     wifi_sta_connect(g_config.wifi_ssid, g_config.wifi_pass);
     wifi_conn_policy_reset(&g_wifi_pol, now_us_ms(), 1);   // S3 stores one network (ESP-013 is P4-only so far)
     while (WiFi.status() != WL_CONNECTED) {
-        if ((now_us_ms() - g_wifi_pol.connect_start_us) >= WIFI_CONN_TIMEOUT_US) {
+        // One slot, so its budget is the whole WIFI_CONN_TIMEOUT_US and slot_start_us
+        // is the cold-start instant -- same clock the old connect_start_us named.
+        if ((now_us_ms() - g_wifi_pol.slot_start_us) >= WIFI_CONN_TIMEOUT_US) {
             g_wifi_pol.state = WCS_AP;   // stop on_wifi_event re-connect attempts first
             Serial.printf("[X32Link] WiFi timeout (last_reason=%d)\n", s_wifi_disc_reason);
             WiFi.setAutoReconnect(false); // stop the core's own retry loop too
