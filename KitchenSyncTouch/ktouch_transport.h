@@ -11,6 +11,11 @@ extern "C" {
 void                  ktouch_transport_post(TransportLaunchIntent intent);
 TransportLaunchIntent ktouch_transport_take(void);   // consumes; NONE when empty
 
+// The writer publishes the current launch state (TL_STOPPED/ARMED/RUNNING) each
+// tick; the display reads it to colour the toggle and pick the tap direction.
+void ktouch_transport_publish_state(int launch_state);
+int  ktouch_transport_state(void);
+
 #ifdef __cplusplus
 }
 #endif

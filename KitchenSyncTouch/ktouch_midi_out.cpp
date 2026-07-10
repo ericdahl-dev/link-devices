@@ -48,6 +48,7 @@ static void writer_task(void*) {
                                                      beats, q, beats >= 0.0);
         if (o.action == TL_START) din_midi_out_byte(0xFA);
         else if (o.action == TL_STOP) din_midi_out_byte(0xFC);
+        ktouch_transport_publish_state(o.state);   // stopped/armed/running -> display
 
         vTaskDelay(1);
     }

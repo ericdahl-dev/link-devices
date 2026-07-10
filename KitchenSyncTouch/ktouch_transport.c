@@ -5,6 +5,7 @@
 
 static portMUX_TYPE          s_mux  = portMUX_INITIALIZER_UNLOCKED;
 static TransportLaunchIntent s_slot = TL_INTENT_NONE;
+static volatile int          s_state = TL_STOPPED;   // published by the writer
 
 void ktouch_transport_post(TransportLaunchIntent intent) {
     portENTER_CRITICAL(&s_mux);
@@ -19,3 +20,6 @@ TransportLaunchIntent ktouch_transport_take(void) {
     portEXIT_CRITICAL(&s_mux);
     return i;
 }
+
+void ktouch_transport_publish_state(int launch_state) { s_state = launch_state; }
+int  ktouch_transport_state(void)                     { return s_state; }
