@@ -45,3 +45,22 @@ void metro_strip_render(double beats, int quantum, int npix,
     int start = beat_in_bar * ppb;
     for (int i = start; i < start + ppb && i < npix; i++) set_px(&out[i], color, faded);
 }
+
+// ESP-009. Sine breath between a dim floor and a modest ceiling -- deliberately
+// below the beat chase's brightness so standby can never be mistaken for
+// playback. Floor is non-zero: fully dark reads as "dead", which is the whole
+// bug this fixes.
+void metro_strip_standby(double phase, int npix, const MetroStripCfg* cfg, RGB out[]) {
+    static const double kFloor = 0.06;   // never fully dark
+    static const double kPeak  = 0.30;   // well under a lit beat pixel
+
+    double ph = phase - floor(phase);                       // wrap to 0..1
+    double breath = (1.0 - cos(2.0 * M_PI * ph)) * 0.5;     // 0 at ph=0, 1 at ph=0.5
+    double level = (kFloor + (kPeak - kFloor) * breath) * (cfg->bright / 100.0);
+
+    for (int i = 0; i < npix; i++) {
+        out[i].r = scale8(cfg->beat.r, level);
+        out[i].g = scale8(cfg->beat.g, level);
+        out[i].b = scale8(cfg->beat.b, level);
+    }
+}

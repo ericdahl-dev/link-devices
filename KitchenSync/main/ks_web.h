@@ -9,6 +9,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include "ks_config.h"
+// ESP-011: the clock task publishes each output's launch state (0 stopped /
+// 1 armed / 2 running) so /status can render it.
+void ks_web_publish_launch(const int state[KS_CLOCK_OUTPUTS]);
 // Start the web server. cfg is the live config: read to render the page, fully
 // rewritten + saved + rebooted on POST /save, and patched in place (live-safe
 // fields only, no reboot) on POST /live (P4-015). `gen` is a config-generation
