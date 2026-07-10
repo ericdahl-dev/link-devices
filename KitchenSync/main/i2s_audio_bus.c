@@ -13,6 +13,7 @@
 #include "driver/gpio.h"
 #include "driver/i2c.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"   /* pdMS_TO_TICKS for the ALC-off I2C write */
 
 static const char *TAG = "audio_bus";
 
@@ -58,6 +59,11 @@ static esp_err_t i2s_init(uint32_t rate) {
         },
     };
     std_cfg.clk_cfg.mclk_multiple = (i2s_mclk_multiple_t)mclk_multiple_for(rate);
+    // APLL, explicitly: the default source divides a general PLL fractionally
+    // for audio rates, and a dithering MCLK wobbles the codec's ADC sample
+    // clock (wow/flutter suspect, P4-032 2026-07-10). The APLL exists to lock
+    // audio-exact frequencies.
+    std_cfg.clk_cfg.clk_src = I2S_CLK_SRC_APLL;
 
     e = i2s_channel_init_std_mode(s_tx, &std_cfg);
     if (e != ESP_OK) return e;
@@ -121,7 +127,28 @@ static esp_err_t codec_init(uint32_t rate) {
     // register a normal room mic signal. 24dB is a reasonable mid-high starting
     // point (Espressif's ES8311 examples commonly use this range for MEMS mic
     // recording); revisit if follow_beat still can't lock or clips.
-    return es8311_microphone_gain_set(s_codec, ES8311_MIC_GAIN_24DB);
+    e = es8311_microphone_gain_set(s_codec, ES8311_MIC_GAIN_24DB);
+    if (e != ESP_OK) return e;
+
+    // ALC OFF (ADC reg 0x18 = ALC enable + window size; the es8311 component
+    // never touches it, leaving the chip default). Auto level control pumps
+    // gain at syllable rate -- a ~4-6Hz amplitude modulation measured in a
+    // received recording that the ear files under "film projector"
+    // (P4-032, 2026-07-10). The component exports no raw register write, so
+    // poke it over the same I2C bus the codec handle uses.
+    // Automute (regs 0x1A/0x1B) is the ALC block's noise GATE and is separate
+    // from ALC enable -- with it left at chip default the quiet tail of the
+    // mic snaps to hard silence ("gated" feel, heard 2026-07-10). 0x1B keeps
+    // its HPF bits (0x0A) with the automute bits cleared.
+    {
+        const uint8_t regs[][2] = { {0x18, 0x00}, {0x1A, 0x00}, {0x1B, 0x0A} };
+        for (size_t i = 0; i < sizeof(regs)/sizeof(regs[0]); i++) {
+            e = i2c_master_write_to_device(I2C_PORT, ES8311_ADDRRES_0,
+                                           regs[i], 2, pdMS_TO_TICKS(100));
+            if (e != ESP_OK) return e;
+        }
+    }
+    return ESP_OK;
 }
 
 void audio_bus_init(uint32_t sample_rate) {
@@ -162,6 +189,7 @@ bool audio_bus_reclock(uint32_t sample_rate) {
 
     i2s_std_clk_config_t clk = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate);
     clk.mclk_multiple = (i2s_mclk_multiple_t)mclk_multiple_for(sample_rate);
+    clk.clk_src = I2S_CLK_SRC_APLL;   // see i2s_init()
     esp_err_t e = i2s_channel_reconfig_std_clock(s_tx, &clk);
     if (e == ESP_OK) e = i2s_channel_reconfig_std_clock(s_rx, &clk);
     if (e == ESP_OK)

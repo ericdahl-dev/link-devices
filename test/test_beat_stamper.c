@@ -30,12 +30,14 @@ void test_first_block_anchors_to_measured_end(void) {
     ASSERT_BEATS(10.0 - BLOCK_BEATS, begin);
 }
 
-// Steady stream: stamps advance by exactly the block length in beats,
-// regardless of small jitter in the measured session beat.
+// Steady jitter-free stream: stamps advance by exactly the block length in
+// beats. (Under measurement jitter the servo intentionally lets stamps move
+// by error/128 per block -- see the servo tests -- so exactness is only
+// promised for exact input.)
 void test_steady_stream_advances_exactly_one_block(void) {
     double b0 = beat_stamper_stamp(&bs, 10.0, BPS_120, BLOCK, RATE);
-    double b1 = beat_stamper_stamp(&bs, 10.0 + BLOCK_BEATS + 0.001, BPS_120, BLOCK, RATE);
-    double b2 = beat_stamper_stamp(&bs, 10.0 + 2 * BLOCK_BEATS - 0.002, BPS_120, BLOCK, RATE);
+    double b1 = beat_stamper_stamp(&bs, 10.0 + BLOCK_BEATS, BPS_120, BLOCK, RATE);
+    double b2 = beat_stamper_stamp(&bs, 10.0 + 2 * BLOCK_BEATS, BPS_120, BLOCK, RATE);
     ASSERT_BEATS(b0 + BLOCK_BEATS, b1);
     ASSERT_BEATS(b1 + BLOCK_BEATS, b2);
 }
@@ -62,6 +64,45 @@ void test_tempo_change_advances_at_new_rate(void) {
     (void)new_block_beats;
 }
 
+// Servo: a persistent bias between measured and predicted (a bad first-block
+// anchor -- one jittery boot-time measurement otherwise frozen in for the whole
+// run) is pulled out over many blocks instead of lasting forever.
+void test_servo_converges_out_a_biased_anchor(void) {
+    // Anchor lands 20ms late at 120BPM: 0.04 beats of persistent bias.
+    double bias = 0.04;
+    beat_stamper_stamp(&bs, 10.0 + bias, BPS_120, BLOCK, RATE);
+    // Feed the TRUE grid from here on; servo should walk the bias out.
+    double measured = 10.0 + BLOCK_BEATS;
+    double begin = 0;
+    for (int k = 0; k < 2000; k++) {
+        begin = beat_stamper_stamp(&bs, measured, BPS_120, BLOCK, RATE);
+        measured += BLOCK_BEATS;
+    }
+    // begin of the last block should sit within 1ms-at-120BPM (0.002 beats)
+    // of the true grid: measured(previous end) - BLOCK_BEATS.
+    double truth = measured - BLOCK_BEATS - BLOCK_BEATS;
+    TEST_ASSERT_TRUE(fabs(begin - truth) < 0.002);
+}
+
+// Servo must stay too slow to follow per-block jitter: alternating +/-j
+// measurement noise moves consecutive stamps' spacing by (much) less than the
+// noise itself.
+void test_servo_rejects_symmetric_jitter(void) {
+    beat_stamper_stamp(&bs, 10.0, BPS_120, BLOCK, RATE);
+    double measured = 10.0;
+    double prev = 10.0 - BLOCK_BEATS;
+    double max_spacing_err = 0.0;
+    for (int k = 1; k <= 200; k++) {
+        measured += BLOCK_BEATS;
+        double j = (k % 2 == 0) ? 0.01 : -0.01;   // +/-5ms at 120BPM
+        double begin = beat_stamper_stamp(&bs, measured + j, BPS_120, BLOCK, RATE);
+        double err = fabs((begin - prev) - BLOCK_BEATS);
+        if (k > 1 && err > max_spacing_err) max_spacing_err = err;
+        prev = begin;
+    }
+    TEST_ASSERT_TRUE(max_spacing_err < 0.0005);   // spacing wobble << jitter
+}
+
 // Reset rearms anchoring.
 void test_reset_reanchors(void) {
     beat_stamper_stamp(&bs, 10.0, BPS_120, BLOCK, RATE);
@@ -76,6 +117,8 @@ int main(void) {
     RUN_TEST(test_steady_stream_advances_exactly_one_block);
     RUN_TEST(test_large_drift_resyncs_to_measured);
     RUN_TEST(test_tempo_change_advances_at_new_rate);
+    RUN_TEST(test_servo_converges_out_a_biased_anchor);
+    RUN_TEST(test_servo_rejects_symmetric_jitter);
     RUN_TEST(test_reset_reanchors);
     return UNITY_END();
 }

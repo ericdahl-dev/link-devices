@@ -133,6 +133,22 @@ static constexpr size_t kMaxSinkSamples = kBlockFrames * kChannels;
 static std::atomic<uint32_t> g_session_rate{0};
 static constexpr double kQuantum = 4.0;
 
+// Capture-chain latency, measured 2026-07-10 by recording Live's click track
+// through this mic and measuring transient offsets from the grid: +21.4ms,
+// constant to +/-0.05ms across clicks (and inter-click interval recovered the
+// session tempo exactly, so the stamps are rate-perfect -- pure fixed lag).
+// Composition: I2S DMA pipeline depth + ES8311 group delay + speaker-to-mic
+// flight (~1-3ms of it is acoustic and rig-specific; re-measure per install).
+// Calibrated 2026-07-10 by click-track, AFTER the beat_stamper servo landed.
+// Pre-servo, placement wandered +/-25ms run to run (single-measurement anchor
+// dice); post-servo two consecutive takes agreed within 0.04ms, making this a
+// real constant. At 33800 the clicks sat -15.75ms early; 1:1 shift ->
+// 18050us. Matches the physical estimate (I2S DMA pipeline + ES8311 group
+// delay + ~1m speaker-to-mic flight). Includes the rig's acoustic path --
+// re-derive with one click-track take if the setup changes.
+// Final 1ms trim off a verification take (user-measured, 2026-07-10).
+static constexpr int64_t kCaptureLatencyUs = 17050;
+
 static void link_task(void*)
 {
   auto link_ptr = std::make_unique<ableton::LinkAudio>(120.0, "KitchenSync P4");
@@ -210,8 +226,11 @@ static void link_task(void*)
 
     // Stamp at the block's END (the read just returned), then commit.
     const auto state = link.captureAudioSessionState();
-    const double endBeats =
-      state.beatAtTime(link.clock().micros(), kQuantum);
+    // Ask Link where the session was when this block ACTUALLY ended at the
+    // ADC (now minus the measured capture latency) -- Link's own time->beat
+    // map does the conversion, so tempo changes stay correct.
+    const double endBeats = state.beatAtTime(
+      link.clock().micros() - std::chrono::microseconds(kCaptureLatencyUs), kQuantum);
     const double bps = state.tempo() / 60.0;
     const double beginBeats =
       beat_stamper_stamp(&stamper, endBeats, bps, frames, rate);
