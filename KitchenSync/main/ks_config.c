@@ -167,3 +167,24 @@ void ks_config_live_safe_copy(KsConfig* dst, const KsConfig* src) {
     dst->led_accent_color = src->led_accent_color;
     for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) dst->clock[o] = src->clock[o];
 }
+
+// P4-014: the single owner of "is this persisted blob safe to load?" — see ks_config.h.
+// Every gate is fail-closed: anything we can't positively vouch for becomes defaults,
+// because loading a stale layout puts garbage in fields the user never sees until a
+// clock output misfires.
+ks_decode_result ks_config_decode(KsConfig* out, const void* blob, size_t blob_len,
+                                  bool version_present, uint32_t version) {
+    ks_config_defaults(out);
+
+    if (!blob || blob_len != sizeof(KsConfig)) return KS_DECODE_DEFAULTED;
+    if (!version_present || version != KS_CONFIG_VERSION) return KS_DECODE_DEFAULTED;
+
+    // Version and size both vouch for the layout; the bytes still have to be in
+    // range (bit-rot, or a layout change someone shipped without bumping).
+    KsConfig candidate;
+    memcpy(&candidate, blob, sizeof(candidate));
+    if (!ks_config_valid(&candidate)) return KS_DECODE_DEFAULTED;
+
+    *out = candidate;
+    return KS_DECODE_OK;
+}
