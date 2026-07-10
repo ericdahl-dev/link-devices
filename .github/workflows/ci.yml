@@ -3,6 +3,7 @@ name: CI
 # Host-side Unity tests (pure logic, no hardware) + firmware compiles so a change
 # that passes host tests but breaks a real build is caught before merge:
 #   - X32Link  (ESP32-S3, arduino-cli): headless + Waveshare touch + QT Py NeoPixel variants
+#   - X32_emulator (ESP32-S3 XIAO, arduino-cli): on-device X32 OSC test double
 #   - KitchenSync    (ESP32-P4, ESP-IDF): the hub-tier target (see ADR-0005)
 on:
   push:
@@ -17,9 +18,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and run host tests
         run: make -C test          # Unity is vendored in lib/unity — no submodule step
+      - name: Run X32 emulator seam tests
+        run: make -C tests run     # native gcc — x32_port IP/defaults/path seam
 
   firmware-compile:
-    name: Firmware compile (X32Link)
+    name: Firmware compile (X32Link + X32 emulator)
     runs-on: ubuntu-latest
     env:
       FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
@@ -72,6 +75,11 @@ jobs:
           printf -- '-DBOARD_QTPY_ESP32S3\n-DHAS_BATTERY_GAUGE\n' > X32Link/build_opt.h
           arduino-cli compile --fqbn "$FQBN" X32Link
           git checkout -- X32Link/build_opt.h
+
+      - name: Compile X32 emulator (ESP-002)
+        env:
+          EMU_FQBN: esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc
+        run: arduino-cli compile --fqbn "$EMU_FQBN" X32_emulator
 
   loralink-compile:
     name: Firmware compile (LoraLink)

@@ -26,6 +26,8 @@ bridge and emulator only. Don't edit `cli/` when working here.
 | Compile | `arduino-cli compile --fqbn esp32:esp32:adafruit_qtpy_esp32s3_n4r2:PartitionScheme=min_spiffs X32Link` |
 | Flash   | `arduino-cli upload  --fqbn esp32:esp32:adafruit_qtpy_esp32s3_n4r2:PartitionScheme=min_spiffs -p /dev/ttyACM0 X32Link` |
 | Host tests | `cd test && make`  (Unity; pure-logic suites, runs on the dev box) |
+| Emulator seam tests | `cd tests && make run` (native gcc — `x32_port`) |
+| Emulator compile | `arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc X32_emulator` |
 
 Notes:
 - **Board:** ESP32-S3 Super Mini (and XIAO), or a genuine Adafruit QT Py
