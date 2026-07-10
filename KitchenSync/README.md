@@ -26,12 +26,15 @@ is configured live from a phone — no reboot to dial in timing.
 | Audible **metronome** — beat click + bar-1 accent out the onboard speaker | P4-006 | ✅ on hardware |
 | Metronome **volume + click voice** (Tone / Click / Wood) | P4-012 | ✅ on hardware |
 | **Multiclock**-style per-output config — division, phase nudge, cable | P4-010 | ✅ on hardware |
-| Per-output **swing / shuffle** | P4-013 | ⏳ built + host-tested; ear-test pending |
-| **Live config** — timing/swing audible instantly, no reboot (`/live` + steppers) | P4-015 | ⏳ built; on-device check pending |
+| Per-output **swing / shuffle** | P4-013 | ✅ on hardware |
+| **Live config** — timing/swing audible instantly, no reboot (`/live` + steppers) | P4-015 | ✅ on hardware |
 | Rack-panel **web UI** — config + live status | P4-007 | ✅ on hardware |
+| **Visual metronome** — WS2812 bar-position chase, customizable | P4-018/019 | ✅ on hardware |
+| **Follow Beat** — mic tempo detection (display only) | P4-020 | ✅ on hardware, ±1% across 108-183 BPM |
+| **Versioned NVS config** — layout changes reset to defaults, never load garbage | P4-014 | ✅ on hardware |
 | **MIDI clock IN** → detected BPM (displayed) | P4-011 s1 | ⏳ built + host-tested; needs a clock source to verify |
 | MIDI clock IN → **publish into Link** (P4 as tempo-setting peer) | P4-011 s2 | ⬜ not started |
-| **Web-based OTA update** — push a `.bin` at `/update`, no serial/USB needed | P4-017 | ⏳ built; on-device flash-and-boot check pending |
+| **Web-based OTA update** — push a `.bin` at `/update`, no serial/USB needed | P4-017 | ✅ on hardware |
 
 ## Signal flow
 
@@ -92,8 +95,11 @@ explains why it lives in the sketch root rather than a neutral `shared/`).
   ARC-015, pulled out of the `ks_main` loop), `midi_clock_in`.
 - **KitchenSync glue** (`main/`): `ks_main` (the 1 ms clock task driving `ks_tick`),
   `wifi_link` +
-  `link_measure_io` (sockets), `usb_midi_host` (USB), `metronome_audio`
-  (ES8311/I2S), `ks_web` (HTTP server), `ks_config_nvs`.
+  `link_measure_io` (sockets), `usb_midi_host` (USB), `i2s_audio_bus`
+  (the single owner of I2S_NUM_0 + the ES8311 — two masters cannot share
+  BCLK/WS, so the metronome's TX and Follow Beat's RX both consume its
+  handles), `metronome_audio`, `follow_beat_io`, `ks_web` (HTTP server),
+  `ks_config_nvs`.
 
 ### Why ESP-IDF (not Arduino like X32Link)
 
@@ -107,7 +113,11 @@ arduino-cli sketch ([ADR-0005](../docs/adr/0005-per-target-firmware-framework.md
 - **Waveshare ESP32-P4-NANO** (RISC-V). Early silicon (chip rev v1.3);
   `sdkconfig.defaults` drops the ESP-IDF minimum P4 revision to v1.0 so it boots.
 - **ESP32-C6** companion for WiFi over SDIO (ESP-Hosted).
-- **ES8311 codec + NS4150B amp** on the onboard speaker for the metronome
+- **ES8311 codec + NS4150B amp** — onboard speaker (metronome) and mic (Follow
+  Beat), full-duplex on one I2S bus. The codec's ALC and automute are disabled
+  and the I2S clock is pinned to the APLL: the chip defaults pump gain at ~4-6 Hz
+  and gate quiet tails, and a fractionally-divided MCLK wobbles the ADC sample
+  clock — all three were audible as wow/flutter on captured audio.
   (I2C @0x18, PA-EN GPIO53, I2S MCLK/BCLK/WS/DOUT/DIN = 13/12/10/9/11).
 - **Type-A USB** OTG port hosts the downstream USB-MIDI device.
 
@@ -166,14 +176,29 @@ running. From the CLI: `curl --data-binary @build/kitchensync.bin http://<device
 ## Status & roadmap
 
 The Link→MIDI spine (tempo + phase in, clock + transport out, metronome,
-multiclock) is **built and hardware-verified**. Recently landed and awaiting an
-on-device pass: per-output **swing** (P4-013), **live config** (P4-015), and
-**MIDI clock IN → BPM** detection (P4-011 stage 1).
+multiclock, visual metronome) is **built and hardware-verified**, as is
+mic-based tempo detection (P4-020) and versioned config (P4-014). Awaiting a
+clock source to verify: **MIDI clock IN → BPM** (P4-011 stage 1).
 
-Next:
+### Proven, but not shipped here
 
+**Link Audio** (P4-032) — the P4 can stream its mic into an Ableton Live 12.4
+session as a Link Audio channel, in sync. That lives in `../LinkAudioPoC/`, not
+in this firmware, because it links Ableton's **GPLv2** SDK. Integrating it means
+clearing a commercial-licence conversation with Ableton first. Three tickets
+(P4-032 productization, ESP-008 USB interface ingest, ESP-010 transport
+proposal) are blocked on that one email.
+
+### Next
+
+- **ESP-011** — per-output MIDI transport from the web UI, **quantized to the
+  Link grid**: arm the drum machine on this bar, the synth two bars later. No
+  licensing gate; `transport_update()` needs zero changes, it is a widening of
+  two fields to arrays.
+- **ESP-009** — standby heartbeat. Session-joined-but-stopped is currently
+  silent and dark, indistinguishable from a dead board.
 - **P4-011 stage 2** — publish the detected MIDI-in tempo into Link (the P4 as a
   tempo-setting peer) + a Link-vs-MIDI-in source arbiter. The hard part; verified
   against the Link reference-probe rig.
-- **P4-014** — versioned NVS so config survives struct changes without a manual
-  rewrite.
+- **ESP-007** — let Follow Beat actually drive the session, not just display.
+  Blocked on the same tempo-source arbiter as P4-011 stage 2.
