@@ -173,6 +173,82 @@ void test_live_safe_copy_carries_live_fields_not_wifi(void) {
     TEST_ASSERT_EQUAL_INT(24, live.clock[1].ppqn);
 }
 
+// --- P4-014: persisted-blob decode guard ------------------------------------
+// ks_config_decode owns the "is this persisted blob safe to load?" decision, so
+// a struct-layout change falls back to clean defaults instead of loading bytes
+// shifted into the wrong fields. Pure: the caller (ks_config_nvs.c) hands over
+// whatever NVS held; every judgement happens here.
+
+// A blob that a CURRENT-version firmware would have written: right version,
+// right size, valid contents.
+static void make_good_blob(KsConfig* blob) {
+    ks_config_defaults(blob);
+    blob->metronome_volume = 42;          // a marker we can assert survived
+    strcpy(blob->wifi_ssid, "Studio");
+}
+
+void test_decode_accepts_current_version_blob(void) {
+    KsConfig blob; make_good_blob(&blob);
+    KsConfig out;
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob), true, KS_CONFIG_VERSION);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_OK, r);
+    TEST_ASSERT_EQUAL_INT(42, out.metronome_volume);       // blob won, not defaults
+    TEST_ASSERT_EQUAL_STRING("Studio", out.wifi_ssid);
+}
+
+// The upgrade case this whole ticket exists for: a blob written before the
+// version key existed. Its bytes may be ANY old layout -- never trust them.
+void test_decode_legacy_unversioned_blob_falls_back_to_defaults(void) {
+    KsConfig blob; make_good_blob(&blob);
+    KsConfig out;
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob), false, 0);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_DEFAULTED, r);
+    TEST_ASSERT_EQUAL_INT(80, out.metronome_volume);       // default, not the blob's 42
+    TEST_ASSERT_EQUAL_STRING("", out.wifi_ssid);
+}
+
+// A blob from a DIFFERENT schema version: same size is not enough -- fields may
+// have been reordered/reinterpreted, which sizeof can never detect.
+void test_decode_version_mismatch_falls_back_to_defaults(void) {
+    KsConfig blob; make_good_blob(&blob);
+    KsConfig out;
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob), true, KS_CONFIG_VERSION + 1);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_DEFAULTED, r);
+    TEST_ASSERT_EQUAL_INT(80, out.metronome_volume);
+}
+
+// Size mismatch (a grown or shrunk struct) is rejected even when the version
+// happens to match -- belt to the version's braces.
+void test_decode_size_mismatch_falls_back_to_defaults(void) {
+    KsConfig blob; make_good_blob(&blob);
+    KsConfig out;
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob) - 4, true, KS_CONFIG_VERSION);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_DEFAULTED, r);
+    TEST_ASSERT_EQUAL_INT(80, out.metronome_volume);
+}
+
+// No blob at all (fresh board / NVS_NOT_FOUND -> len 0): plain defaults, and
+// that's not an error worth distinguishing from a rejected blob.
+void test_decode_absent_blob_yields_defaults(void) {
+    KsConfig out;
+    ks_decode_result r = ks_config_decode(&out, NULL, 0, false, 0);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_DEFAULTED, r);
+    TEST_ASSERT_EQUAL_INT(80, out.metronome_volume);
+    TEST_ASSERT_TRUE(ks_config_valid(&out));
+}
+
+// Right version, right size, but the contents are out of range (bit-rot, or a
+// version bump that was forgotten). ks_config_valid is the last gate.
+void test_decode_invalid_contents_falls_back_to_defaults(void) {
+    KsConfig blob; make_good_blob(&blob);
+    blob.metronome_volume = 999;          // out of 0..100
+    KsConfig out;
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob), true, KS_CONFIG_VERSION);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_DEFAULTED, r);
+    TEST_ASSERT_EQUAL_INT(80, out.metronome_volume);
+    TEST_ASSERT_TRUE(ks_config_valid(&out));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_live_safe_copy_carries_live_fields_not_wifi);
@@ -191,5 +267,11 @@ int main(void) {
     RUN_TEST(test_unknown_key);
     RUN_TEST(test_follow_beat_default_off);
     RUN_TEST(test_follow_beat_set);
+    RUN_TEST(test_decode_accepts_current_version_blob);
+    RUN_TEST(test_decode_legacy_unversioned_blob_falls_back_to_defaults);
+    RUN_TEST(test_decode_version_mismatch_falls_back_to_defaults);
+    RUN_TEST(test_decode_size_mismatch_falls_back_to_defaults);
+    RUN_TEST(test_decode_absent_blob_yields_defaults);
+    RUN_TEST(test_decode_invalid_contents_falls_back_to_defaults);
     return UNITY_END();
 }
