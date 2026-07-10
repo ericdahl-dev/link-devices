@@ -4,6 +4,7 @@
 #include "midi_clock_out_io.h"
 #include "midi_clock_out.h"
 #include "midi_clock.h"      // midi_clock_send_f8()
+#include "din_midi_out.h"    // ESP-016: mirror 0xF8 onto the DIN wire (S3 -> RC-505)
 #include "tempo_source.h"    // tempo_source_beats_now()
 #include <Arduino.h>
 
@@ -27,7 +28,10 @@ static void midi_clock_out_task(void*) {
             midi_clock_out_reset(&s_sched);
         } else {
             int n = midi_clock_out_ticks_due(&s_sched, beats, MAX_BURST);
-            for (int i = 0; i < n; i++) midi_clock_send_f8();
+            // Same code point for both wires: the DIN byte and the USB packet leave
+            // microseconds apart, so DIN gear (ESP-016) is clocked in lockstep with
+            // the USB path -- and DIN clocks even with no USB host attached.
+            for (int i = 0; i < n; i++) { din_midi_out_byte(0xF8); midi_clock_send_f8(); }
         }
         vTaskDelay(1);  // 1 ms — tick period is ~10ms+ even at 240 BPM
     }
@@ -35,5 +39,6 @@ static void midi_clock_out_task(void*) {
 
 void midi_clock_out_io_begin(void) {
     midi_clock_usb_begin();  // idempotent; USB.begin() is done in tempo_source_pre_net
+    din_midi_out_begin(MIDI_TX_GPIO);   // ESP-016: DIN MIDI out on the S3 header
     xTaskCreatePinnedToCore(midi_clock_out_task, "midi_clk_out", 2048, NULL, 6, NULL, 1);
 }
