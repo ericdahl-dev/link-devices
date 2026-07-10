@@ -41,10 +41,11 @@ CLOCKOUTPUT = ../X32Link/clock_output.c
 MVOICE = ../X32Link/metronome_voice.c
 SWING   = ../X32Link/swing.c
 METROSTRIP = ../X32Link/metro_strip.c
+BATTGAUGE = ../X32Link/battery_gauge.c
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_battery_gauge
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -81,6 +82,7 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_metro_strip
 	./test_wifi_conn_policy
 	./test_metronome
+	./test_battery_gauge
 	./check_docs.sh
 
 test_bpm_tracker: test_bpm_tracker.c $(TRACKER) $(UNITY)
@@ -160,6 +162,9 @@ test_beat_source: test_beat_source.c $(BEATSOURCE) $(BEATCLOCK) $(PHASE) $(PROTO
 
 test_ks_status: test_ks_status.c $(P4STATUS) $(UNITY)
 	$(CC) $(CFLAGS) -I../KitchenSync/main $^ -o $@
+
+test_battery_gauge: test_battery_gauge.c $(BATTGAUGE) $(UNITY)
+	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 clean:
 	rm -f test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_axs5106l test_touch_ui test_tempo_snapshot test_bar

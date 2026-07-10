@@ -152,7 +152,9 @@ static void start_sta(const char* ssid, const char* pass)
 
     wifi_config_t wc = {0};
     strncpy((char *)wc.sta.ssid,     ssid, sizeof(wc.sta.ssid) - 1);
-    strncpy((char *)wc.sta.password, pass, sizeof(wc.sta.password) - 1);
+    strncpy((char *)wc.sta.password, pass ? pass : "", sizeof(wc.sta.password) - 1);
+    wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
     wifi_conn_policy_reset(&s_pol, esp_timer_get_time());
