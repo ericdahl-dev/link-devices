@@ -14,6 +14,10 @@
 #ifdef HAS_TOUCH_DISPLAY     // LNK-025: implied by the board flag in config.h (included above)
 #include "touch_display.h"   // LNK-014: 1.47" JD9853 LCD + AXS5106L touch
 #endif
+#ifdef HAS_BATTERY_GAUGE     // opt-in per unit — the QT Py's LiPo BFF fuel gauge
+#include "battery_gauge_io.h"
+#include "battery_snapshot.h"
+#endif
 
 #define LED_FLASH_MS 30
 
@@ -24,6 +28,13 @@
 #define WIFI_DOWN_BLINK_GAP_MS       80
 #define WIFI_DOWN_BLINK_COUNT        3
 #define WIFI_DOWN_BLINK_INTERVAL_MS  4000
+
+// MAX17048's own ADC/filtering cycle is ~1Hz internally — polling faster than
+// that over I2C just re-reads the same conversion, so this is deliberately
+// slow (also keeps it well off the touch board's separate I2C traffic, on
+// units that somehow have both, though HAS_BATTERY_GAUGE + HAS_TOUCH_DISPLAY
+// isn't a real combination today).
+#define BATTERY_POLL_MS 3000
 
 AppConfig g_config;
 
@@ -208,6 +219,23 @@ static void bpm_task(void*) {
     }
 }
 
+#ifdef HAS_BATTERY_GAUGE
+// LiPo BFF fuel gauge poll. Independent of WiFi/tempo — runs unconditionally
+// once started, same "don't gate hardware readout on network state" reasoning
+// as bpm_task/led_task above. battery_reading_t left un-published (present
+// stays false) whenever the I2C read fails, e.g. no LiPo BFF stacked on this
+// unit — handle_status() then omits batt_v/batt_pct from /status entirely.
+static void battery_task(void*) {
+    battery_gauge_io_begin();
+    for (;;) {
+        battery_reading_t r;
+        bool ok = battery_gauge_io_read(&r);
+        battery_snapshot_publish(ok ? r.volts : 0.0f, ok ? r.percent : 0.0f, ok);
+        vTaskDelay(pdMS_TO_TICKS(BATTERY_POLL_MS));
+    }
+}
+#endif
+
 static int64_t now_us_ms() { return (int64_t)millis() * 1000; }
 
 // Cold-start connect. The give-up budget lives in the shared wifi_conn_policy now,
@@ -294,6 +322,9 @@ void setup() {
     // the STA-connected path — see the wifi_ok branch below.
     xTaskCreatePinnedToCore(bpm_task, "bpm", 4096, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(led_task, "led", 2048, NULL, 1, NULL, 0);
+#ifdef HAS_BATTERY_GAUGE
+    xTaskCreatePinnedToCore(battery_task, "batt", 2048, NULL, 1, NULL, 0);
+#endif
 
     bool wifi_ok = wifi_try_connect();
     if (wifi_ok) {

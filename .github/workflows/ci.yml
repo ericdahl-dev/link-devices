@@ -64,6 +64,15 @@ jobs:
           arduino-cli compile --fqbn "$FQBN" X32Link
           git checkout -- X32Link/build_opt.h
 
+      # battery_gauge_io.cpp's Wire calls only compile under this flag — opt-in
+      # per unit (not every QT Py has the LiPo BFF attached), so it needs its
+      # own job or it never gets compiled at all.
+      - name: Compile X32Link (QT Py + LiPo BFF battery gauge)
+        run: |
+          printf -- '-DBOARD_QTPY_ESP32S3\n-DHAS_BATTERY_GAUGE\n' > X32Link/build_opt.h
+          arduino-cli compile --fqbn "$FQBN" X32Link
+          git checkout -- X32Link/build_opt.h
+
   loralink-compile:
     name: Firmware compile (LoraLink)
     runs-on: ubuntu-latest
