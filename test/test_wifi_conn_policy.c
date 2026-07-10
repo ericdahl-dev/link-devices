@@ -11,20 +11,20 @@ void tearDown(void) {}
 
 void test_disconnect_well_before_budget_retries(void) {
     TEST_ASSERT_EQUAL_INT(WCA_CONNECT, wifi_conn_policy_step(&p, WCE_DISCONNECTED, 1000000));   // 1s
-    TEST_ASSERT_EQUAL_INT(WCA_CONNECT, wifi_conn_policy_step(&p, WCE_DISCONNECTED, 29000000));  // 29s
+    TEST_ASSERT_EQUAL_INT(WCA_CONNECT, wifi_conn_policy_step(&p, WCE_DISCONNECTED, 44000000));  // 44s
     TEST_ASSERT_EQUAL_INT(WCS_CONNECTING, p.state);
 }
 
 void test_disconnect_at_budget_gives_up_to_ap(void) {
-    // Boundary is inclusive (>=), matching the old 30s give-up.
-    TEST_ASSERT_EQUAL_INT(WCA_GIVE_UP_TO_AP, wifi_conn_policy_step(&p, WCE_DISCONNECTED, 30000000));
+    // Boundary is inclusive (>=) at WIFI_CONN_TIMEOUT_US, now 45s.
+    TEST_ASSERT_EQUAL_INT(WCA_GIVE_UP_TO_AP, wifi_conn_policy_step(&p, WCE_DISCONNECTED, 45000000));
     TEST_ASSERT_EQUAL_INT(WCS_AP, p.state);
 }
 
 void test_budget_is_relative_to_connect_start(void) {
     wifi_conn_policy_reset(&p, 100000000);   // cold start at 100s since boot
-    TEST_ASSERT_EQUAL_INT(WCA_CONNECT,       wifi_conn_policy_step(&p, WCE_DISCONNECTED, 100000000 + 29000000));
-    TEST_ASSERT_EQUAL_INT(WCA_GIVE_UP_TO_AP, wifi_conn_policy_step(&p, WCE_DISCONNECTED, 100000000 + 30000000));
+    TEST_ASSERT_EQUAL_INT(WCA_CONNECT,       wifi_conn_policy_step(&p, WCE_DISCONNECTED, 100000000 + 44000000));
+    TEST_ASSERT_EQUAL_INT(WCA_GIVE_UP_TO_AP, wifi_conn_policy_step(&p, WCE_DISCONNECTED, 100000000 + 45000000));
 }
 
 /* ---- got-IP: proven creds → retry forever, listener once --------------- */
@@ -48,9 +48,9 @@ void test_disconnect_after_ip_retries_forever_never_ap(void) {
 /* ---- AP is terminal ---------------------------------------------------- */
 
 void test_ap_is_terminal_ignores_events(void) {
-    wifi_conn_policy_step(&p, WCE_DISCONNECTED, 30000000);   // → AP
-    TEST_ASSERT_EQUAL_INT(WCA_NONE, wifi_conn_policy_step(&p, WCE_DISCONNECTED, 31000000));  // no double-init
-    TEST_ASSERT_EQUAL_INT(WCA_NONE, wifi_conn_policy_step(&p, WCE_GOT_IP, 32000000));
+    wifi_conn_policy_step(&p, WCE_DISCONNECTED, 45000000);   // → AP
+    TEST_ASSERT_EQUAL_INT(WCA_NONE, wifi_conn_policy_step(&p, WCE_DISCONNECTED, 46000000));  // no double-init
+    TEST_ASSERT_EQUAL_INT(WCA_NONE, wifi_conn_policy_step(&p, WCE_GOT_IP, 47000000));
     TEST_ASSERT_EQUAL_INT(WCS_AP, p.state);
 }
 

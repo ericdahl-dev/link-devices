@@ -1,0 +1,8 @@
+# Vendored Ableton Link SDK clone (GPLv2). Not committed while this is a spike;
+# vendoring shape (submodule vs subtree) decided if/when the PoC graduates.
+third_party/link/
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock

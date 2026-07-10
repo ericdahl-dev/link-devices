@@ -101,7 +101,10 @@ justify-content:center;user-select:none;-webkit-user-select:none;touch-action:ma
 .sect{position:relative;margin:0 0 8px 3px;padding:0 0 10px 18px;border-left:2px solid var(--line)}
 .sect::before{content:"";position:absolute;left:-2px;top:0;width:2px;height:28px;background:var(--led-dim)}
 .sect > .frow:first-child{border-top:0;padding-top:12px}
-.hide{display:none}
+/* !important because the desktop media query's `.grp--wide .sect{display:grid}`
+   (two classes) otherwise out-specifies this single-class rule, leaving the MIDI
+   Clock Out group unable to collapse above 760px while every other group could. */
+.hide{display:none!important}
 .frow.head{padding:18px 0 12px}
 .frow.head .cap{font-family:var(--disp);font-weight:600;font-size:12.5px;letter-spacing:.12em;color:var(--ink);margin-bottom:12px}
 .frow.head .cap::before{content:"";display:inline-block;width:6px;height:6px;border-radius:1px;background:var(--led-dim);margin-right:10px;vertical-align:2px}

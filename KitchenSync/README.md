@@ -152,6 +152,10 @@ Two write paths:
 
 ### Firmware update (OTA, P4-017)
 
+See also [`docs/ota-deployment.md`](../docs/ota-deployment.md) for the full
+cross-target playbook (X32Link + KitchenSync, partition prerequisites, version
+audit).
+
 `/update` uploads a compiled `.bin` (`idf.py build`'s
 `build/kitchensync.bin`) straight into the inactive OTA slot and boots into it — no
 USB cable needed once the device is on WiFi. The partition table

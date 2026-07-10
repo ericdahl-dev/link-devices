@@ -1,0 +1,15 @@
+menu "Link Audio PoC"
+
+config POC_WIFI_SSID
+    string "WiFi SSID"
+    default ""
+    help
+        Station SSID. Set locally (menuconfig / sdkconfig); never commit.
+
+config POC_WIFI_PASSWORD
+    string "WiFi password"
+    default ""
+    help
+        Station password. Set locally; never commit.
+
+endmenu

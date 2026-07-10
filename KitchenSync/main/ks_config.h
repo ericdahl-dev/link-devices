@@ -4,11 +4,24 @@
 // validation, host-tested in test/test_ks_config.c. NVS load/save is the thin
 // glue in ks_config_nvs.c.
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #define KS_CLOCK_OUTPUTS 4   // Multiclock-style per-output clocks (P4-010)
+
+// P4-014: schema version of the PERSISTED config. Bump on ANY change to
+// KsConfig's layout — added, removed, reordered, or resized field. The
+// _Static_assert below turns "forgot to bump it" into a compile error.
+//
+// Deliberately NOT a field inside KsConfig: on the first upgrade from an
+// unversioned blob, an in-struct version would read the old blob's first four
+// bytes (wifi_ssid[0..3] — arbitrary ASCII) and could alias a plausible
+// version. Stored under its own NVS key instead, where "absent" is an
+// unambiguous "legacy, don't trust these bytes". See ks_config_nvs.c.
+#define KS_CONFIG_VERSION 1u
 
 // One configurable clock output (routed to a USB-MIDI cable). Division, phase and
 // swing are the E-RM-Multiclock-style controls.
@@ -39,6 +52,13 @@ typedef struct {
     int  follow_beat_enable; // 0/1 -- mic-based tempo detection (P4-020, display only)
 } KsConfig;
 
+// P4-014 tripwire. sizeof alone can't detect a same-size field reorder, so it is
+// not the safety mechanism — KS_CONFIG_VERSION is. This assert exists to make
+// editing the struct impossible without noticing the version constant above.
+// When it fires: bump KS_CONFIG_VERSION, then update the size here.
+_Static_assert(sizeof(KsConfig) == 228,
+               "KsConfig layout changed: bump KS_CONFIG_VERSION, then fix this size (P4-014)");
+
 void ks_config_defaults(KsConfig* c);
 
 // True if every field is in range. An empty ssid is valid (it selects SoftAP
@@ -57,6 +77,27 @@ bool ks_config_set(KsConfig* c, const char* key, const char* value);
 // handler calls this instead of an inline field list. WiFi creds and any reboot-only
 // field are deliberately excluded (those go through Save + reboot).
 void ks_config_live_safe_copy(KsConfig* dst, const KsConfig* src);
+
+// P4-014: did we load the persisted config, or fall back to defaults?
+typedef enum {
+    KS_DECODE_OK,          // blob accepted verbatim
+    KS_DECODE_DEFAULTED,   // blob absent/legacy/wrong-version/wrong-size/invalid
+} ks_decode_result;
+
+// The one owner of "is this persisted blob safe to load?". *out always ends up
+// a valid config: either the blob (when it clears every gate) or clean defaults.
+//
+// The blob is accepted ONLY when all of these hold:
+//   version_present  — the NVS "ver" key existed (a legacy blob predates it)
+//   version == KS_CONFIG_VERSION
+//   blob_len == sizeof(KsConfig)
+//   ks_config_valid(blob)
+//
+// Otherwise *out is defaults. This is what stops a struct-layout change from
+// loading bytes shifted into the wrong fields. Pure — ks_config_nvs.c hands over
+// whatever NVS held and does no judging of its own. Host-tested.
+ks_decode_result ks_config_decode(KsConfig* out, const void* blob, size_t blob_len,
+                                  bool version_present, uint32_t version);
 
 #ifdef __cplusplus
 }

@@ -40,8 +40,11 @@ the touch-vs-web config split.
 
 - **Host tests:** `make -C test` (Unity is vendored in `lib/unity/` — no submodule).
 - **Firmware:** `arduino-cli compile --fqbn 'esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi' X32Link` (see `AGENTS.md`; board flag goes in `X32Link/build_opt.h`, kept empty at HEAD).
+- **OTA (no USB after first flash):** both X32Link and KitchenSync accept a `.bin`
+  at `/update` over WiFi. See [`docs/ota-deployment.md`](docs/ota-deployment.md).
 
-CI (`.github/workflows/ci.yml`) runs the host suite + compiles X32Link (headless + touch).
+CI (`.github/workflows/ci.yml`) runs the host suite + emulator seam tests +
+compiles X32Link (headless + touch) and X32_emulator.
 
 ## Tasks
 
