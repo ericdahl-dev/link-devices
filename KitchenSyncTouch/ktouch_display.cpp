@@ -63,7 +63,15 @@ static int      s_shown_state = -1;
 static int      s_prev_mx = -1, s_prev_my = -1;
 static bool     s_touch_down = false;
 static bool     s_cueing = false;   // turntable: held, armed-in-hand, no MIDI yet
+static int      s_touch_fails = 0;  // consecutive failed I2C reads (debounce, see tick)
+// Bench probe: the cue was leaving the screen mid-hold and /status could not see why.
+// Counts the two ways a hold can be broken so the wire can tell us which it is.
+static uint32_t s_fail_total  = 0;  // I2C reads that failed outright
+static uint32_t s_zero_total  = 0;  // reads that SUCCEEDED but reported 0 touch points
+static uint32_t s_cue_cancels = 0;  // cues killed by the sustained-fault path
 #define CUE_DISP 99                 // synthetic shown-state for the cue panel
+#define TOUCH_FAIL_LIMIT 10         // ~50ms of dead sensor before we call it a fault
+#define RELEASE_CONFIRM  3          // immediate re-reads that must ALL agree a finger left
 
 // PWM the backlight (ledc via analogWrite) so it can be dimmed. Clamp to the
 // config's floor is the caller's job; here we just refuse full-dark and full range.
@@ -72,6 +80,12 @@ static void backlight_apply(int pct) {
     analogWrite(LCD_BL, pct * 255 / 100);
 }
 void ktouch_display_set_brightness(int pct) { backlight_apply(pct); }
+
+// Bench probe accessors (see the counters above).
+uint32_t ktouch_touch_fails(void)  { return s_fail_total; }
+uint32_t ktouch_touch_zeros(void)  { return s_zero_total; }
+uint32_t ktouch_cue_cancels(void)  { return s_cue_cancels; }
+int      ktouch_cueing(void)       { return s_cueing ? 1 : 0; }
 
 // I2C read + pure parse of the AXS5106L (0x63). axs5106l itself is pure (no Wire).
 static bool read_touch(axs_touch_t *t) {
@@ -135,28 +149,43 @@ void ktouch_display_tick(void) {
     uint32_t now = millis();
 
     // ---- transport toggle: ANY touch flips it (no buttons -> no mis-hit) ----
-    // Digital-DJ (play_on_release=0): a press fires the toggle immediately.
-    // Turntable-DJ (play_on_release=1): a press on STOPPED *cues* (armed-in-hand,
-    // no MIDI); release drops it -- transport_launch quantizes the PLAY to the next
-    // "1", so releasing just before the bar lands the beat on the downbeat. Pressing
-    // while running/armed stops immediately either way.
+    // The DECISION is pure and host-tested (ktouch_touch_step); this glue owns only
+    // the sensor read and the two carried bools. A failed read is reported as a fault
+    // rather than swallowed: debounce it (a transient I2C hiccup must not cancel a
+    // cue), but once the sensor is really gone, say so -- otherwise a stuck CUE panel
+    // has no way back.
     axs_touch_t t;
-    if (read_touch(&t)) {
-        bool touched = t.points_len > 0;
-        if (touched && !s_touch_down) {
-            s_touch_down = true;
-            if (!g_config.play_on_release) {
-                ktouch_transport_post(ktouch_toggle_intent(state));   // digital: on press
-            } else if (state == TL_STOPPED) {
-                s_cueing = true;                                       // turntable: cue on hold
-            } else {
-                ktouch_transport_post(TL_INTENT_STOP);                // running/armed: stop now
-            }
-        } else if (!touched && s_touch_down) {
-            s_touch_down = false;
-            if (s_cueing) { s_cueing = false; ktouch_transport_post(TL_INTENT_PLAY); }  // release = drop
+    bool ok      = read_touch(&t);
+    bool touched = ok && t.points_len > 0;
+    if (!ok) s_fail_total++;
+
+    // PHANTOM RELEASE (measured on the bench: 17 of these across a handful of holds).
+    // The AXS5106L intermittently returns a perfectly SUCCESSFUL read that reports zero
+    // touch points while a finger is still on the glass. Believing one is a release --
+    // and in turntable mode a release IS the drop, so the sensor blinking fires the beat
+    // by itself, mid-hold.
+    //
+    // Confirm by re-reading IMMEDIATELY rather than by waiting ticks. The drop is timed
+    // to the "1": a debounce measured in milliseconds could push the release past the
+    // bar line and cost a whole bar. Three back-to-back reads on a 400kHz bus cost well
+    // under a millisecond, and any one of them seeing the finger proves it never left.
+    if (ok && !touched && s_touch_down) {
+        s_zero_total++;
+        for (int i = 0; i < RELEASE_CONFIRM && !touched; i++) {
+            axs_touch_t r;
+            if (read_touch(&r) && r.points_len > 0) touched = true;   // still there: a blink
         }
     }
+
+    if (ok) s_touch_fails = 0;
+    else if (s_touch_fails < TOUCH_FAIL_LIMIT) { s_touch_fails++; return; }   // transient: hold state
+    if (!ok && s_cueing) s_cue_cancels++;
+
+    KtouchTouchOut o = ktouch_touch_step(state, ok, touched, s_touch_down,
+                                         s_cueing, g_config.play_on_release != 0);
+    s_touch_down = touched;
+    s_cueing     = o.cueing;
+    if (o.intent != TL_INTENT_NONE) ktouch_transport_post(o.intent);
 
     // ---- toggle zone repaint: cue panel while held, else follow launch state ----
     if (s_cueing) {
@@ -173,12 +202,32 @@ void ktouch_display_tick(void) {
         bool sync_changed = sync != s_shown_sync;
         s_shown_bpm = bpm; s_shown_sync = sync;
 
-        s_lcd.fillRect(0, 16, 200, 44, TFT_BLACK);
-        s_lcd.setTextColor(0xB6FF36u, TFT_BLACK); s_lcd.setTextSize(4);
-        s_lcd.setCursor(8, 18);
-        if (bpm > 0.0f) s_lcd.printf("%3.0f", bpm); else s_lcd.print("---");
+        // Tempo, with the tenth shown small -- the same shape as the web readout, and
+        // the only way the decimal fits: at size 4 a glyph is 24px, so a full "168.0"
+        // would run to x=128 and collide with the sync text at x=130. Big whole number,
+        // small tenth, unit after it.
+        //
+        // Link tempos are genuinely fractional (a session at 120.4 was displaying as
+        // "120"), and the redraw threshold below was already 0.05 -- the display could
+        // always SEE the tenth, it just never showed it.
+        //
+        // Round to tenths ONCE and split: computing the whole and the fraction
+        // separately would print 167.96 as "167.0" -- the whole truncates down while
+        // the tenth rounds up.
+        int tenths = (bpm > 0.0f) ? (int)(bpm * 10.0f + 0.5f) : 0;
+
+        s_lcd.fillRect(0, 16, 128, 46, TFT_BLACK);
+        s_lcd.setTextColor(0xB6FF36u, TFT_BLACK);
+        if (bpm > 0.0f) {
+            s_lcd.setTextSize(4); s_lcd.setCursor(8, 18);
+            s_lcd.printf("%3d", tenths / 10);            // 3 glyphs @24px -> x 8..80
+            s_lcd.setTextSize(2); s_lcd.setCursor(80, 34);
+            s_lcd.printf(".%d", tenths % 10);            // bottom-aligned with the big text
+        } else {
+            s_lcd.setTextSize(4); s_lcd.setCursor(8, 18); s_lcd.print("---");
+        }
         s_lcd.setTextColor(0x6f8a4du, TFT_BLACK); s_lcd.setTextSize(1);
-        s_lcd.setCursor(96, 44); s_lcd.println("BPM");
+        s_lcd.setCursor(108, 44); s_lcd.println("BPM");
 
         s_lcd.fillRect(120, 14, 150, 44, TFT_BLACK);
         s_lcd.setTextColor(sync == 1 ? 0xB6FF36u : 0xFF9D3Bu, TFT_BLACK); s_lcd.setTextSize(1);
@@ -212,4 +261,8 @@ void ktouch_display_tick(void) {
 void ktouch_display_begin(void) {}
 void ktouch_display_tick(void) {}
 void ktouch_display_set_brightness(int pct) { (void)pct; }
+uint32_t ktouch_touch_fails(void) { return 0; }
+uint32_t ktouch_touch_zeros(void) { return 0; }
+uint32_t ktouch_cue_cancels(void) { return 0; }
+int      ktouch_cueing(void)      { return 0; }
 #endif
