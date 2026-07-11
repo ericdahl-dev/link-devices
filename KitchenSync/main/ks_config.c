@@ -23,6 +23,7 @@ void ks_config_defaults(KsConfig* c) {
         c->clock[i].ppqn         = 24;
         c->clock[i].phase_mbeats = 0;
         c->clock[i].swing_mbeats = 0;   // straight by default (P4-013)
+        c->clock[i].follow_link  = 1;   // Link owns transport by default (ESP-011)
     }
 }
 
@@ -46,6 +47,7 @@ bool ks_config_valid(const KsConfig* c) {
         if (o->ppqn < 1 || o->ppqn > 48) return false;
         if (o->phase_mbeats < -250 || o->phase_mbeats > 250) return false;
         if (o->swing_mbeats < 0 || o->swing_mbeats > 250) return false;
+        if (o->follow_link != 0 && o->follow_link != 1) return false;
     }
     return true;
 }
@@ -163,7 +165,7 @@ bool ks_config_set(KsConfig* c, const char* key, const char* value) {
         else               c->led_accent_color = (int)v;   // "led_accent"
         return true;
     }
-    // P4-010 per-output fields: "clk<N>_en|cable|ppqn|phase" (N = 0..3).
+    // P4-010 per-output fields: "clk<N>_en|cable|ppqn|phase|swing|follow" (N = 0..3).
     if (strncmp(key, "clk", 3) == 0 && key[3] >= '0' && key[3] <= '9' && key[4] == '_') {
         int idx = key[3] - '0';
         if (idx < 0 || idx >= KS_CLOCK_OUTPUTS) return false;
@@ -175,6 +177,7 @@ bool ks_config_set(KsConfig* c, const char* key, const char* value) {
         if (strcmp(f, "ppqn") == 0)  { if (v < 1 || v > 48)  return false; o->ppqn = v; return true; }
         if (strcmp(f, "phase") == 0) { if (v < -250 || v > 250) return false; o->phase_mbeats = v; return true; }
         if (strcmp(f, "swing") == 0) { if (v < 0 || v > 250)    return false; o->swing_mbeats = v; return true; }
+        if (strcmp(f, "follow") == 0){ if (v != 0 && v != 1)    return false; o->follow_link = v; return true; }
         return false;
     }
     return false;
