@@ -18,6 +18,9 @@ void setUp(void) {
     ks_tick_reset(&st, 0);
     memset(&cfg, 0, sizeof cfg);
     cfg.clock_out_enable = 1;
+    // memset zeroes follow_link, but the REAL default is 1 (Link owns transport).
+    // Model the default here or every test silently becomes a manual-output test.
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) cfg.clock[i].follow_link = 1;
     cfg.clock[0].enable = 1; cfg.clock[0].cable = 0; cfg.clock[0].ppqn = 1;   // 1 pulse/beat
     cfg.metronome_enable = 1; cfg.metronome_accent = 1;
     memset(&TL, 0, sizeof TL);
@@ -240,8 +243,124 @@ void test_manual_owns_transport_when_session_silent(void) {
     TEST_ASSERT_EQUAL_INT(TRANSPORT_START, ks_tick_step(&st, &in).transport[0]);
 }
 
+// Per-output transport ownership: an output set to MANUAL (follow_link=0) is not
+// stomped by the Link session's transport. This is the entire reason the flag
+// exists -- the bench bug was a manual START killed by the session's stopped state
+// in the same millisecond. The arbitration's invariant is "exactly one master per
+// output", so here the session must NOT be that master.
+void test_manual_output_survives_session_stop(void) {
+    cfg.clock[0].follow_link = 0;   // this output is ours, not Link's
+
+    // Prime the beat grid first: with no grid, transport_launch deliberately starts
+    // Play immediately rather than hanging armed forever, which wouldn't exercise
+    // the quantized path we care about here.
+    int64_t t = 0;
+    KsTickPlan p;
+    for (int i = 0; i < 10; i++) {
+        t += 20000;
+        KsTickInputs w = mk(t, 0, true, true);
+        w.start_stop_seen = true; w.playing = true;
+        ks_tick_step(&st, &w);
+    }
+
+    // Session is publishing transport and IS playing. Press manual play.
+    KsTickInputs in = mk(t, 0, true, true);
+    in.start_stop_seen = true; in.playing = true;
+    in.launch[0] = TL_INTENT_PLAY;      // arms; fires on the next bar line
+    p = ks_tick_step(&st, &in);
+
+    bool started = (p.transport[0] == TRANSPORT_START);
+    for (int i = 0; i < 400; i++) {
+        t += 20000;
+        in = mk(t, 0, true, true);
+        in.start_stop_seen = true; in.playing = true;
+        p = ks_tick_step(&st, &in);
+        if (p.transport[0] == TRANSPORT_START) started = true;
+    }
+    TEST_ASSERT_TRUE(started);
+    TEST_ASSERT_EQUAL_INT(TL_RUNNING, p.launch_state[0]);
+
+    // Now the SESSION stops. Our manual output must keep running, un-stomped.
+    for (int i = 0; i < 50; i++) {
+        t += 20000;
+        in = mk(t, 0, true, true);
+        in.start_stop_seen = true; in.playing = false;   // session stopped
+        p = ks_tick_step(&st, &in);
+        TEST_ASSERT_NOT_EQUAL(TRANSPORT_STOP, p.transport[0]);
+    }
+    TEST_ASSERT_EQUAL_INT(TL_RUNNING, p.launch_state[0]);
+}
+
+// Independence (ESP-011's whole point): the session's transport reaches the outputs
+// that follow it and NOT the manual ones, so a drum machine can track Ableton while
+// a synth waits to be launched by hand.
+void test_session_start_reaches_only_following_outputs(void) {
+    cfg.clock[0].enable = 1; cfg.clock[0].follow_link = 1;   // follows Link
+    cfg.clock[1].enable = 1; cfg.clock[1].ppqn = 1;
+    cfg.clock[1].follow_link = 0;                            // manual — ours
+
+    // The session must TRANSITION stopped->playing: transport_update primes on its
+    // first observation and emits nothing (joining a session mid-play must not jump
+    // gear to bar 1, P4-008). So observe it stopped first, then start it.
+    int64_t t = 0;
+    KsTickPlan p; bool out0_started = false, out1_started = false;
+    for (int i = 0; i < 10; i++) {
+        t += 20000;
+        KsTickInputs w = mk(t, 0, true, true);
+        w.start_stop_seen = true; w.playing = false;   // session present but stopped
+        ks_tick_step(&st, &w);
+    }
+    for (int i = 0; i < 200; i++) {
+        t += 20000;
+        KsTickInputs in = mk(t, 0, true, true);
+        in.start_stop_seen = true; in.playing = true;  // session starts playing
+        p = ks_tick_step(&st, &in);
+        if (p.transport[0] == TRANSPORT_START) out0_started = true;
+        if (p.transport[1] == TRANSPORT_START) out1_started = true;
+    }
+    TEST_ASSERT_TRUE(out0_started);    // Link owns it -> session START lands
+    TEST_ASSERT_FALSE(out1_started);   // manual -> session must NOT start it
+}
+
+// A manual output stops the moment you ask, even while the session plays on.
+void test_manual_stop_is_immediate_while_session_plays(void) {
+    cfg.clock[0].follow_link = 0;
+
+    int64_t t = 0;
+    KsTickPlan p;
+    for (int i = 0; i < 10; i++) {   // prime the grid
+        t += 20000;
+        KsTickInputs w = mk(t, 0, true, true);
+        w.start_stop_seen = true; w.playing = true;
+        ks_tick_step(&st, &w);
+    }
+    KsTickInputs in = mk(t, 0, true, true);
+    in.start_stop_seen = true; in.playing = true;
+    in.launch[0] = TL_INTENT_PLAY;
+    ks_tick_step(&st, &in);
+    for (int i = 0; i < 400; i++) {           // let it reach RUNNING
+        t += 20000;
+        in = mk(t, 0, true, true);
+        in.start_stop_seen = true; in.playing = true;
+        p = ks_tick_step(&st, &in);
+    }
+    TEST_ASSERT_EQUAL_INT(TL_RUNNING, p.launch_state[0]);
+
+    // Manual STOP: immediate, not quantized -- session is still playing.
+    t += 20000;
+    in = mk(t, 0, true, true);
+    in.start_stop_seen = true; in.playing = true;
+    in.launch[0] = TL_INTENT_STOP;
+    p = ks_tick_step(&st, &in);
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_STOP, p.transport[0]);
+    TEST_ASSERT_EQUAL_INT(TL_STOPPED, p.launch_state[0]);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_manual_output_survives_session_stop);
+    RUN_TEST(test_session_start_reaches_only_following_outputs);
+    RUN_TEST(test_manual_stop_is_immediate_while_session_plays);
     RUN_TEST(test_session_transport_wins_over_manual);
     RUN_TEST(test_manual_owns_transport_when_session_silent);
     RUN_TEST(test_launch_tracks_without_usb);

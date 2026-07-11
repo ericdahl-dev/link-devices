@@ -71,15 +71,23 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
         //     output when the session publishes transport.
         // `tr` sits downstream of both and emits exactly one 0xFA/0xFC per
         // transition, so the two can never double-fire.
-        // Arbitration: once the session publishes StartStopState, Link owns
-        // transport and manual presses are ignored (the UI greys the buttons).
-        // Two masters is how "why did my gear stop" happens -- and it did, on
-        // the bench: a manual START was stomped by the session's stopped state
-        // in the same millisecond.
-        bool session_owns = in->start_stop_seen;
+        // Arbitration, PER OUTPUT: exactly one master owns each output's transport.
+        // Link owns an output once the session publishes StartStopState AND that
+        // output is set to follow it (cfg.clock[o].follow_link, the default); such
+        // an output ignores manual presses and the UI greys its toggle. An output
+        // with follow_link=0 is manual: its web toggle drives it and the session's
+        // transport never touches it, so a drum machine can follow Ableton while a
+        // synth is launched by hand two bars later (ESP-011's whole point).
+        //
+        // Never BOTH. Two masters is how "why did my gear stop" happens -- and it
+        // did, on the bench: a manual START was stomped by the session's stopped
+        // state in the same millisecond. Picking the master per output is what
+        // keeps that impossible while still allowing independent outputs.
+        bool session_playing = in->start_stop_seen;
 
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
             if (!in->cfg->clock[o].enable) continue;
+            bool session_owns = session_playing && in->cfg->clock[o].follow_link;
             TransportLaunchIntent intent = session_owns ? TL_INTENT_NONE : in->launch[o];
             TransportLaunchOut lo = transport_launch_step(&st->tl[o], intent,
                                                           bs.beats, KS_TICK_METRO_QUANTUM, bs.active);

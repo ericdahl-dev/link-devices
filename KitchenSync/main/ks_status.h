@@ -25,9 +25,13 @@ extern "C" {
 // `launch` is the per-output quantized-launch state (ESP-011): 0 stopped,
 // 1 armed (waiting for the bar line), 2 running. Emitted as "launch":[a,b,c,d]
 // so the UI can render "starting on next bar..." rather than a dead button.
+// `playing` is the session's real transport state and `link_owns` is true once a
+// Link peer has published StartStopState (ks_tick arbitration): when link_owns is
+// true the manual PLAY/STOP buttons are ignored, so the UI greys them and shows
+// the session's `playing` state instead of the (frozen) manual launch state.
 int ks_status_json(char* buf, size_t len, float bpm, float midi_bpm, int peers, bool usb, uint32_t tx,
                    const char* fw, bool follow_enabled, float follow_bpm, float follow_confidence,
-                   bool follow_valid, const int launch[4]);
+                   bool follow_valid, const int launch[4], bool playing, bool link_owns);
 
 #ifdef __cplusplus
 }
