@@ -7,9 +7,11 @@
 // host (diagnosed on the bench -- the port only returns via the ROM download mode).
 // Keeping USB plain CDC = stable serial. USB-MIDI can be an opt-in feature later.
 //
-// The tick TIMING is the pure, host-tested midi_clock_out engine (over clock_ticker).
+// The tick TIMING is the pure, host-tested clock_output engine (over
+// clock_ticker) — the same derivation KitchenSync's plan loop uses (ARC-019),
+// so nudge/swing/division and the reset-on-invalid rule have one tested owner.
 #include "ktouch_midi_out.h"
-#include "midi_clock_out.h"   // MidiClockOut scheduler: quantize beats -> 24-PPQN
+#include "clock_output.h"     // ClockOutput: swing + nudge + ppqn -> pulses due
 #include "din_midi_out.h"
 #include "tempo_source.h"
 #include "transport_launch.h"   // bar-quantized PLAY/STOP (ESP-011 pure engine)
@@ -19,10 +21,9 @@
 
 extern AppConfig g_config;
 
-// A gap over this many 1/24-beat ticks between task iterations (a re-origin or a
-// long stall) realigns instead of spraying a catch-up burst. Same as X32Link.
-static const int MAX_BURST = 4;
-static MidiClockOut    s_sched;
+// Burst cap + reset-on-invalid live in clock_output (CLOCK_OUTPUT_MAX_BURST),
+// shared with X32Link's writer instead of copy-pasted into each task (ARC-019).
+static ClockOutput     s_out;
 static TransportLaunch s_tl;
 
 // 1 ms writer task: quantize the current Link beat to 24 PPQN, emit due 0xF8 on
@@ -55,7 +56,6 @@ static volatile uint32_t s_max_gap_us  = 0;
 static volatile uint32_t s_max_work_us = 0;
 static volatile uint32_t s_overruns    = 0;
 static volatile uint32_t s_bursts      = 0;   // ticks that emitted >1 clock = catch-up
-static volatile uint32_t s_dropped_total = 0; // lifetime pulses discarded by the realign
 static volatile int      s_core        = -1;  // which core this task actually runs on
 // Per-stage worst case, captured on the tick that set max_work. `work` exploded from
 // 124us (idle) to 2431us the moment a Link session came up -- so a call in here starts
@@ -73,7 +73,7 @@ int      ktouch_midi_core(void)     { return s_core; }
 
 static void writer_task(void*) {
     s_core = xPortGetCoreID();   // ESP-018: confirm, don't assume
-    midi_clock_out_reset(&s_sched);
+    clock_output_reset(&s_out);
     transport_launch_reset(&s_tl);
     uint32_t prev_end = 0;
     /* vTaskDelayUntil, NOT vTaskDelay (ESP-018).
@@ -94,22 +94,15 @@ static void writer_task(void*) {
 
         double beats = tempo_source_beats_now();   // <0 when phase not valid
         uint32_t t_beats = micros();
-        if (beats < 0.0) {
-            // Bank the discarded-pulse count before reset() zeroes it. reset() must zero
-            // it (the ticker is stack-allocated, so an un-zeroed counter is garbage), and
-            // a pure struct cannot tell "first init" from "re-prime" -- so the LIFETIME
-            // total is ours to keep. After the first reset this adds 0, so calling it
-            // every tick while the phase is invalid is harmless.
-            s_dropped_total += s_sched.dropped;
-            midi_clock_out_reset(&s_sched);
-        } else {
-            // Nudge trims only the CLOCK phase (+ve = ahead), tempo-relative so it
-            // holds across tempo changes. Transport START stays on the true bar.
-            double clk_beats = beats + (double)g_config.nudge_mbeats / 1000.0;
-            int n = midi_clock_out_ticks_due(&s_sched, clk_beats, MAX_BURST);
-            if (n > 1) s_bursts++;   // more than one pulse in a 1ms tick = catching up
-            for (int i = 0; i < n; i++) din_midi_out_byte(0xF8);
-        }
+        // One call owns the whole derivation (ARC-019): reset-on-invalid +
+        // dropped banking + burst cap inside clock_output_step; nudge trims
+        // only the CLOCK phase (+ve = ahead), tempo-relative so it holds
+        // across tempo changes — transport START stays on the true bar.
+        // ppqn 24 / swing 0 until the Touch grows RATE + SWING config fields
+        // (ESP-017 parity; the derivation already supports both).
+        int n = clock_output_step(&s_out, beats, 24, g_config.nudge_mbeats, 0);
+        if (n > 1) s_bursts++;   // more than one pulse in a 1ms tick = catching up
+        for (int i = 0; i < n; i++) din_midi_out_byte(0xF8);
 
         uint32_t t_clock = micros();
 
@@ -139,11 +132,11 @@ static void writer_task(void*) {
     }
 }
 
-// Pulses the scheduler THREW AWAY (realign past MAX_BURST) -- banked total plus
-// whatever the live ticker has counted since its last reset. This is the number that
-// matters: a stall long enough to trip the realign leaves no burst and no gap on the
-// wire, so before this counter existed it was completely undetectable.
-uint32_t ktouch_midi_dropped(void) { return s_dropped_total + s_sched.dropped; }
+// Pulses the scheduler THREW AWAY (realign past the burst cap). The banking
+// across resets lives in clock_output now (ARC-019); this stays the number
+// that matters: a stall long enough to trip the realign leaves no burst and
+// no gap on the wire, so before this counter existed it was undetectable.
+uint32_t ktouch_midi_dropped(void) { return clock_output_dropped(&s_out); }
 
 void ktouch_midi_out_begin(int tx_gpio) {
     din_midi_out_begin(tx_gpio);   // UART1 TX @ 31250 8N1 on the DIN pin
