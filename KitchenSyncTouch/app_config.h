@@ -12,10 +12,15 @@ extern "C" {
 typedef struct {
     char wifi_ssid[64];
     char wifi_pass[64];
-    int  quantum_beats;      // beats per bar for phase / launch quantize (1..16)
+    int  quantum_beats;      // launch/phase quantize in Link beats (1..64). The web
+                             // UI edits this in BARS (x4, 4/4); 4 beats = 1 bar.
     int  clock_enable;       // 0/1 — emit 24-PPQN MIDI clock on DIN
     int  transport_enable;   // 0/1 — allow PLAY/STOP from the touch screen
     int  play_on_release;    // 0 = toggle on touch (digital DJ), 1 = on release (turntable)
+    int  nudge_mbeats;       // DIN clock phase trim, millibeats (-250..250, tempo-
+                             // relative). +ve = clock ahead; slides the RC-505 into
+                             // the pocket. Live via /nudge, no reboot.
+    int  brightness;         // LCD backlight, percent (10..100). Live via /bright.
 } AppConfig;
 
 void config_defaults(AppConfig* cfg);
@@ -32,6 +37,8 @@ typedef enum {
     ACF_CLOCK_ENABLE,
     ACF_TRANSPORT_ENABLE,
     ACF_PLAY_ON_RELEASE,
+    ACF_NUDGE_MBEATS,
+    ACF_BRIGHTNESS,
 } AppConfigField;
 
 bool app_config_set(AppConfig* cfg, AppConfigField field, int value);

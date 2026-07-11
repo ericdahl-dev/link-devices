@@ -62,8 +62,16 @@ static int      s_shown_sync = -2;
 static int      s_shown_state = -1;
 static int      s_prev_mx = -1, s_prev_my = -1;
 static bool     s_touch_down = false;
+static bool     s_cueing = false;   // turntable: held, armed-in-hand, no MIDI yet
+#define CUE_DISP 99                 // synthetic shown-state for the cue panel
 
-static void backlight_on(void) { pinMode(LCD_BL, OUTPUT); digitalWrite(LCD_BL, HIGH); }
+// PWM the backlight (ledc via analogWrite) so it can be dimmed. Clamp to the
+// config's floor is the caller's job; here we just refuse full-dark and full range.
+static void backlight_apply(int pct) {
+    if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+    analogWrite(LCD_BL, pct * 255 / 100);
+}
+void ktouch_display_set_brightness(int pct) { backlight_apply(pct); }
 
 // I2C read + pure parse of the AXS5106L (0x63). axs5106l itself is pure (no Wire).
 static bool read_touch(axs_touch_t *t) {
@@ -89,6 +97,16 @@ static void draw_toggle(int state) {
     s_lcd.setTextSize(2); s_lcd.setCursor(16, TOGGLE_Y + 66); s_lcd.print(hint);
 }
 
+// Turntable cue: held, armed-in-hand. Amber, distinct from ARMED; the drop
+// happens on the "1" after release (transport_launch quantizes the PLAY).
+static void draw_cue(void) {
+    uint32_t bg = 0x8a5a12u;
+    s_lcd.fillRect(0, TOGGLE_Y, SCR_W, SCR_H - TOGGLE_Y, bg);
+    s_lcd.setTextColor(TFT_WHITE, bg);
+    s_lcd.setTextSize(5); s_lcd.setCursor(16, TOGGLE_Y + 14); s_lcd.print("CUE");
+    s_lcd.setTextSize(2); s_lcd.setCursor(16, TOGGLE_Y + 66); s_lcd.print("release on the 1");
+}
+
 // Top strip: header + wheel outline. Redrawn on a sync-state change.
 static void draw_frame(void) {
     s_lcd.fillScreen(TFT_BLACK);
@@ -101,7 +119,7 @@ static void draw_frame(void) {
 void ktouch_display_begin(void) {
     s_lcd.init();
     s_lcd.setRotation(7);   // landscape 320x172
-    backlight_on();
+    backlight_apply(g_config.brightness);
     draw_frame();
     draw_toggle(TL_STOPPED); s_shown_state = TL_STOPPED;
     pinMode(TP_RST, OUTPUT);
@@ -117,22 +135,35 @@ void ktouch_display_tick(void) {
     uint32_t now = millis();
 
     // ---- transport toggle: ANY touch flips it (no buttons -> no mis-hit) ----
-    // Fire on touch-down (digital-DJ) or on release (turntable-DJ: hold, release to
-    // let the beat play). Which edge is a web setting (g_config.play_on_release).
+    // Digital-DJ (play_on_release=0): a press fires the toggle immediately.
+    // Turntable-DJ (play_on_release=1): a press on STOPPED *cues* (armed-in-hand,
+    // no MIDI); release drops it -- transport_launch quantizes the PLAY to the next
+    // "1", so releasing just before the bar lands the beat on the downbeat. Pressing
+    // while running/armed stops immediately either way.
     axs_touch_t t;
     if (read_touch(&t)) {
         bool touched = t.points_len > 0;
         if (touched && !s_touch_down) {
             s_touch_down = true;
-            if (!g_config.play_on_release) ktouch_transport_post(ktouch_toggle_intent(state));
+            if (!g_config.play_on_release) {
+                ktouch_transport_post(ktouch_toggle_intent(state));   // digital: on press
+            } else if (state == TL_STOPPED) {
+                s_cueing = true;                                       // turntable: cue on hold
+            } else {
+                ktouch_transport_post(TL_INTENT_STOP);                // running/armed: stop now
+            }
         } else if (!touched && s_touch_down) {
             s_touch_down = false;
-            if (g_config.play_on_release) ktouch_transport_post(ktouch_toggle_intent(state));
+            if (s_cueing) { s_cueing = false; ktouch_transport_post(TL_INTENT_PLAY); }  // release = drop
         }
     }
 
-    // ---- toggle zone repaint on state change ----
-    if (state != s_shown_state) { draw_toggle(state); s_shown_state = state; }
+    // ---- toggle zone repaint: cue panel while held, else follow launch state ----
+    if (s_cueing) {
+        if (s_shown_state != CUE_DISP) { draw_cue(); s_shown_state = CUE_DISP; }
+    } else if (state != s_shown_state) {
+        draw_toggle(state); s_shown_state = state;
+    }
 
     // ---- status text (top strip): throttled, redraw on change ----
     static uint32_t s_last_text = 0;
@@ -180,4 +211,5 @@ void ktouch_display_tick(void) {
 #else  // no touch display on this board -> no-ops
 void ktouch_display_begin(void) {}
 void ktouch_display_tick(void) {}
+void ktouch_display_set_brightness(int pct) { (void)pct; }
 #endif

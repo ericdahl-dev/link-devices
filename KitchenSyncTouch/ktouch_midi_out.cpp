@@ -36,7 +36,10 @@ static void writer_task(void*) {
         if (beats < 0.0) {
             midi_clock_out_reset(&s_sched);
         } else {
-            int n = midi_clock_out_ticks_due(&s_sched, beats, MAX_BURST);
+            // Nudge trims only the CLOCK phase (+ve = ahead), tempo-relative so it
+            // holds across tempo changes. Transport START stays on the true bar.
+            double clk_beats = beats + (double)g_config.nudge_mbeats / 1000.0;
+            int n = midi_clock_out_ticks_due(&s_sched, clk_beats, MAX_BURST);
             for (int i = 0; i < n; i++) din_midi_out_byte(0xF8);
         }
 
