@@ -7,6 +7,7 @@
 #include "link_protocol.h"    // link_proto_peers()
 #include "ktouch_transport.h" // transport state for /status
 #include "ktouch_display.h"   // live backlight brightness
+#include "ktouch_midi_out.h"  // ESP-018 tick health
 #include <WebServer.h>
 #include <WiFi.h>
 
@@ -200,14 +201,21 @@ static void handle_save() {
 static void handle_status() {
     float bpm = tempo_source_bpm();
     int   sync = tempo_source_phase_valid() ? 1 : (tempo_source_active() ? 0 : -1);
-    char buf[160];
+    char buf[400];
     snprintf(buf, sizeof(buf),
              "{\"bpm\":%.1f,\"sync\":%d,\"peers\":%d,\"clock\":%d,\"transport\":%d,"
-             "\"cue\":%d,\"tfail\":%lu,\"tzero\":%lu,\"ccancel\":%lu}",
+             "\"cue\":%d,\"tfail\":%lu,\"tzero\":%lu,\"ccancel\":%lu,"
+             "\"drop\":%lu,\"burst\":%lu,\"gap\":%lu,\"work\":%lu,\"over\":%lu,\"core\":%d,"
+             "\"wbeats\":%lu,\"wclock\":%lu,\"wtport\":%lu}",
              (double)bpm, sync, link_proto_peers(),
              g_config.clock_enable ? 1 : 0, ktouch_transport_state(),
              ktouch_cueing(), (unsigned long)ktouch_touch_fails(),
-             (unsigned long)ktouch_touch_zeros(), (unsigned long)ktouch_cue_cancels());
+             (unsigned long)ktouch_touch_zeros(), (unsigned long)ktouch_cue_cancels(),
+             (unsigned long)ktouch_midi_dropped(), (unsigned long)ktouch_midi_bursts(),
+             (unsigned long)ktouch_midi_max_gap(), (unsigned long)ktouch_midi_max_work(),
+             (unsigned long)ktouch_midi_overruns(), ktouch_midi_core(),
+             (unsigned long)ktouch_midi_w_beats(), (unsigned long)ktouch_midi_w_clock(),
+             (unsigned long)ktouch_midi_w_tport());
     server.send(200, "application/json", buf);
 }
 

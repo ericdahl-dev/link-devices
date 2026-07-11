@@ -5,6 +5,13 @@
 void clock_ticker_reset(ClockTicker* s) {
     s->last_tick = 0;
     s->primed    = false;
+    /* Zeroed here so the counter is always INITIALISED -- callers do
+     * `ClockTicker t; clock_ticker_reset(&t);`, so leaving it alone means it starts as
+     * stack garbage and can never be trusted. reset() only fires at startup and on Link
+     * phase-invalid (no clock to drop anyway), so nothing real is lost. Accumulating a
+     * LIFETIME total across resets is the glue's job: a pure struct cannot tell "first
+     * init" from "re-prime", and that distinction is what the decision needs. */
+    s->dropped   = 0;
 }
 
 int clock_ticker_ticks_due(ClockTicker* s, double beats_now, int ppqn, int max_burst) {
@@ -24,6 +31,11 @@ int clock_ticker_ticks_due(ClockTicker* s, double beats_now, int ppqn, int max_b
     if (max_burst > 0 && due > (int64_t)max_burst) {
         // Big forward jump (tempo re-origin / long stall): realign to the new
         // position instead of flooding the output with a catch-up burst.
+        //
+        // ESP-018: this THROWS AWAY every pending pulse. Still the right musical call
+        // -- a 20-pulse burst is worse than a gap -- but it used to happen silently,
+        // so a stall long enough to trip it left no evidence anywhere. Count it.
+        s->dropped  += (uint32_t)due;
         s->last_tick = tick;
         return 0;
     }
