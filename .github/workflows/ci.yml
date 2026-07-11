@@ -26,6 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+      # Persisted core.a build cache (see the cache step below). Every compile
+      # passes --build-cache-path here so the ESP32 core isn't recompiled each run.
+      CORE_CACHE: ${{ github.workspace }}/.arduino-core-cache
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +54,18 @@ jobs:
           path: bin
           key: arduino-cli-bin-${{ runner.os }}-v1
 
+      # Compiled core.a. ~/.arduino15 caches the *downloaded* core; this caches the
+      # *built* one, which arduino-cli otherwise re-compiles into a fresh temp dir
+      # every run. restore-keys cross-seeds from any prior core cache (same FQBN).
+      # Static key like the others — bump -vN when the core version changes.
+      - name: Cache arduino compiled core
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CORE_CACHE }}
+          key: arduino-core-${{ runner.os }}-x32link-v1
+          restore-keys: |
+            arduino-core-${{ runner.os }}-
+
       - name: Install arduino-cli
         if: steps.cache-arduino-cli-bin.outputs.cache-hit != 'true'
         run: curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
@@ -67,12 +82,12 @@ jobs:
           arduino-cli lib install LovyanGFX
 
       - name: Compile X32Link (headless)
-        run: arduino-cli compile --fqbn "$FQBN" X32Link
+        run: arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" X32Link
 
       - name: Compile X32Link (Waveshare touch board)
         run: |
           echo '-DBOARD_WAVESHARE_S3_TOUCH_LCD_147' > X32Link/build_opt.h
-          arduino-cli compile --fqbn "$FQBN" X32Link
+          arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" X32Link
           git checkout -- X32Link/build_opt.h
 
       # LED_RGB path (LNK-039) only compiles under this flag — without it the
@@ -80,7 +95,7 @@ jobs:
       - name: Compile X32Link (QT Py NeoPixel board)
         run: |
           echo '-DBOARD_QTPY_ESP32S3' > X32Link/build_opt.h
-          arduino-cli compile --fqbn "$FQBN" X32Link
+          arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" X32Link
           git checkout -- X32Link/build_opt.h
 
       # battery_gauge_io.cpp's Wire calls only compile under this flag — opt-in
@@ -89,20 +104,20 @@ jobs:
       - name: Compile X32Link (QT Py + LiPo BFF battery gauge)
         run: |
           printf -- '-DBOARD_QTPY_ESP32S3\n-DHAS_BATTERY_GAUGE\n' > X32Link/build_opt.h
-          arduino-cli compile --fqbn "$FQBN" X32Link
+          arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" X32Link
           git checkout -- X32Link/build_opt.h
 
       - name: Compile X32 emulator (ESP-002)
         env:
           EMU_FQBN: esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc
-        run: arduino-cli compile --fqbn "$EMU_FQBN" X32_emulator
+        run: arduino-cli compile --fqbn "$EMU_FQBN" --build-cache-path "$CORE_CACHE" X32_emulator
 
       # KitchenSync Touch (ESP-016) — dedicated sketch, Waveshare touch board. The
       # board flag lives in KitchenSyncTouch/config.h (not build_opt.h), so no
       # flag-juggling here; secrets.h is gitignored and the sketch builds without
       # it via __has_include.
       - name: Compile KitchenSyncTouch (ESP-016, Waveshare touch board)
-        run: arduino-cli compile --fqbn "$FQBN" KitchenSyncTouch
+        run: arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" KitchenSyncTouch
 
   loralink-compile:
     name: Firmware compile (LoraLink)
@@ -115,6 +130,9 @@ jobs:
       # console; FlashSize=16M gave a boot-time spi_flash size-mismatch
       # assert crash-loop.
       FQBN: esp32:esp32:esp32s3:CDCOnBoot=default,FlashSize=8M,PSRAM=disabled
+      # Persisted core.a build cache — keyed separately from firmware-compile
+      # because this board's FQBN (8M/no-PSRAM) yields a different compiled core.
+      CORE_CACHE: ${{ github.workspace }}/.arduino-core-cache
     steps:
       - uses: actions/checkout@v4
 
@@ -138,6 +156,14 @@ jobs:
           path: bin
           key: arduino-cli-bin-${{ runner.os }}-v1
 
+      - name: Cache arduino compiled core
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CORE_CACHE }}
+          key: arduino-core-${{ runner.os }}-lora-v1
+          restore-keys: |
+            arduino-core-${{ runner.os }}-
+
       - name: Install arduino-cli
         if: steps.cache-arduino-cli-bin.outputs.cache-hit != 'true'
         run: curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
@@ -156,12 +182,12 @@ jobs:
         run: cp LoraLink/lora_secrets.h.example LoraLink/lora_secrets.h
 
       - name: Compile LoraLink (sender role)
-        run: arduino-cli compile --fqbn "$FQBN" LoraLink
+        run: arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" LoraLink
 
       - name: Compile LoraLink (receiver role)
         run: |
           echo '-DLORA_ROLE_OVERRIDE=LORA_ROLE_RECEIVER' > LoraLink/build_opt.h
-          arduino-cli compile --fqbn "$FQBN" LoraLink
+          arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" LoraLink
           git checkout -- LoraLink/build_opt.h
 
   kitchensync-compile:
@@ -169,11 +195,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Component-manager downloads (esp_hosted / esp_wifi_remote etc.), keyed on
+      # the lock file. Exact-match only: a dependencies.lock change forces a clean
+      # re-resolve rather than restoring a stale component set.
+      - name: Cache ESP-IDF managed components
+        uses: actions/cache@v4
+        with:
+          path: KitchenSync/managed_components
+          key: idf-managed-${{ runner.os }}-${{ hashFiles('KitchenSync/dependencies.lock') }}
+
+      # ccache dir persists compiled objects across runs. Rolling key (newest run
+      # wins); restore-keys pulls master's latest onto PRs. ccache is content-hashed
+      # so a stale entry is simply a miss, never wrong output.
+      - name: Cache ESP-IDF ccache
+        uses: actions/cache@v4
+        with:
+          path: KitchenSync/.ccache
+          key: idf-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            idf-ccache-${{ runner.os }}-
+
       # Builds KitchenSync for the ESP32-P4 via the official ESP-IDF Docker action.
       # idf.py auto-downloads any managed components (esp_hosted / esp_wifi_remote
       # once the P4-004/005 glue lands). release-v5.5 has the esp32p4 min-rev gate.
+      # IDF_CCACHE_ENABLE makes cmake launch the compiler through ccache; the paths
+      # below are the container's view of the mounted workspace (/github/workspace),
+      # so ccache writes into the dir cached above. CCACHE_BASEDIR + NOHASHDIR make
+      # hits survive the per-run build path.
       - name: Compile KitchenSync for esp32p4
         uses: espressif/esp-idf-ci-action@v1
+        env:
+          IDF_CCACHE_ENABLE: "1"
+          CCACHE_DIR: /github/workspace/KitchenSync/.ccache
+          CCACHE_BASEDIR: /github/workspace
+          CCACHE_NOHASHDIR: "1"
         with:
           esp_idf_version: release-v5.5
           target: esp32p4
