@@ -202,12 +202,32 @@ void ktouch_display_tick(void) {
         bool sync_changed = sync != s_shown_sync;
         s_shown_bpm = bpm; s_shown_sync = sync;
 
-        s_lcd.fillRect(0, 16, 200, 44, TFT_BLACK);
-        s_lcd.setTextColor(0xB6FF36u, TFT_BLACK); s_lcd.setTextSize(4);
-        s_lcd.setCursor(8, 18);
-        if (bpm > 0.0f) s_lcd.printf("%3.0f", bpm); else s_lcd.print("---");
+        // Tempo, with the tenth shown small -- the same shape as the web readout, and
+        // the only way the decimal fits: at size 4 a glyph is 24px, so a full "168.0"
+        // would run to x=128 and collide with the sync text at x=130. Big whole number,
+        // small tenth, unit after it.
+        //
+        // Link tempos are genuinely fractional (a session at 120.4 was displaying as
+        // "120"), and the redraw threshold below was already 0.05 -- the display could
+        // always SEE the tenth, it just never showed it.
+        //
+        // Round to tenths ONCE and split: computing the whole and the fraction
+        // separately would print 167.96 as "167.0" -- the whole truncates down while
+        // the tenth rounds up.
+        int tenths = (bpm > 0.0f) ? (int)(bpm * 10.0f + 0.5f) : 0;
+
+        s_lcd.fillRect(0, 16, 128, 46, TFT_BLACK);
+        s_lcd.setTextColor(0xB6FF36u, TFT_BLACK);
+        if (bpm > 0.0f) {
+            s_lcd.setTextSize(4); s_lcd.setCursor(8, 18);
+            s_lcd.printf("%3d", tenths / 10);            // 3 glyphs @24px -> x 8..80
+            s_lcd.setTextSize(2); s_lcd.setCursor(80, 34);
+            s_lcd.printf(".%d", tenths % 10);            // bottom-aligned with the big text
+        } else {
+            s_lcd.setTextSize(4); s_lcd.setCursor(8, 18); s_lcd.print("---");
+        }
         s_lcd.setTextColor(0x6f8a4du, TFT_BLACK); s_lcd.setTextSize(1);
-        s_lcd.setCursor(96, 44); s_lcd.println("BPM");
+        s_lcd.setCursor(108, 44); s_lcd.println("BPM");
 
         s_lcd.fillRect(120, 14, 150, 44, TFT_BLACK);
         s_lcd.setTextColor(sync == 1 ? 0xB6FF36u : 0xFF9D3Bu, TFT_BLACK); s_lcd.setTextSize(1);
