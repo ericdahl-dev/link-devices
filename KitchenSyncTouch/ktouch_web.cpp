@@ -1,0 +1,235 @@
+// KitchenSync Touch web config server — see ktouch_web.h (ESP-016, Inc3).
+#include "ktouch_web.h"
+#include "app_config.h"
+#include "ui_chrome.h"
+#include "fw_version.h"
+#include "tempo_source.h"     // live BPM / sync for /status
+#include "link_protocol.h"    // link_proto_peers()
+#include "ktouch_transport.h" // transport state for /status
+#include "ktouch_display.h"   // live backlight brightness
+#include <WebServer.h>
+#include <WiFi.h>
+
+extern AppConfig g_config;
+
+static WebServer server(80);
+
+// The config form body (between the shared <style> and <script>). Panel classes
+// come from ui_chrome_css(). %TOKENS% are filled per request.
+static const char FORM[] = R"HTML(<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KitchenSync Touch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/dseg@0.46.0/css/dseg.css" rel="stylesheet">
+<style>%CSS%
+/* Page-specific: everything above is the shared chrome (ui_chrome_css). These
+   rules extend it and win only by coming second -- the same way ks_web.cpp (the
+   P4 gold standard) extends the chrome. Touch mirrors the P4's structure with a
+   smaller feature set. */
+.unit{padding:0 0 20px}.brand{padding:16px 22px 12px}
+.grp{padding:0 22px}
+.frow{padding:12px 0;border-top:1px solid var(--line)}
+.cap{font-family:var(--disp);font-weight:600;font-size:12.5px;letter-spacing:.12em;color:var(--ink);margin-bottom:10px;display:block}
+/* Group header: the section title (with a dim status tick) pairs with the
+   feature's master toggle -- the P4's .frow.head device. */
+.frow.head{padding:18px 0 12px}
+.frow.head .cap{margin-bottom:12px}
+.frow.head .cap::before{content:"";display:inline-block;width:6px;height:6px;border-radius:1px;background:var(--led-dim);margin-right:10px;vertical-align:2px}
+.frow.head .sw{margin-top:0}
+/* Accent rail: a feature's settings live behind its toggle and appear when it
+   flips on -- the P4's .sect. */
+.sect{position:relative;margin:0 0 4px 3px;padding:0 0 6px 18px;border-left:2px solid var(--line)}
+.sect::before{content:"";position:absolute;left:-2px;top:0;width:2px;height:28px;background:var(--led-dim)}
+.sect > .frow:first-child{border-top:0;padding-top:12px}
+.hide{display:none!important}
+/* Help captions: one shared class, replacing the old per-element inline styles. */
+.hint{font-family:var(--mono);font-size:11px;letter-spacing:.02em;line-height:1.45;color:var(--mut);margin-top:8px}
+.fld{margin-top:8px}.sw{margin-top:12px}
+.fld .pre{min-width:54px}
+.fld input{flex:1;min-width:0;appearance:none;background:transparent;border:0;outline:0;color:var(--ink);font-family:var(--mono);font-size:14.5px;padding:12px 0}
+.fld input::placeholder{color:#434a52}
+.rows{padding:2px 22px 4px}
+.row{display:flex;justify-content:space-between;align-items:baseline;padding:12px 0;border-top:1px solid var(--line)}
+.row label{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--mut)}
+.val{font-family:var(--mono);font-size:14px;color:var(--ink);letter-spacing:.06em}
+.pill{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;padding:4px 9px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}
+.pill.on{color:#0a0d07;background:linear-gradient(180deg,#caff5a,#9be32a);border-color:#7fbf1f}
+.fld.nudge{gap:9px}.fld.nudge input{text-align:center;padding:9px 0}
+.stp{flex:none;width:44px;height:44px;border-radius:9px;border:1px solid var(--line);background:linear-gradient(180deg,#1a1f25,#12161b);color:var(--ink);font-family:var(--disp);font-weight:800;font-size:22px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.stp:active{background:#0d1014;transform:translateY(1px);border-color:#4a5a2c}
+.write{margin-top:20px}
+.write:active{transform:translateY(4px);box-shadow:0 1px 0 #5e8a16}
+.foot{padding-top:16px}
+/* Desktop: widen the card, flow the config into two columns, and turn the four
+   status readouts into a 4-across meter bridge -- the P4's treatment, sized for
+   Touch's shorter form. Status glass and Save button stay full width. */
+@media (min-width:760px){
+.unit{max-width:760px}
+.formcols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:24px;align-items:start;padding:0 22px}
+.grp{padding-left:0;padding-right:0}
+.rows{display:grid;grid-template-columns:repeat(4,1fr);column-gap:24px;padding-top:4px}
+.row{border-top:0;flex-direction:column;align-items:flex-start;gap:7px;padding:16px 0}
+.bignum{font-size:74px}
+.foot{max-width:760px}
+}
+</style></head><body>
+<div class="unit">
+<span class="screw tl"></span><span class="screw tr"></span><span class="screw bl"></span><span class="screw br"></span>
+<div class="brand"><span class="pwr"></span><span class="wordmark">KITCHEN&middot;<b>SYNC</b> TOUCH</span><span class="rev">FW %FWVER%</span></div>
+<div class="scr">
+<div class="scr-top"><span class="beat" id="beat"></span><span class="scr-lbl">Session Tempo</span><span class="scr-src">Ableton Link</span></div>
+<div class="readout"><span class="ghost bignum">188.8</span><span class="live"><span class="bignum" id="bpm">--.-</span><span class="unit-bpm">BPM</span></span></div>
+</div>
+<div class="rows">
+<div class="row"><label>Link Peers</label><span class="val" id="peers">0</span></div>
+<div class="row"><label>Sync</label><span class="pill" id="sync">No Link</span></div>
+<div class="row"><label>MIDI Clock</label><span class="pill" id="clk">Off</span></div>
+<div class="row"><label>Transport</label><span class="pill" id="tp">Stopped</span></div>
+</div>
+<form method="POST" action="/save">
+<div class="formcols">
+<div class="grp"><div class="frow head"><span class="cap">WiFi Network</span></div>
+<div class="fld"><span class="pre">SSID</span><input name="wifi_ssid" value="%SSID%" autocomplete="off"></div>
+<div class="fld"><span class="pre">PASS</span><input name="wifi_pass" type="password" placeholder="keep current"></div></div>
+<div class="grp"><div class="frow head"><span class="cap">Transport</span>
+<label class="sw"><input type="checkbox" name="transport" value="1" %TP%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
+<div class="hint">quantized MIDI Start / Stop over the DIN jack</div></div>
+<div class="sect" data-when="transport">
+<div class="frow"><span class="cap">Launch Quantize</span>
+<div class="fld"><span class="pre">BARS</span><input name="quantum" type="number" min="1" max="16" value="%Q%" inputmode="numeric"></div>
+<div class="hint">bars per phrase (4/4) &mdash; start fires on the next phrase line</div></div>
+<div class="frow"><span class="cap">Play On Release</span>
+<label class="sw"><input type="checkbox" name="play_rel" value="1" %REL%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
+<div class="hint">turntable feel &mdash; transport fires when you lift off</div></div>
+</div></div>
+<div class="grp"><div class="frow head"><span class="cap">MIDI Clock Out</span>
+<label class="sw"><input type="checkbox" name="clock" value="1" %CLK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
+<div class="hint">24 PPQN clock to the DIN jack</div></div>
+<div class="sect" data-when="clock">
+<div class="frow"><span class="cap">Clock Nudge</span>
+<div class="fld nudge"><span class="pre">NUDGE</span><button type="button" class="stp" data-step="-5">&minus;</button><input type="number" id="nudge" name="nudge" value="%NUDGE%" min="-250" max="250" step="5" inputmode="numeric"><button type="button" class="stp" data-step="5">+</button></div>
+<div class="hint">millibeats &mdash; slide the DIN clock into the pocket, live</div></div>
+</div></div>
+<div class="grp"><div class="frow head"><span class="cap">Display</span></div>
+<div class="fld nudge"><span class="pre">BRIGHT</span><button type="button" class="stp" data-step="-10">&minus;</button><input type="number" id="bright" name="bright" value="%BRIGHT%" min="10" max="100" step="10" inputmode="numeric"><button type="button" class="stp" data-step="10">+</button></div>
+<div class="hint">LCD backlight (%) &mdash; applies live</div></div>
+</div>
+<div style="padding:0 22px"><button class="write" type="submit">Save &amp; Reboot</button></div>
+</form>
+<div class="foot">KitchenSync Touch &middot; FW %FWVER%</div>
+</div>
+<script>%JS%
+// ui_chrome_js owns showBpm/setBeat/poll; onStatus paints our own rows.
+var peersEl=document.getElementById('peers'),syncEl=document.getElementById('sync'),
+    clkEl=document.getElementById('clk'),tpEl=document.getElementById('tp');
+function onStatus(d){
+peersEl.textContent=d.peers;
+var s=d.sync;syncEl.textContent=s===1?'Synced':s===0?'Linking':'No Link';syncEl.className='pill'+(s===1?' on':'');
+clkEl.textContent=d.clock?'On':'Off';clkEl.className='pill'+(d.clock?' on':'');
+var t=d.transport;tpEl.textContent=t===2?'Playing':t===1?'Arming':'Stopped';tpEl.className='pill'+(t===2?' on':'');
+}
+poll();setInterval(poll,1000);
+// Reveal each feature's settings when its master toggle is on -- the P4's
+// syncSect. The server renders the toggle's checked state; we mirror it into the
+// accent rail on load (so a disabled feature starts collapsed) and on every flip.
+// Fields stay in the DOM while hidden, so they still submit and /save is unchanged.
+function syncSect(cb){var s=document.querySelectorAll('.sect[data-when="'+cb.name+'"]');
+for(var i=0;i<s.length;i++){cb.checked?s[i].classList.remove('hide'):s[i].classList.add('hide')}}
+['transport','clock'].forEach(function(n){var cb=document.querySelector('input[name="'+n+'"]');
+if(cb){cb.addEventListener('change',function(){syncSect(cb)});syncSect(cb)}});
+// Steppers bump their sibling input, clamp, then fire its change handler; each
+// input owns which endpoint it POSTs to (live, no reboot).
+function bump(i,d){var v=(parseInt(i.value,10)||0)+d;var lo=parseInt(i.min,10),hi=parseInt(i.max,10);
+if(v<lo)v=lo;if(v>hi)v=hi;i.value=v;i.dispatchEvent(new Event('change'))}
+Array.prototype.forEach.call(document.querySelectorAll('.stp'),function(b){
+b.addEventListener('click',function(){bump(b.parentNode.querySelector('input'),parseInt(b.getAttribute('data-step'),10)||0)})});
+function live(id,url){var el=document.getElementById(id);if(el)el.addEventListener('change',function(){
+fetch(url+this.value,{method:'POST'}).catch(function(){})})}
+live('nudge','/nudge?mb=');live('bright','/bright?pct=');
+</script>
+</body></html>)HTML";
+
+// The config model stores Link beats; the UI speaks bars (4/4). 4 beats = 1 bar.
+static const int BEATS_PER_BAR = 4;
+
+static void handle_root() {
+    String h(FORM);
+    h.replace("%CSS%", ui_chrome_css());
+    h.replace("%JS%",  ui_chrome_js());
+    h.replace("%SSID%", g_config.wifi_ssid);
+    int bars = g_config.quantum_beats / BEATS_PER_BAR; if (bars < 1) bars = 1;
+    h.replace("%Q%",    String(bars));
+    h.replace("%NUDGE%", String(g_config.nudge_mbeats));
+    h.replace("%BRIGHT%", String(g_config.brightness));
+    h.replace("%CLK%",  g_config.clock_enable ? "checked" : "");
+    h.replace("%TP%",   g_config.transport_enable ? "checked" : "");
+    h.replace("%REL%",  g_config.play_on_release ? "checked" : "");
+    h.replace("%FWVER%", FW_VERSION);
+    server.send(200, "text/html", h);
+}
+
+static void handle_save() {
+    AppConfig c = g_config;
+    if (server.hasArg("wifi_ssid")) strlcpy(c.wifi_ssid, server.arg("wifi_ssid").c_str(), sizeof(c.wifi_ssid));
+    // blank password = keep current
+    if (server.hasArg("wifi_pass") && server.arg("wifi_pass").length())
+        strlcpy(c.wifi_pass, server.arg("wifi_pass").c_str(), sizeof(c.wifi_pass));
+    // Checkboxes: absent = off. Numbers via the validating setter. The BARS field
+    // is bars; store as Link beats (x4). NUDGE persists whatever /nudge set live.
+    app_config_set(&c, ACF_QUANTUM_BEATS,    server.arg("quantum").toInt() * BEATS_PER_BAR);
+    app_config_set(&c, ACF_CLOCK_ENABLE,     server.hasArg("clock")     ? 1 : 0);
+    app_config_set(&c, ACF_TRANSPORT_ENABLE, server.hasArg("transport") ? 1 : 0);
+    app_config_set(&c, ACF_PLAY_ON_RELEASE,  server.hasArg("play_rel")  ? 1 : 0);
+    if (server.hasArg("nudge"))  app_config_set(&c, ACF_NUDGE_MBEATS, server.arg("nudge").toInt());
+    if (server.hasArg("bright")) app_config_set(&c, ACF_BRIGHTNESS,   server.arg("bright").toInt());
+
+    if (!config_validate(&c)) {
+        char p[1024]; ui_result_page(p, sizeof(p), "Invalid Config", "Check the values and go back.", false);
+        server.send(200, "text/html", p); return;
+    }
+    g_config = c;
+    config_save(&g_config);
+    char p[1024]; ui_result_page(p, sizeof(p), "Saved &mdash; Restarting", "Reconnect if WiFi changed.", true);
+    server.send(200, "text/html", p);
+    delay(800);
+    ESP.restart();
+}
+
+// Live status for the 1 Hz poll: BPM, sync state, peers, clock on/off, transport.
+static void handle_status() {
+    float bpm = tempo_source_bpm();
+    int   sync = tempo_source_phase_valid() ? 1 : (tempo_source_active() ? 0 : -1);
+    char buf[160];
+    snprintf(buf, sizeof(buf),
+             "{\"bpm\":%.1f,\"sync\":%d,\"peers\":%d,\"clock\":%d,\"transport\":%d}",
+             (double)bpm, sync, link_proto_peers(),
+             g_config.clock_enable ? 1 : 0, ktouch_transport_state());
+    server.send(200, "application/json", buf);
+}
+
+// Live clock nudge — the writer task reads g_config.nudge_mbeats every tick, so
+// this takes effect immediately with no reboot. Persisted only on Save (no flash
+// wear while the DJ dials it in). Out-of-range values are rejected by the setter.
+static void handle_nudge() {
+    if (server.hasArg("mb")) app_config_set(&g_config, ACF_NUDGE_MBEATS, server.arg("mb").toInt());
+    server.send(200, "text/plain", "ok");
+}
+
+// Live backlight brightness. Same pattern as /nudge: apply now, persist on Save.
+static void handle_bright() {
+    if (server.hasArg("pct") && app_config_set(&g_config, ACF_BRIGHTNESS, server.arg("pct").toInt()))
+        ktouch_display_set_brightness(g_config.brightness);
+    server.send(200, "text/plain", "ok");
+}
+
+void ktouch_web_begin(void) {
+    server.on("/",       handle_root);
+    server.on("/status", handle_status);
+    server.on("/save",   HTTP_POST, handle_save);
+    server.on("/nudge",  HTTP_POST, handle_nudge);
+    server.on("/bright", HTTP_POST, handle_bright);
+    server.begin();
+}
+
+void ktouch_web_tick(void) { server.handleClient(); }
