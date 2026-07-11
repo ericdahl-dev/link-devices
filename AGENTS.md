@@ -101,7 +101,7 @@ Notes:
 | `osc_out.*` / `osc_sender.*` | OSC packet build / UDP send to the mixer |
 | `app_config.*` · `app_config_nvs.cpp` | config struct, validation, NVS persistence (incl. `input_source`) |
 | `tempo_snapshot.{h,c}` | ARC-001 seam: atomic `{bpm,phase,valid,quantum}` — one writer (`bpm_task`), many readers (web `/status`, UI, serial); replaces the old loose `g_current_*` globals + mutex |
-| `ui_chrome.{h,c}` | ARC-017 shared web chrome for both config UIs: `ui_chrome_css()` / `ui_chrome_js()` (static, sent as chunks) + `ui_result_page()` / `ui_update_page()` (snprintf builders). Pure C, no Arduino/ESP-IDF. The *forms* stay per-firmware; only the look + client plumbing is shared. Host-tested |
+| `ui_chrome.{h,c}` | ARC-017 shared web chrome for both config UIs: `ui_chrome_css()` / `ui_chrome_js()` (static, sent as chunks) + `ui_result_page()` / `ui_update_page()` (snprintf builders). Pure C, no Arduino/ESP-IDF. The *forms* stay per-firmware; only the look + client plumbing is shared. Host-tested. **Never edit this to fix one page** — anything a single page needs goes in that page's own `<style>`. The P4 page (`KitchenSync/main/ks_web.cpp`) is the brand/UX reference every page mirrors; see ADR-0008 |
 | `din_midi_out.{h,cpp}` | ESP-016 hardware DIN MIDI OUT on the S3 (KitchenSync Touch): HardwareSerial UART1 TX @31250 8N1 on GPIO11, mirroring `midi_clock_send_f8()` onto a 5-pin DIN so the S3 clocks DIN gear (RC-505) with no host. Arduino glue; byte timing is the pure midi_clock_out engine |
 | `web_config.*` | rack-panel config web UI + captive portal + `/status` live-BPM endpoint + `/update` OTA firmware upload (LNK-034, Arduino core's Update library) |
 | `config.h` | per-firmware constants (Link/MIDI timing, first-boot defaults) |
