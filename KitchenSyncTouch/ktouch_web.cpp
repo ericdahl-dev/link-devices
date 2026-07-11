@@ -202,9 +202,12 @@ static void handle_status() {
     int   sync = tempo_source_phase_valid() ? 1 : (tempo_source_active() ? 0 : -1);
     char buf[160];
     snprintf(buf, sizeof(buf),
-             "{\"bpm\":%.1f,\"sync\":%d,\"peers\":%d,\"clock\":%d,\"transport\":%d}",
+             "{\"bpm\":%.1f,\"sync\":%d,\"peers\":%d,\"clock\":%d,\"transport\":%d,"
+             "\"cue\":%d,\"tfail\":%lu,\"tzero\":%lu,\"ccancel\":%lu}",
              (double)bpm, sync, link_proto_peers(),
-             g_config.clock_enable ? 1 : 0, ktouch_transport_state());
+             g_config.clock_enable ? 1 : 0, ktouch_transport_state(),
+             ktouch_cueing(), (unsigned long)ktouch_touch_fails(),
+             (unsigned long)ktouch_touch_zeros(), (unsigned long)ktouch_cue_cancels());
     server.send(200, "application/json", buf);
 }
 
