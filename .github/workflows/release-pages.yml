@@ -1,0 +1,108 @@
+# GitHub Pages web flasher — build every board variant on a tag and publish a page that
+# flashes them straight from Chrome/Edge over WebSerial. Design:
+# docs/plans/2026-07-10-github-pages-web-flasher-design.md
+#
+# Why this exists at all: a partition table can ONLY be written over USB. It cannot be
+# changed over OTA. So this is not merely a convenience over `arduino-cli` -- it is the
+# only delivery path that can fix a device's partition layout, or recover one that will
+# not boot. That is also why it must exist before hardware reaches a customer.
+#
+# Tag-triggered ONLY, deliberately: it can never fail or block the required checks on the
+# protected master branch.
+name: Release — web flasher (GitHub Pages)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:   # let a release be re-published without re-tagging
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build firmware + assemble site
+    runs-on: ubuntu-latest
+    env:
+      # X32Link's 4 variants: same FQBN, differing only by build_opt.h -- exactly as
+      # ci.yml already compiles them. min_spiffs so every flashed image lands on an
+      # OTA-capable table and can use /update afterwards without a second USB trip.
+      X32_FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=min_spiffs
+      # KitchenSync Touch ships its own partitions.csv (16MB, dual-OTA, 4MB app slots).
+      # PartitionScheme=custom is what makes the core USE that file -- without it the core
+      # silently falls back to its 4MB default table and the app slot is 1.25MB.
+      TOUCH_FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom
+      CORE_CACHE: ${{ github.workspace }}/.arduino-core-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache arduino-cli data (ESP32 core + libraries)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino
+          key: arduino-esp32-${{ runner.os }}-x32link-v1
+          restore-keys: |
+            arduino-esp32-${{ runner.os }}-
+
+      - name: Cache arduino compiled core
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CORE_CACHE }}
+          key: arduino-core-${{ runner.os }}-x32link-v1
+          restore-keys: |
+            arduino-core-${{ runner.os }}-
+
+      - name: Install arduino-cli
+        run: curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
+
+      - name: Add arduino-cli to PATH
+        run: echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      - name: Install ESP32 core + LovyanGFX
+        run: |
+          arduino-cli config init --overwrite --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install LovyanGFX
+
+      # The version a release publishes is the TAG. One source of truth -- no second
+      # place to forget to bump.
+      - name: Resolve version
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build every variant
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          bash tools/build-flasher-site.sh
+
+      # Catch a broken release BEFORE it is published, not after someone's device is
+      # halfway through a flash.
+      - name: Validate manifests
+        run: python3 tools/validate_manifests.py site/firmware
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
