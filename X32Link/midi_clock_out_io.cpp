@@ -69,6 +69,17 @@ static void midi_clock_out_task(void*) {
                                  // WRONG about core assignment; only measuring caught it.
     midi_clock_out_reset(&s_sched);
     uint32_t prev_end = 0;
+    /* vTaskDelayUntil, NOT vTaskDelay (ESP-018, ported here by ARC-024).
+     *
+     * vTaskDelay(1) sleeps one tick FROM NOW, so the period re-bases on every wake: the
+     * loop body's own runtime and any preemption latency are ADDED to each cycle rather
+     * than absorbed by it. Measured on the Touch, that alone produced gaps of up to
+     * 5.7 ms with the board completely idle and no HTTP traffic.
+     *
+     * vTaskDelayUntil holds an ABSOLUTE 1 ms cadence: a tick that runs late fires
+     * immediately instead of adding another whole tick on top, so the clock grid stops
+     * inheriting the scheduler's slop. */
+    TickType_t next_wake = xTaskGetTickCount();
     for (;;) {
         uint32_t tk0 = micros();
         uint32_t gap = prev_end ? (tk0 - prev_end) : 0;
@@ -103,14 +114,29 @@ static void midi_clock_out_task(void*) {
         if (gap > 5000 || work > 5000) s_overruns++;
         prev_end = tk1;
 
-        vTaskDelay(1);  // 1 ms — tick period is ~10ms+ even at 240 BPM
+        vTaskDelayUntil(&next_wake, 1);   // absolute 1 ms cadence, no drift
     }
 }
 
 void midi_clock_out_io_begin(void) {
     midi_clock_usb_begin();  // idempotent; USB.begin() is done in tempo_source_pre_net
     din_midi_out_begin(MIDI_TX_GPIO);   // ESP-016: DIN MIDI out on the S3 header
-    xTaskCreatePinnedToCore(midi_clock_out_task, "midi_clk_out", 2048, NULL, 6, NULL, 1);
+    /* ARC-024: priority 19, core 1 — the ESP-018 fix, ported to the firmware that never
+     * got it. This task ran at 6, which is BELOW lwIP's tcpip_task (18): the network
+     * stack could legally preempt the clock generator, and on the Touch, on identical
+     * silicon, it did — costing real MIDI pulses under web load.
+     *
+     * 19 is the only defensible number, and it is a sandwich:
+     *   - ABOVE lwIP (18), so serving the web UI cannot deschedule the clock.
+     *   - BELOW WiFi (23), because starving the radio to feed the clock loses the Link
+     *     session, and a perfectly-timed clock with no tempo is worth nothing.
+     *
+     * Core 1 is unchanged, and deliberately: Arduino's loopTask is on core 1 too
+     * (CONFIG_ARDUINO_RUNNING_CORE=1), so the writer shares a core with the web server.
+     * It now out-prioritises everything there. What priority CANNOT fix is a flash-cache
+     * stall, which freezes both cores regardless — which is exactly why the config write
+     * in ARC-022 is debounced and kept on a low-priority task. */
+    xTaskCreatePinnedToCore(midi_clock_out_task, "midi_clk_out", 2048, NULL, 19, NULL, 1);
     s_running = true;   // ARC-024: /status omits tick health entirely until this is set,
                         // so a row of zeroes can never be mistaken for "measured, clean".
 }
