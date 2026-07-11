@@ -28,6 +28,7 @@ SESSION = ../X32Link/link_measurement_session.c
 SESSIONTL = ../X32Link/session_timeline.c
 PUMP = ../X32Link/link_measure_pump.c
 USBMIDIPACK = ../X32Link/usb_midi_pack.c
+USBMIDIBATCH = ../X32Link/usb_midi_batch.c
 BEATCLOCK = ../X32Link/beat_clock.c
 BEATSOURCE = ../X32Link/beat_source.c
 P4STATUS = ../KitchenSync/main/ks_status.c
@@ -66,7 +67,7 @@ HEADERS = $(wildcard ../X32Link/*.h ../KitchenSync/main/*.h ../LoraLink/*.h \
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper test_transport_launch test_ks_hostname test_ui_chrome test_ktouch_ui test_ktouch_config
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper test_transport_launch test_ks_hostname test_ui_chrome test_ktouch_ui test_ktouch_config test_usb_midi_batch
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -91,6 +92,7 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_ks_tick
 	./test_follow_beat
 	./test_usb_midi_pack
+	./test_usb_midi_batch
 	./test_beat_clock
 	./test_beat_source
 	./test_ks_status
@@ -180,6 +182,9 @@ test_session_timeline: test_session_timeline.c $(SESSIONTL) $(PHASE) $(PROTO) $(
 
 test_link_measure_pump: test_link_measure_pump.c $(PUMP) $(MEAS) $(SESSION) $(SESSIONTL) $(PHASE) $(PROTO) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
+
+test_usb_midi_batch: test_usb_midi_batch.c $(USBMIDIBATCH) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $< $(USBMIDIBATCH) $(UNITY) -o $@
 
 test_usb_midi_pack: test_usb_midi_pack.c $(USBMIDIPACK) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
