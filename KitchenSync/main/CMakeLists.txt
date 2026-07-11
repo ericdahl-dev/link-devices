@@ -35,6 +35,7 @@ idf_component_register(
          "${X32LINK_DIR}/metronome.c"
          "${X32LINK_DIR}/metronome_voice.c"
          "${X32LINK_DIR}/usb_midi_pack.c"
+         "${X32LINK_DIR}/usb_midi_batch.c"
          "${X32LINK_DIR}/transport.c"
          "${X32LINK_DIR}/transport_launch.c"
          "${X32LINK_DIR}/link_protocol.c"

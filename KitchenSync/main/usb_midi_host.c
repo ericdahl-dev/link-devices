@@ -150,12 +150,21 @@ uint32_t usb_midi_host_rx_clocks(void) { return s_rx_clocks; }
 
 uint32_t usb_midi_host_tx(void) { return s_tx; }
 
-void usb_midi_host_send(const uint8_t* data, int len)
+/* P4-034: returns false when the endpoint is BUSY so the caller can hold its batch and
+ * retry next tick instead of losing it. This used to be void and silently dropped --
+ * with one in-flight transfer (~1 ms) and the fan-out calling it once per output
+ * back-to-back inside a 1 ms tick, ~3 of every 4 packets were discarded and only the
+ * first output ever reached USB gear. Callers must now batch a tick's events into ONE
+ * transfer (usb_midi_batch) and honour this return value. */
+bool usb_midi_host_send(const uint8_t* data, int len)
 {
-    if (!s_ready || len <= 0 || len > 64) return;
-    if (s_out_busy) { s_dropped++; return; }   /* previous packet still in flight */
+    if (!s_ready || len <= 0 || len > 64) return false;
+    if (s_out_busy) { s_dropped++; return false; }   /* previous transfer still in flight */
     memcpy(s_out->data_buffer, data, len);
     s_out->num_bytes = len;
     s_out_busy = true;
-    if (usb_host_transfer_submit(s_out) != ESP_OK) { s_out_busy = false; s_out_err++; }
+    if (usb_host_transfer_submit(s_out) != ESP_OK) { s_out_busy = false; s_out_err++; return false; }
+    return true;
 }
+
+uint32_t usb_midi_host_dropped(void) { return s_dropped; }
