@@ -168,11 +168,22 @@ int ui_update_page(char* buf, size_t len, const char* product,
         "background:linear-gradient(180deg,#d2ff63,#9be32a)}"
         "#st{margin-top:14px;font-size:12px;color:#717a82;letter-spacing:.03em}"
         "a{color:#b6ff36;text-decoration:none;font-size:12px}"
+        ".warn{color:#e8b64c;border:1px solid #4a3a17;background:#1b1608;border-radius:8px;"
+        "padding:10px 12px;margin:0 0 18px;font-size:12px;line-height:1.5;letter-spacing:.02em}"
         "</style></head><body>"
         "<div class=\"card\">"
         "<h2>Firmware Update</h2>"
         "<p>Running FW %s &middot; built %s</p>"
-        "<p>Select a compiled .bin. The device flashes it and reboots automatically.</p>"
+        /* ESP-020: say it plainly. Writing the image suspends the flash cache, which
+         * freezes BOTH cores regardless of task priority -- so the 1 ms MIDI writer
+         * cannot run while this happens. This is not a subtle timing effect: it is
+         * seconds against a 1 ms tick. The clock WILL stop. Better the user reads that
+         * here than discovers it in front of an audience. */
+        "<p class=\"warn\"><b>Updating stops the clock.</b> Writing firmware freezes both "
+        "CPU cores for several seconds, so MIDI clock and transport halt until the device "
+        "reboots. Do not update mid-set.</p>"
+        "<p>Select a compiled .bin. The device flashes it and reboots automatically. "
+        "A failed or interrupted upload leaves the running firmware untouched.</p>"
         "%s"
         "<p style=\"margin-top:16px\"><a href=\"/\">&larr; Back</a></p>"
         "</div></body></html>",
