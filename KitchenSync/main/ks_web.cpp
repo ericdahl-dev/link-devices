@@ -181,7 +181,7 @@ background:linear-gradient(180deg,#2a1512,#1c0f0d);color:#ff7a6b;transition:back
 <div class="frow"><span class="cap">Metronome Sound</span>
 <div class="grid2">
 <div class="fld"><span class="pre">VOL</span><input type="number" class="live" name="metro_vol" value="%MVOL%" min="0" max="100" step="5"></div>
-<div class="fld"><span class="pre">VOICE</span><select class="live" name="metro_voice" id="mvoice"><option value="0">Tone</option><option value="1">Click</option><option value="2">Wood</option></select></div></div></div>
+<div class="fld"><span class="pre">VOICE</span><select class="live" name="metro_voice" id="mvoice">%MVOICE%</select></div></div></div>
 </div></div>
 <div class="grp"><div class="frow head"><span class="cap">LED Strip &middot; Visual Metronome</span>
 <label class="sw"><input type="checkbox" class="live" name="led" value="1" %LEDCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label></div>
@@ -367,6 +367,30 @@ static std::string build_outputs()
     return s;
 }
 
+// The metronome VOICE options, with the live one marked `selected` (P4-029).
+//
+// This used to be static HTML in PAGE with no `selected` at all, so the dropdown ALWAYS
+// rendered "Tone" no matter what was saved -- and %MVOICE% was substituted into a token
+// that appeared nowhere, silently doing nothing.
+//
+// It was not merely cosmetic: NVS held the right voice (and the metronome SOUNDED right),
+// but the form showed Tone. So the next Save for any unrelated reason -- a WiFi edit --
+// POSTed metro_voice=0 and wiped the saved voice back to Tone. A read-back bug that eats
+// data on the next write.
+//
+// Generated like every other select in this file (build_outputs, build_led) rather than
+// hand-written, which is exactly why those never had the bug.
+static std::string build_voice()
+{
+    static const char* VOICES[3] = { "Tone", "Click", "Wood" };
+    std::string s;
+    for (int v = 0; v < 3; v++)
+        s += "<option value=\"" + std::to_string(v) + "\""
+             + ((s_cfg && s_cfg->metronome_voice == v) ? " selected" : "")
+             + ">" + VOICES[v] + "</option>";
+    return s;
+}
+
 // LED-strip customization controls (P4-019): brightness, pattern, fade, colours —
 // all on the /live path so they apply instantly with no reboot.
 static std::string build_led()
@@ -414,7 +438,7 @@ static std::string build_body(const char* begin, const char* end)
     subst(h, "%METSECT%", (s_cfg && s_cfg->metronome_enable) ? "" : "hide");
     subst(h, "%LEDSECT%", (s_cfg && s_cfg->led_enable) ? "" : "hide");
     subst(h, "%MVOL%",    std::to_string(s_cfg ? s_cfg->metronome_volume : 80));
-    subst(h, "%MVOICE%",  std::to_string(s_cfg ? s_cfg->metronome_voice : 0));
+    subst(h, "%MVOICE%",  build_voice());
     subst(h, "%OUTPUTS%", build_outputs());
     subst(h, "%FWVER%",   FW_VERSION);   // LNK-038
     subst(h, "%FWBUILD%", FW_BUILD);
