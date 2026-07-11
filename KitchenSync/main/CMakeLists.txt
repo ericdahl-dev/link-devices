@@ -28,6 +28,7 @@ idf_component_register(
          "${X32LINK_DIR}/ui_chrome.c"
          "${X32LINK_DIR}/metro_strip.c"
          "${X32LINK_DIR}/clock_ticker.c"
+         "${X32LINK_DIR}/config_persist.c"
          "${X32LINK_DIR}/clock_output.c"
          "${X32LINK_DIR}/swing.c"
          "${X32LINK_DIR}/beat_clock.c"

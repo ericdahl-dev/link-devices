@@ -8,12 +8,19 @@
 #include "ktouch_transport.h" // transport state for /status
 #include "ktouch_display.h"   // live backlight brightness
 #include "ktouch_midi_out.h"  // ESP-018 tick health
+#include "config_persist.h"   // ARC-022: debounced write-through for live edits
 #include <WebServer.h>
 #include <WiFi.h>
 
 extern AppConfig g_config;
 
 static WebServer server(80);
+
+// ARC-022: /nudge and /bright used to apply and return -- the edit was real until the
+// next power cycle and then silently wasn't. They now mark the config dirty and
+// ktouch_web_tick() writes the blob once the edits settle. Marked, not written,
+// because config is ONE nvs blob: a slider drag is dozens of POSTs.
+static ConfigPersist s_persist;
 
 // The config form body (between the shared <style> and <script>). Panel classes
 // come from ui_chrome_css(). %TOKENS% are filled per request.
@@ -220,21 +227,27 @@ static void handle_status() {
 }
 
 // Live clock nudge — the writer task reads g_config.nudge_mbeats every tick, so
-// this takes effect immediately with no reboot. Persisted only on Save (no flash
-// wear while the DJ dials it in). Out-of-range values are rejected by the setter.
+// this takes effect immediately with no reboot. ARC-022: and it is now also KEPT.
+// The old comment here said "persisted only on Save (no flash wear while the DJ
+// dials it in)" -- the flash-wear worry was real, but the answer to it is a
+// debounce, not throwing the edit away at the next power cycle.
 static void handle_nudge() {
-    if (server.hasArg("mb")) app_config_set(&g_config, ACF_NUDGE_MBEATS, server.arg("mb").toInt());
+    if (server.hasArg("mb") && app_config_set(&g_config, ACF_NUDGE_MBEATS, server.arg("mb").toInt()))
+        config_persist_mark(&s_persist, millis());
     server.send(200, "text/plain", "ok");
 }
 
-// Live backlight brightness. Same pattern as /nudge: apply now, persist on Save.
+// Live backlight brightness. Same pattern as /nudge: apply now, persist once settled.
 static void handle_bright() {
-    if (server.hasArg("pct") && app_config_set(&g_config, ACF_BRIGHTNESS, server.arg("pct").toInt()))
+    if (server.hasArg("pct") && app_config_set(&g_config, ACF_BRIGHTNESS, server.arg("pct").toInt())) {
         ktouch_display_set_brightness(g_config.brightness);
+        config_persist_mark(&s_persist, millis());
+    }
     server.send(200, "text/plain", "ok");
 }
 
 void ktouch_web_begin(void) {
+    config_persist_reset(&s_persist);   // ARC-022: clean at boot — never write on the way up
     server.on("/",       handle_root);
     server.on("/status", handle_status);
     server.on("/save",   HTTP_POST, handle_save);
@@ -243,4 +256,11 @@ void ktouch_web_begin(void) {
     server.begin();
 }
 
-void ktouch_web_tick(void) { server.handleClient(); }
+void ktouch_web_tick(void) {
+    server.handleClient();
+    // ARC-022: write the blob once the live edits have settled. loop() calls this
+    // every ~5 ms, and due() is a couple of unsigned compares when nothing is owed,
+    // so polling it here is free. The write itself is rare by construction -- once
+    // per settled burst -- which matters because a flash write freezes both cores.
+    if (config_persist_due(&s_persist, millis())) config_save(&g_config);
+}

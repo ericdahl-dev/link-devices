@@ -4,6 +4,7 @@
 #include "fw_version.h"
 #include "web_status_json.h"
 #include "tempo_snapshot.h"
+#include "config_persist.h"   // ARC-022: debounced write-through for /live edits
 #ifdef HAS_BATTERY_GAUGE
 #include "battery_snapshot.h"
 #endif
@@ -14,6 +15,11 @@
 
 extern AppConfig g_config;
 extern void config_save(const AppConfig*);
+
+// ARC-022: /live marks this dirty; web_config_handle() writes the blob once the edits
+// settle. Marked rather than written because config is ONE nvs blob -- a colour picker
+// dragged across the wheel emits a POST per frame.
+static ConfigPersist s_persist;
 // Live tempo comes from the tempo_snapshot seam (ARC-001): one atomic read
 // yields a torn-free {bpm,phase,valid,quantum}, so this file needs no
 // tempo_source calls (the reason the old shared globals existed).
@@ -363,25 +369,33 @@ static void handle_save() {
     }
 }
 
-// LNK-037: apply live-safe fields to the running config with no reboot and no NVS
-// write (Save persists), mirroring the P4's /live. touch_display reads g_config each
-// render, so the phase dot mode/colours update instantly for preview.
+// LNK-037: apply live-safe fields to the running config with no reboot, mirroring the
+// P4's /live. touch_display reads g_config each render, so the phase dot mode/colours
+// update instantly.
+//
+// ARC-022: these edits are now KEPT. This handler had the same bug as the P4's and the
+// Touch's -- it applied the value and returned, so a colour or quantum set here looked
+// right until the next power cycle and then quietly wasn't. It marks the config dirty
+// now; web_config_handle() writes the blob once the edits settle.
 static void handle_live() {
     // ARC-012: same validated setter as save; ranges live in config_validate only.
+    // Only a value the setter ACCEPTED dirties the config -- a rejected one changed nothing.
+    bool edited = false;
     if (server.hasArg("phase_flash"))
-        app_config_set(&g_config, ACF_PHASE_DISPLAY_MODE, server.arg("phase_flash").toInt() == 1 ? 1 : 0);
+        edited |= app_config_set(&g_config, ACF_PHASE_DISPLAY_MODE, server.arg("phase_flash").toInt() == 1 ? 1 : 0);
     if (server.hasArg("dot_beat")) {
         String cb = server.arg("dot_beat");
         if (cb.length() == 7 && cb[0] == '#')
-            app_config_set(&g_config, ACF_DOT_BEAT_COLOR, (int)strtol(cb.c_str() + 1, NULL, 16));
+            edited |= app_config_set(&g_config, ACF_DOT_BEAT_COLOR, (int)strtol(cb.c_str() + 1, NULL, 16));
     }
     if (server.hasArg("dot_acc")) {
         String ca = server.arg("dot_acc");
         if (ca.length() == 7 && ca[0] == '#')
-            app_config_set(&g_config, ACF_DOT_ACCENT_COLOR, (int)strtol(ca.c_str() + 1, NULL, 16));
+            edited |= app_config_set(&g_config, ACF_DOT_ACCENT_COLOR, (int)strtol(ca.c_str() + 1, NULL, 16));
     }
     if (server.hasArg("quantum_beats"))
-        app_config_set(&g_config, ACF_QUANTUM_BEATS, server.arg("quantum_beats").toInt());
+        edited |= app_config_set(&g_config, ACF_QUANTUM_BEATS, server.arg("quantum_beats").toInt());
+    if (edited) config_persist_mark(&s_persist, millis());
     server.send(200, "text/plain", "ok");
 }
 
@@ -394,6 +408,7 @@ static void handle_captive_redirect() {
 }
 
 void web_config_begin() {
+    config_persist_reset(&s_persist);   // ARC-022: clean at boot — never write on the way up
     server.on("/",       HTTP_GET,  handle_root);
     server.on("/status", HTTP_GET,  handle_status);
     server.on("/save",   HTTP_POST, handle_save);
@@ -404,6 +419,7 @@ void web_config_begin() {
 }
 
 void web_config_ap_begin() {
+    config_persist_reset(&s_persist);   // ARC-022: this path serves /live too
     s_ap_ip   = WiFi.softAPIP();
     s_captive = true;
 
@@ -429,4 +445,9 @@ void web_config_ap_begin() {
 void web_config_handle() {
     if (s_captive) s_dns.processNextRequest();
     server.handleClient();
+    // ARC-022: write the blob once the live edits have settled. due() is a couple of
+    // unsigned compares when nothing is owed, so polling it from loop() is free; the
+    // write itself is rare by construction, which matters because a flash write
+    // suspends the cache and freezes both cores.
+    if (config_persist_due(&s_persist, millis())) config_save(&g_config);
 }
