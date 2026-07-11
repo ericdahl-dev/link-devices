@@ -92,6 +92,17 @@ color:var(--ink);cursor:pointer}
 .tp:active{transform:translateY(1px);border-color:#4a5a2c}
 .tp.armed{border-color:var(--amber);color:var(--amber)}
 .tp.running{border-color:#7fbf1f;color:var(--led)}
+.tp:disabled{opacity:.4;cursor:not-allowed;border-color:var(--line);color:var(--mut)}
+/* ESP-011: per-output transport toggle — one control, state is the label/colour
+   (the KitchenSync Touch device's full-screen toggle, shrunk to a row). */
+.tgl{flex:1;font-family:var(--disp);font-weight:800;font-size:13px;letter-spacing:.14em;
+padding:11px 12px;border-radius:9px;cursor:pointer;border:1px solid var(--line);
+background:linear-gradient(180deg,#2a1512,#1c0f0d);color:#ff7a6b;transition:background .15s,color .15s,border-color .15s}
+.tgl.arming{border-color:var(--amber);color:var(--amber);background:linear-gradient(180deg,#2c2113,#1d160d)}
+.tgl.playing{border-color:#7fbf1f;color:#0a0d07;background:linear-gradient(180deg,#caff5a,#9be32a)}
+.tgl:active{transform:translateY(1px)}
+.tgl:disabled{opacity:.45;cursor:not-allowed}
+.folsw{margin-top:10px}
 .frow.head{padding:18px 0 12px}
 .frow.head .cap{font-family:var(--disp);font-weight:600;font-size:12.5px;letter-spacing:.12em;color:var(--ink);margin-bottom:12px}
 .frow.head .cap::before{content:"";display:inline-block;width:6px;height:6px;border-radius:1px;background:var(--led-dim);margin-right:10px;vertical-align:2px}
@@ -152,7 +163,8 @@ color:var(--ink);cursor:pointer}
 <div class="row"><label>MIDI Clock In</label><span class="val" id="min">&mdash;&mdash;.&mdash; BPM</span></div>
 <div class="row"><label>Clock Out</label><span class="val" id="tx">0 pulses</span></div>
 <div class="row"><label>Follow Beat</label><span class="val" id="follow">off</span></div>
-<div class="row"><label>Transport</label><span class="val"><button type="button" class="tp" data-out="all" data-play="1">PLAY</button><button type="button" class="tp" data-out="all" data-play="0">STOP</button></span></div>
+<div class="row"><label>Transport</label><span class="val"><span class="pill" id="tstate">Stopped</span><button type="button" class="tp" data-out="all" data-play="1">PLAY</button><button type="button" class="tp" data-out="all" data-play="0">STOP</button></span></div>
+<div class="row" id="townerrow" style="display:none;padding-top:0;border-top:0"><label></label><span class="val" id="towner" style="color:var(--amber);font-size:11px;letter-spacing:.12em">Link owns transport for outputs set to follow it</span></div>
 </div>
 <form method="POST" action="/save">
 <div class="formcols">
@@ -187,11 +199,30 @@ color:var(--ink);cursor:pointer}
 // and the poll() loop; poll() hands each /status here.
 var peersEl=document.getElementById('peers'),usbEl=document.getElementById('usb'),txEl=document.getElementById('tx'),minEl=document.getElementById('min');
 var followEl=document.getElementById('follow');
+var tstateEl=document.getElementById('tstate'),townerRow=document.getElementById('townerrow');
+// Overall transport state for the header pill. When a Link peer owns transport the
+// manual launch[] is frozen, so reflect the session's real play flag instead.
+function transportState(d){
+if(d.link_owns)return d.playing?'PLAYING':'STOPPED';
+var a=d.launch||[],run=false,arm=false;
+for(var i=0;i<a.length;i++){if(a[i]===2)run=true;else if(a[i]===1)arm=true;}
+return run?'PLAYING':(arm?'ARMING':'STOPPED');}
 function onStatus(d){
 peersEl.textContent=d.peers;
 usbEl.textContent=d.usb?'Connected':'Waiting';usbEl.className='pill'+(d.usb?' on':'');
 minEl.textContent=(d.min>0)?d.min.toFixed(1)+' BPM':'——.— BPM';
-txEl.textContent=(d.tx||0)+' pulses';showLaunch(d.launch);
+txEl.textContent=(d.tx||0)+' pulses';showLaunch(d.launch,d);
+// Transport pill + arbitration. The ALL buttons stay live if ANY output is manual --
+// outputs that follow Link simply ignore the intent, so "all" is still useful.
+var ts=transportState(d);
+tstateEl.textContent=ts.charAt(0)+ts.slice(1).toLowerCase();
+tstateEl.className='pill'+(ts==='PLAYING'?' on':'');
+var anyManual=false;
+Array.prototype.forEach.call(document.querySelectorAll('.tgl'),function(b){
+if(!outFollows(+b.dataset.out))anyManual=true});
+var allOwned=!!d.link_owns&&!anyManual;
+Array.prototype.forEach.call(document.querySelectorAll('.tp'),function(b){b.disabled=allOwned});
+townerRow.style.display=d.link_owns?'flex':'none';
 if(typeof d.follow_enabled!=='undefined'){
   followEl.textContent=!d.follow_enabled?'off':(d.follow_valid?(d.follow_bpm.toFixed(1)+' BPM'):'listening...');
 }
@@ -202,11 +233,24 @@ poll();setInterval(poll,1000);
 Array.prototype.forEach.call(document.querySelectorAll('.tp'),function(b){
 b.addEventListener('click',function(){
 fetch('/transport?out='+b.dataset.out+'&play='+b.dataset.play,{method:'POST'}).catch(function(){})})});
-function showLaunch(a){if(!a)return;
-Array.prototype.forEach.call(document.querySelectorAll('.tp[data-play="1"]'),function(b){
-var o=b.dataset.out; if(o==='all')return;
-var st=a[+o]|0; b.classList.toggle('armed',st===1); b.classList.toggle('running',st===2);
-b.textContent=st===1?'ARMED':'PLAY'})}
+// Per-output transport (ESP-011). Each output has ONE master: Link when its
+// "follow Link" switch is on and the session publishes transport, otherwise you.
+// A Link-owned output shows the SESSION's play state (its manual launch state is
+// frozen and would lie) and its toggle greys out.
+function outFollows(o){var cb=document.querySelector('input[name="clk'+o+'_follow"]');return !!(cb&&cb.checked)}
+function showLaunch(a,d){
+Array.prototype.forEach.call(document.querySelectorAll('.tgl'),function(b){
+var o=+b.dataset.out, owned=!!(d&&d.link_owns)&&outFollows(o);
+var st=owned?((d&&d.playing)?2:0):((a&&a[o])|0);
+b.textContent=st===2?'PLAYING':(st===1?'ARMING':'STOPPED');
+b.classList.toggle('playing',st===2);b.classList.toggle('arming',st===1);
+b.disabled=owned;b.dataset.state=st})}
+// Click = flip, exactly like the Touch device: stopped -> play (bar-quantized),
+// arming/playing -> stop (immediate).
+Array.prototype.forEach.call(document.querySelectorAll('.tgl'),function(b){
+b.addEventListener('click',function(){
+var play=((+(b.dataset.state||0))===0)?1:0;
+fetch('/transport?out='+b.dataset.out+'&play='+play,{method:'POST'}).catch(function(){})})});
 var liveT=null;
 Array.prototype.forEach.call(document.querySelectorAll('.live'),function(el){
 var num=el.type==='number';
@@ -288,9 +332,16 @@ static std::string build_outputs()
         s += "<label class=\"sw\"><input type=\"checkbox\" class=\"live\" name=\"clk" + N + "_en\" value=\"1\""
              + (c->enable ? " checked" : "")
              + "><span class=\"track\"><span class=\"knob\"></span></span><span class=\"swlbl\"></span></label>";
+        // ESP-011: one Touch-style toggle per output (stopped/arming/playing), plus
+        // the per-output transport master. Follow Link on => this output tracks the
+        // session and its toggle greys out; off => the toggle is yours.
         s += std::string("<div class=\"fld\"><span class=\"pre\">RUN</span>")
-             + "<button type=\"button\" class=\"tp\" data-out=\"" + N + "\" data-play=\"1\">PLAY</button>"
-             + "<button type=\"button\" class=\"tp\" data-out=\"" + N + "\" data-play=\"0\">STOP</button></div>";
+             + "<button type=\"button\" class=\"tgl\" data-out=\"" + N + "\">STOPPED</button></div>";
+        s += std::string("<label class=\"sw folsw\"><input type=\"checkbox\" class=\"live\" name=\"clk") + N
+             + "_follow\" value=\"1\"" + (c->follow_link ? " checked" : "")
+             + "><span class=\"track\"><span class=\"knob\"></span></span>"
+             + "<span class=\"swlbl\"></span></label>"
+             + "<div class=\"cap\" style=\"margin:4px 0 0;color:var(--mut)\">follow Link transport</div>";
         s += "<div class=\"fld\"><span class=\"pre\">CABLE</span><select class=\"live\" name=\"clk" + N + "_cable\">";
         for (int p = 0; p < 4; p++)
             s += "<option value=\"" + std::to_string(p) + "\"" + (c->cable == p ? " selected" : "")
@@ -393,7 +444,7 @@ static esp_err_t root_handler(httpd_req_t *req)
 
 static esp_err_t status_handler(httpd_req_t *req)
 {
-    char buf[280];   // grew again for launch[] (ESP-011) -- four more fields (P4-020); matches test_ks_status.c's margin
+    char buf[320];   // launch[] (ESP-011) + follow (P4-020) + transport state; matches test_ks_status.c's margin
     bool fb_enabled = s_cfg && s_cfg->follow_beat_enable;
     FollowBeatOut fb = fb_enabled ? follow_beat_io_status() : FollowBeatOut{};
     int ls[KS_CLOCK_OUTPUTS];
@@ -401,7 +452,8 @@ static esp_err_t status_handler(httpd_req_t *req)
     ks_status_json(buf, sizeof(buf),
                       (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
                       wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx(),
-                      FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid, ls);
+                      FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid, ls,
+                      link_proto_playing(), link_proto_start_stop_seen());
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }

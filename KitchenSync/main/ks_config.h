@@ -41,7 +41,7 @@ typedef struct {
 //   A v1 blob is MIGRATED, not discarded — a version bump that silently forgot
 //   the user's network would inflict exactly the SoftAP re-setup this feature
 //   exists to abolish. See ks_config_decode().
-#define KS_CONFIG_VERSION 2u
+#define KS_CONFIG_VERSION 3u
 
 // One configurable clock output (routed to a USB-MIDI cable). Division, phase and
 // swing are the E-RM-Multiclock-style controls.
@@ -51,6 +51,14 @@ typedef struct {
     int ppqn;          // pulses per beat: 1=1/4, 2=1/8, 4=1/16, 24=MIDI clock, 48=×2 (1..48)
     int phase_mbeats;  // phase nudge, signed milli-beats (±250 = ±1/4 beat) for latency comp
     int swing_mbeats;  // swing/shuffle, 0..250 milli-beats of off-eighth delay (0 = straight, P4-013)
+    int follow_link;   // 0/1 — who owns THIS output's transport. 1 (default): the Link
+                       // session drives it once the session publishes StartStopState.
+                       // 0: it's manual — the web toggle starts/stops it and the
+                       // session's transport never touches it. The arbitration's
+                       // invariant is exactly ONE master per output: two masters is
+                       // how "why did my gear stop" happens (a manual START stomped
+                       // by the session's stopped state), so this picks the master
+                       // rather than letting both write.
 } ClockOutputCfg;
 
 typedef struct {
@@ -75,7 +83,7 @@ typedef struct {
 // not the safety mechanism — KS_CONFIG_VERSION is. This assert exists to make
 // editing the struct impossible without noticing the version constant above.
 // When it fires: bump KS_CONFIG_VERSION, then update the size here.
-_Static_assert(sizeof(KsConfig) == 420,
+_Static_assert(sizeof(KsConfig) == 436,
                "KsConfig layout changed: bump KS_CONFIG_VERSION, then fix this size (P4-014)");
 
 void ks_config_defaults(KsConfig* c);
