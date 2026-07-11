@@ -1,20 +1,19 @@
 // LNK-027 glue: drive USB-MIDI clock OUT from the Link phase pipeline. See
-// midi_clock_out_io.h. Timing math is in the pure, host-tested midi_clock_out.c;
-// this file only owns the FreeRTOS task and the TinyUSB writes.
+// midi_clock_out_io.h. Timing math is in the pure, host-tested clock_output.c
+// (ARC-019 — the same derivation KitchenSync and the Touch use); this file
+// only owns the FreeRTOS task and the TinyUSB writes.
 #include "midi_clock_out_io.h"
-#include "midi_clock_out.h"
+#include "clock_output.h"
 #include "midi_clock.h"      // midi_clock_send_f8()
 #include "din_midi_out.h"    // ESP-016: mirror 0xF8 onto the DIN wire (S3 -> RC-505)
 #include "tempo_source.h"    // tempo_source_beats_now()
 #include <Arduino.h>
 
-// A gap of more than this many 1/24-beat ticks between task ticks (a re-origin
-// or a long stall) triggers a realign instead of a catch-up burst. At the 1ms
-// task cadence, a normal step is 0-1 ticks even at high tempo, so 4 is generous
-// slack for scheduling hiccups while still catching a real discontinuity.
-static const int MAX_BURST = 4;
-
-static MidiClockOut s_sched;
+// Burst cap + reset-on-invalid live in clock_output (CLOCK_OUTPUT_MAX_BURST),
+// shared with the Touch's writer instead of copy-pasted into each task
+// (ARC-019). At the 1ms cadence a normal step is 0-1 ticks even at high tempo,
+// so 4 is generous slack while still catching a real discontinuity.
+static ClockOutput s_out;
 
 /* ARC-024 tick-health probe. This firmware has never been measured. The Touch's
  * identical writer, on identical silicon, turned out to be losing MIDI pulses under web
@@ -38,7 +37,6 @@ static volatile uint32_t s_max_gap_us    = 0;
 static volatile uint32_t s_max_work_us   = 0;
 static volatile uint32_t s_overruns      = 0;
 static volatile uint32_t s_bursts        = 0;   // ticks that emitted >1 pulse = catch-up
-static volatile uint32_t s_dropped_total = 0;   // lifetime pulses discarded by the realign
 static volatile int      s_core          = -1;  // which core this task ACTUALLY runs on
 static volatile uint32_t s_w_beats = 0, s_w_clock = 0;   // worst-tick stage split
 
@@ -53,10 +51,10 @@ bool midi_clock_out_io_health(WebTickHealth* out) {
     out->core        = s_core;
     out->w_beats     = s_w_beats;
     out->w_clock     = s_w_clock;
-    // Banked total plus whatever the live ticker has counted since its last reset. This
-    // is the number that matters most: a stall long enough to trip the realign leaves no
-    // burst and no gap on the wire, so until this counter existed it was undetectable.
-    out->dropped     = s_dropped_total + s_sched.dropped;
+    // Lifetime total, banked across resets inside clock_output (ARC-019). This
+    // is the number that matters most: a stall long enough to trip the realign
+    // leaves no burst and no gap on the wire — this counter is the only trace.
+    out->dropped     = clock_output_dropped(&s_out);
     return true;
 }
 
@@ -67,7 +65,7 @@ bool midi_clock_out_io_health(WebTickHealth* out) {
 static void midi_clock_out_task(void*) {
     s_core = xPortGetCoreID();   // ARC-024: confirm, don't assume. ESP-018's ticket was
                                  // WRONG about core assignment; only measuring caught it.
-    midi_clock_out_reset(&s_sched);
+    clock_output_reset(&s_out);
     uint32_t prev_end = 0;
     /* vTaskDelayUntil, NOT vTaskDelay (ESP-018, ported here by ARC-024).
      *
@@ -86,22 +84,16 @@ static void midi_clock_out_task(void*) {
 
         double beats = tempo_source_beats_now();   // <0 when phase not valid
         uint32_t t_beats = micros();
-        if (beats < 0.0) {
-            // Bank the discarded-pulse count before reset() zeroes it. reset() MUST zero
-            // it (the ticker is stack/BSS-allocated, so an un-zeroed counter is garbage),
-            // and a pure struct cannot tell "first init" from "re-prime" — so keeping the
-            // LIFETIME total is the caller's job. After the first reset this adds 0, so
-            // calling it every tick while phase is invalid is harmless.
-            s_dropped_total += s_sched.dropped;
-            midi_clock_out_reset(&s_sched);
-        } else {
-            int n = midi_clock_out_ticks_due(&s_sched, beats, MAX_BURST);
-            if (n > 1) s_bursts++;   // more than one pulse in a 1 ms tick = catching up
-            // Same code point for both wires: the DIN byte and the USB packet leave
-            // microseconds apart, so DIN gear (ESP-016) is clocked in lockstep with
-            // the USB path -- and DIN clocks even with no USB host attached.
-            for (int i = 0; i < n; i++) { din_midi_out_byte(0xF8); midi_clock_send_f8(); }
-        }
+        // One call owns the whole derivation (ARC-019): reset-on-invalid +
+        // dropped banking + burst cap inside clock_output_step. ppqn 24,
+        // nudge 0, swing 0 until X32Link grows the config fields (the Touch
+        // already feeds its nudge here; the derivation supports all three).
+        int n = clock_output_step(&s_out, beats, 24, 0, 0);
+        if (n > 1) s_bursts++;   // more than one pulse in a 1 ms tick = catching up
+        // Same code point for both wires: the DIN byte and the USB packet leave
+        // microseconds apart, so DIN gear (ESP-016) is clocked in lockstep with
+        // the USB path -- and DIN clocks even with no USB host attached.
+        for (int i = 0; i < n; i++) { din_midi_out_byte(0xF8); midi_clock_send_f8(); }
 
         uint32_t tk1  = micros();
         uint32_t work = tk1 - tk0;
