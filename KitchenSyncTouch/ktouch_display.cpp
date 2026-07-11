@@ -63,7 +63,9 @@ static int      s_shown_state = -1;
 static int      s_prev_mx = -1, s_prev_my = -1;
 static bool     s_touch_down = false;
 static bool     s_cueing = false;   // turntable: held, armed-in-hand, no MIDI yet
+static int      s_touch_fails = 0;  // consecutive failed I2C reads (debounce, see tick)
 #define CUE_DISP 99                 // synthetic shown-state for the cue panel
+#define TOUCH_FAIL_LIMIT 10         // ~50ms of dead sensor before we call it a fault
 
 // PWM the backlight (ledc via analogWrite) so it can be dimmed. Clamp to the
 // config's floor is the caller's job; here we just refuse full-dark and full range.
@@ -135,28 +137,22 @@ void ktouch_display_tick(void) {
     uint32_t now = millis();
 
     // ---- transport toggle: ANY touch flips it (no buttons -> no mis-hit) ----
-    // Digital-DJ (play_on_release=0): a press fires the toggle immediately.
-    // Turntable-DJ (play_on_release=1): a press on STOPPED *cues* (armed-in-hand,
-    // no MIDI); release drops it -- transport_launch quantizes the PLAY to the next
-    // "1", so releasing just before the bar lands the beat on the downbeat. Pressing
-    // while running/armed stops immediately either way.
+    // The DECISION is pure and host-tested (ktouch_touch_step); this glue owns only
+    // the sensor read and the two carried bools. A failed read is reported as a fault
+    // rather than swallowed: debounce it (a transient I2C hiccup must not cancel a
+    // cue), but once the sensor is really gone, say so -- otherwise a stuck CUE panel
+    // has no way back.
     axs_touch_t t;
-    if (read_touch(&t)) {
-        bool touched = t.points_len > 0;
-        if (touched && !s_touch_down) {
-            s_touch_down = true;
-            if (!g_config.play_on_release) {
-                ktouch_transport_post(ktouch_toggle_intent(state));   // digital: on press
-            } else if (state == TL_STOPPED) {
-                s_cueing = true;                                       // turntable: cue on hold
-            } else {
-                ktouch_transport_post(TL_INTENT_STOP);                // running/armed: stop now
-            }
-        } else if (!touched && s_touch_down) {
-            s_touch_down = false;
-            if (s_cueing) { s_cueing = false; ktouch_transport_post(TL_INTENT_PLAY); }  // release = drop
-        }
-    }
+    bool ok      = read_touch(&t);
+    bool touched = ok && t.points_len > 0;
+    if (ok) s_touch_fails = 0;
+    else if (s_touch_fails < TOUCH_FAIL_LIMIT) { s_touch_fails++; return; }   // transient: hold state
+
+    KtouchTouchOut o = ktouch_touch_step(state, ok, touched, s_touch_down,
+                                         s_cueing, g_config.play_on_release != 0);
+    s_touch_down = touched;
+    s_cueing     = o.cueing;
+    if (o.intent != TL_INTENT_NONE) ktouch_transport_post(o.intent);
 
     // ---- toggle zone repaint: cue panel while held, else follow launch state ----
     if (s_cueing) {
