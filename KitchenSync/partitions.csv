@@ -1,0 +1,24 @@
+# KitchenSync P4 partition table — 16 MB flash, dual-OTA with 4 MB app slots.
+#
+# The P4-NANO's flash chip is 16 MB (confirmed by `esptool.py flash_id`:
+# manufacturer c8, device 4018). The build previously assumed the ESP-IDF 4 MB
+# default, which squeezed the built-in two_ota table's app slots to 1 MB each --
+# and the app had grown to 0xf5f40 (96% full), so the next feature would not fit.
+#
+# nvs / otadata / phy_init keep the EXACT offsets of the old built-in table
+# (0x9000 / 0xd000 / 0xf000) so the saved config + WiFi credentials in NVS
+# survive this repartition. Only the app region past 0x10000 changes.
+#
+# No factory slot: both app slots are equal-purpose OTA targets, which is what
+# ks_web.cpp's POST /update assumes (esp_ota_get_next_update_partition always
+# picks "the other" slot and boots into it on success).
+#
+# 0x10000 + 2 * 0x400000 = 0x810000 (8.06 MB) used; ~7.9 MB left unallocated for
+# future use (SPIFFS/LittleFS). App slots must stay 64 KB-aligned.
+#
+# Name,     Type, SubType,  Offset,    Size,      Flags
+nvs,        data, nvs,      0x9000,    0x4000,
+otadata,    data, ota,      0xd000,    0x2000,
+phy_init,   data, phy,      0xf000,    0x1000,
+ota_0,      app,  ota_0,    0x10000,   0x400000,
+ota_1,      app,  ota_1,    0x410000,  0x400000,
