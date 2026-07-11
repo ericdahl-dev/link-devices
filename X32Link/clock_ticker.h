@@ -16,8 +16,17 @@ extern "C" {
 #endif
 
 typedef struct {
-    int64_t last_tick;  // last emitted 1/ppqn-beat grid index
-    bool    primed;     // false until the first beats_now aligns the grid
+    int64_t  last_tick;  // last emitted 1/ppqn-beat grid index
+    bool     primed;     // false until the first beats_now aligns the grid
+    // ESP-018: pulses the realign path DISCARDED. On a forward jump bigger than
+    // max_burst the ticker realigns rather than flooding the wire with a catch-up
+    // burst -- the right musical call, but `return 0` throws every pending pulse
+    // away, and until now it did so with NO trace: no burst on the analyzer, no
+    // counter, no log. A stall long enough to trip it was simply invisible.
+    // reset() ZEROES this, so it is always initialised (callers declare the struct on
+    // the stack and call reset on it). Keeping a LIFETIME total across resets is the
+    // caller's job -- a pure struct cannot distinguish "first init" from "re-prime".
+    uint32_t dropped;
 } ClockTicker;
 
 // Clear state: the next ticks_due() call re-primes the grid (emits nothing).

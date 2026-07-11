@@ -81,6 +81,61 @@ void test_bar_reset_bad_quantum(void) {
     TEST_ASSERT_FALSE(bar_reset_due(&br, 4.0, 0.0));
 }
 
+/* ---- ESP-018: the realign path must not discard pulses SILENTLY -----------
+ *
+ * On a forward jump bigger than max_burst, the ticker deliberately realigns instead of
+ * flooding the wire with a catch-up burst -- and `return 0` throws away EVERY pending
+ * pulse. That is the right musical call (a 20-pulse burst is worse than a gap), but
+ * today it happens with no trace at all: no burst to see on the analyzer, no counter,
+ * no log. A stall long enough to trip it is INVISIBLE.
+ *
+ * The bench caught a ~50ms stall on the Touch's DIN wire only because it was just
+ * UNDER the threshold and so produced a visible catch-up burst. A slightly longer one
+ * would have vanished. That is the failure that reaches a customer un-diagnosable.
+ *
+ * So: still realign, but COUNT what was thrown away. `dropped` is health telemetry --
+ * it is surfaced in /status on every device and, like usb_midi_batch's counter, it
+ * must survive a reset (reset fires whenever Link phase goes invalid, which is normal).
+ */
+void test_realign_counts_the_pulses_it_discards(void) {
+    ClockTicker t; clock_ticker_reset(&t);
+    clock_ticker_ticks_due(&t, 0.0, 24, 4);            // prime the grid
+
+    // Jump forward 1 whole beat = 24 ticks, with max_burst 4. The ticker realigns and
+    // emits nothing -- 24 pulses' worth of clock never reaches the wire.
+    TEST_ASSERT_EQUAL_INT(0, clock_ticker_ticks_due(&t, 1.0, 24, 4));
+    TEST_ASSERT_EQUAL_UINT32(24, t.dropped);          // and we KNOW it happened
+
+    // It keeps a running total across events.
+    clock_ticker_ticks_due(&t, 3.0, 24, 4);           // another 2-beat jump = 48 ticks
+    TEST_ASSERT_EQUAL_UINT32(24 + 48, t.dropped);
+}
+
+// A catch-up WITHIN max_burst is delivered, not dropped -- nothing to count.
+void test_normal_catchup_drops_nothing(void) {
+    ClockTicker t; clock_ticker_reset(&t);
+    clock_ticker_ticks_due(&t, 0.0, 24, 4);
+    // 3/24 of a beat forward: 3 ticks due, under the burst cap -> all three emitted.
+    TEST_ASSERT_EQUAL_INT(3, clock_ticker_ticks_due(&t, 3.0 / 24.0, 24, 4));
+    TEST_ASSERT_EQUAL_UINT32(0, t.dropped);
+}
+
+// reset() ZEROES the counter. It has to: callers declare the ticker on the stack and
+// call reset on it, so a counter reset leaves alone starts as garbage and can never be
+// trusted (this test caught exactly that -- it read 25 instead of 24). Keeping a
+// lifetime total across resets is the glue's job; a pure struct cannot tell "first
+// init" from "re-prime".
+void test_reset_zeroes_dropped_so_it_is_always_initialised(void) {
+    ClockTicker t; clock_ticker_reset(&t);
+    clock_ticker_ticks_due(&t, 0.0, 24, 4);
+    clock_ticker_ticks_due(&t, 1.0, 24, 4);           // 24 discarded
+    TEST_ASSERT_EQUAL_UINT32(24, t.dropped);
+
+    clock_ticker_reset(&t);
+    TEST_ASSERT_EQUAL_UINT32(0, t.dropped);           // zeroed -> never garbage
+    TEST_ASSERT_FALSE(t.primed);                      // and the grid is re-primed
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_first_call_primes_and_emits_nothing);
@@ -94,5 +149,8 @@ int main(void) {
     RUN_TEST(test_bar_reset_backward_reprimes_no_fire);
     RUN_TEST(test_bar_reset_multibar_jump_reprimes_no_fire);
     RUN_TEST(test_bar_reset_bad_quantum);
+    RUN_TEST(test_realign_counts_the_pulses_it_discards);
+    RUN_TEST(test_normal_catchup_drops_nothing);
+    RUN_TEST(test_reset_zeroes_dropped_so_it_is_always_initialised);
     return UNITY_END();
 }
