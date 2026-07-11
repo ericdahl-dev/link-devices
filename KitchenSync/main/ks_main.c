@@ -104,11 +104,22 @@ static volatile struct {
     uint32_t overruns;
 } s_stat;
 
+/* Priority 2 — the lowest thing running, and deliberately so. It logs (a blocking
+ * UART write, ~10 ms: fatal in the 1 ms clock task, harmless here, P4-033) and, since
+ * ARC-022, it also performs the debounced NVS write for live config edits. A flash
+ * write suspends the cache and freezes BOTH cores, so it cannot be made safe by
+ * priority — it can only be kept off the clock task and made rare. It polls at 250 ms
+ * so a settled edit is persisted promptly, and logs every fourth pass to keep the
+ * once-a-second serial cadence. */
 static void status_task(void *arg)
 {
     (void)arg;
+    int pass = 0;
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(250));
+        ks_web_config_persist_tick();   /* ARC-022: no-op unless /live edits have settled */
+        if (++pass < 4) continue;
+        pass = 0;
         ESP_LOGI(TAG, "link peers %d  bpm %.2f  phase %s  usb %s  clock TX %lu  play %d  usbdrop %lu",
                  s_stat.peers, s_stat.bpm, s_stat.locked ? "locked" : "free",
                  s_stat.usb ? "ready" : "-", (unsigned long)s_stat.pulses, s_stat.playing,
