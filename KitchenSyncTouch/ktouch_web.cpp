@@ -8,12 +8,23 @@
 #include "ktouch_transport.h" // transport state for /status
 #include "ktouch_display.h"   // live backlight brightness
 #include "ktouch_midi_out.h"  // ESP-018 tick health
+#include "config_persist.h"   // ARC-022: debounced write-through for live edits
 #include <WebServer.h>
 #include <WiFi.h>
+#include <Update.h>           // ESP-020: OTA into the inactive app slot
+
+#define UPDATE_PAGE_MAX 3072   // ui_update_page worst case + slack (ESP-020: the fetch
+                               // variant renders 2386 bytes, so 2560 left only 174 spare)
 
 extern AppConfig g_config;
 
 static WebServer server(80);
+
+// ARC-022: /nudge and /bright used to apply and return -- the edit was real until the
+// next power cycle and then silently wasn't. They now mark the config dirty and
+// ktouch_web_tick() writes the blob once the edits settle. Marked, not written,
+// because config is ONE nvs blob: a slider drag is dozens of POSTs.
+static ConfigPersist s_persist;
 
 // The config form body (between the shared <style> and <script>). Panel classes
 // come from ui_chrome_css(). %TOKENS% are filled per request.
@@ -118,7 +129,7 @@ static const char FORM[] = R"HTML(<!doctype html><html lang="en"><head>
 </div>
 <div style="padding:0 22px"><button class="write" type="submit">Save &amp; Reboot</button></div>
 </form>
-<div class="foot">KitchenSync Touch &middot; FW %FWVER%</div>
+<div class="foot">KitchenSync Touch &middot; FW %FWVER% &middot; <a href="/update" style="color:#4b535b">Firmware Update</a></div>
 </div>
 <script>%JS%
 // ui_chrome_js owns showBpm/setBeat/poll; onStatus paints our own rows.
@@ -220,27 +231,92 @@ static void handle_status() {
 }
 
 // Live clock nudge — the writer task reads g_config.nudge_mbeats every tick, so
-// this takes effect immediately with no reboot. Persisted only on Save (no flash
-// wear while the DJ dials it in). Out-of-range values are rejected by the setter.
+// this takes effect immediately with no reboot. ARC-022: and it is now also KEPT.
+// The old comment here said "persisted only on Save (no flash wear while the DJ
+// dials it in)" -- the flash-wear worry was real, but the answer to it is a
+// debounce, not throwing the edit away at the next power cycle.
 static void handle_nudge() {
-    if (server.hasArg("mb")) app_config_set(&g_config, ACF_NUDGE_MBEATS, server.arg("mb").toInt());
+    if (server.hasArg("mb") && app_config_set(&g_config, ACF_NUDGE_MBEATS, server.arg("mb").toInt()))
+        config_persist_mark(&s_persist, millis());
     server.send(200, "text/plain", "ok");
 }
 
-// Live backlight brightness. Same pattern as /nudge: apply now, persist on Save.
+// Live backlight brightness. Same pattern as /nudge: apply now, persist once settled.
 static void handle_bright() {
-    if (server.hasArg("pct") && app_config_set(&g_config, ACF_BRIGHTNESS, server.arg("pct").toInt()))
+    if (server.hasArg("pct") && app_config_set(&g_config, ACF_BRIGHTNESS, server.arg("pct").toInt())) {
         ktouch_display_set_brightness(g_config.brightness);
+        config_persist_mark(&s_persist, millis());
+    }
     server.send(200, "text/plain", "ok");
+}
+
+// ESP-020: web OTA. The Touch was the ONE firmware in this repo with no OTA path at
+// all -- and it is the firmware in Dan's unit. Without this, every future fix on a box
+// that lives in someone else's rig needs physical access and a USB cable.
+//
+// This is wiring, not building. The page is ui_update_page() from ui_chrome, already
+// shared with X32Link and KitchenSync (ARC-017) -- do not write a second one. The
+// partition table already has the app0/app1 slots (4 MB each); they have just been
+// sitting there unused.
+//
+// SAFETY: Update.h streams into the INACTIVE app slot. The running firmware is never
+// touched, and the bootloader only switches slots after the image validates. So a
+// truncated or aborted upload fails to validate and the device simply reboots into
+// what it was already running. That is a property of the mechanism, not a hope -- but
+// it is on the ticket to verify by deliberately killing an upload halfway.
+static void handle_update_page() {
+    static char page[UPDATE_PAGE_MAX];
+    // Show what is about to be overwritten.
+    int n = ui_update_page(page, sizeof(page), "KitchenSync Touch", FW_VERSION, FW_BUILD, true);
+    if (n < 0 || n >= (int)sizeof(page)) { server.send(500, "text/plain", "page too large"); return; }
+    server.send(200, "text/html", page);
+}
+
+static void handle_update_upload() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+        Serial.printf("[KSTouch] OTA: receiving %s\n", upload.filename.c_str());
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) Update.printError(Serial);
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (Update.end(true)) Serial.printf("[KSTouch] OTA: wrote %u bytes, restarting\n", upload.totalSize);
+        else Update.printError(Serial);
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        Update.end();   // release the slot; the running image is untouched
+    }
+}
+
+static void handle_update_result() {
+    bool ok = !Update.hasError();
+    char p[1024];
+    ui_result_page(p, sizeof(p),
+                   ok ? "Updated &mdash; Restarting" : "Update Failed",
+                   ok ? "New firmware written. The device restarts now."
+                      : "Upload was interrupted or the image was rejected. The device is still "
+                        "running the firmware it booted with. Try again.",
+                   ok);
+    server.send(ok ? 200 : 500, "text/html", p);
+    if (ok) { delay(1000); ESP.restart(); }
 }
 
 void ktouch_web_begin(void) {
+    config_persist_reset(&s_persist);   // ARC-022: clean at boot — never write on the way up
     server.on("/",       handle_root);
     server.on("/status", handle_status);
     server.on("/save",   HTTP_POST, handle_save);
     server.on("/nudge",  HTTP_POST, handle_nudge);
     server.on("/bright", HTTP_POST, handle_bright);
+    server.on("/update", HTTP_GET,  handle_update_page);              // ESP-020
+    server.on("/update", HTTP_POST, handle_update_result, handle_update_upload);
     server.begin();
 }
 
-void ktouch_web_tick(void) { server.handleClient(); }
+void ktouch_web_tick(void) {
+    server.handleClient();
+    // ARC-022: write the blob once the live edits have settled. loop() calls this
+    // every ~5 ms, and due() is a couple of unsigned compares when nothing is owed,
+    // so polling it here is free. The write itself is rare by construction -- once
+    // per settled burst -- which matters because a flash write freezes both cores.
+    if (config_persist_due(&s_persist, millis())) config_save(&g_config);
+}
