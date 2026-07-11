@@ -1,0 +1,31 @@
+# KitchenSync Touch partition table — 16 MB flash, dual-OTA with 4 MB app slots.
+#
+# The Waveshare ESP32-S3-Touch-LCD-1.47 has a 16 MB chip (confirmed with
+# `esptool.py flash_id` on the bench). CI already passes FlashSize=16M -- but with no
+# PartitionScheme, the Arduino core fell back to its 4 MB `default` table: app slots of
+# 0x140000 (1.25 MB) each, which is why the build reported "Maximum is 1310720 bytes".
+# The sketch was at 87% of that, and ~12 MB of the chip sat unused.
+#
+# 87% left no room for the feature that needs it most: an HTTPS client (mbedtls + a CA
+# bundle) costs 60-120 KB, so a device-side GitHub OTA physically would not fit. 4 MB
+# slots take the same image from 87% to 27%.
+#
+# nvs and otadata keep the EXACT offsets of the Arduino default table (0x9000 / 0xe000)
+# so an OTA update preserves saved WiFi + config. (A full flash via the web flasher
+# erases NVS regardless -- that is the flasher's contract, not this table's.)
+#
+# WHY THIS MUST SHIP BEFORE ANY UNIT LEAVES THE BENCH: a partition table cannot be
+# changed over OTA. It can only be written over USB. A device handed to a customer on
+# the old 4 MB table can never move to this one remotely -- so the window to fix it
+# closes the moment hardware leaves the building.
+#
+# 0x10000 + 2*0x400000 = 0x810000 used by code; the rest is spiffs + coredump, ending
+# exactly at 16 MB. App slots stay 64 KB-aligned.
+#
+# Name,     Type, SubType,  Offset,    Size,      Flags
+nvs,        data, nvs,      0x9000,    0x5000,
+otadata,    data, ota,      0xe000,    0x2000,
+app0,       app,  ota_0,    0x10000,   0x400000,
+app1,       app,  ota_1,    0x410000,  0x400000,
+spiffs,     data, spiffs,   0x810000,  0x7E0000,
+coredump,   data, coredump, 0xFF0000,  0x10000,
