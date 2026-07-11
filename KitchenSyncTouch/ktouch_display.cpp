@@ -64,8 +64,14 @@ static int      s_prev_mx = -1, s_prev_my = -1;
 static bool     s_touch_down = false;
 static bool     s_cueing = false;   // turntable: held, armed-in-hand, no MIDI yet
 static int      s_touch_fails = 0;  // consecutive failed I2C reads (debounce, see tick)
+// Bench probe: the cue was leaving the screen mid-hold and /status could not see why.
+// Counts the two ways a hold can be broken so the wire can tell us which it is.
+static uint32_t s_fail_total  = 0;  // I2C reads that failed outright
+static uint32_t s_zero_total  = 0;  // reads that SUCCEEDED but reported 0 touch points
+static uint32_t s_cue_cancels = 0;  // cues killed by the sustained-fault path
 #define CUE_DISP 99                 // synthetic shown-state for the cue panel
 #define TOUCH_FAIL_LIMIT 10         // ~50ms of dead sensor before we call it a fault
+#define RELEASE_CONFIRM  3          // immediate re-reads that must ALL agree a finger left
 
 // PWM the backlight (ledc via analogWrite) so it can be dimmed. Clamp to the
 // config's floor is the caller's job; here we just refuse full-dark and full range.
@@ -74,6 +80,12 @@ static void backlight_apply(int pct) {
     analogWrite(LCD_BL, pct * 255 / 100);
 }
 void ktouch_display_set_brightness(int pct) { backlight_apply(pct); }
+
+// Bench probe accessors (see the counters above).
+uint32_t ktouch_touch_fails(void)  { return s_fail_total; }
+uint32_t ktouch_touch_zeros(void)  { return s_zero_total; }
+uint32_t ktouch_cue_cancels(void)  { return s_cue_cancels; }
+int      ktouch_cueing(void)       { return s_cueing ? 1 : 0; }
 
 // I2C read + pure parse of the AXS5106L (0x63). axs5106l itself is pure (no Wire).
 static bool read_touch(axs_touch_t *t) {
@@ -145,8 +157,29 @@ void ktouch_display_tick(void) {
     axs_touch_t t;
     bool ok      = read_touch(&t);
     bool touched = ok && t.points_len > 0;
+    if (!ok) s_fail_total++;
+
+    // PHANTOM RELEASE (measured on the bench: 17 of these across a handful of holds).
+    // The AXS5106L intermittently returns a perfectly SUCCESSFUL read that reports zero
+    // touch points while a finger is still on the glass. Believing one is a release --
+    // and in turntable mode a release IS the drop, so the sensor blinking fires the beat
+    // by itself, mid-hold.
+    //
+    // Confirm by re-reading IMMEDIATELY rather than by waiting ticks. The drop is timed
+    // to the "1": a debounce measured in milliseconds could push the release past the
+    // bar line and cost a whole bar. Three back-to-back reads on a 400kHz bus cost well
+    // under a millisecond, and any one of them seeing the finger proves it never left.
+    if (ok && !touched && s_touch_down) {
+        s_zero_total++;
+        for (int i = 0; i < RELEASE_CONFIRM && !touched; i++) {
+            axs_touch_t r;
+            if (read_touch(&r) && r.points_len > 0) touched = true;   // still there: a blink
+        }
+    }
+
     if (ok) s_touch_fails = 0;
     else if (s_touch_fails < TOUCH_FAIL_LIMIT) { s_touch_fails++; return; }   // transient: hold state
+    if (!ok && s_cueing) s_cue_cancels++;
 
     KtouchTouchOut o = ktouch_touch_step(state, ok, touched, s_touch_down,
                                          s_cueing, g_config.play_on_release != 0);
@@ -208,4 +241,8 @@ void ktouch_display_tick(void) {
 void ktouch_display_begin(void) {}
 void ktouch_display_tick(void) {}
 void ktouch_display_set_brightness(int pct) { (void)pct; }
+uint32_t ktouch_touch_fails(void) { return 0; }
+uint32_t ktouch_touch_zeros(void) { return 0; }
+uint32_t ktouch_cue_cancels(void) { return 0; }
+int      ktouch_cueing(void)      { return 0; }
 #endif
