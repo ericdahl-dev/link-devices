@@ -20,17 +20,17 @@ CONFIG_FREERTOS_HZ=1000
 # WiFi credentials (CONFIG_KS_WIFI_*) are intentionally NOT set here — set them
 # locally (menuconfig or a gitignored sdkconfig); never commit credentials.
 
-# OTA firmware updates (P4-017): the built-in two-slot table (otadata + ota_0 +
-# ota_1, ~1.5 MB each) so `POST /update` can write the inactive slot and boot
-# into it via esp_ota_set_boot_partition — no factory partition, both slots are
-# equal-purpose OTA targets.
-CONFIG_PARTITION_TABLE_TWO_OTA=y
+# OTA firmware updates (P4-017): a custom two-slot table (partitions.csv) so
+# `POST /update` can write the inactive slot and boot into it via
+# esp_ota_set_boot_partition — no factory partition, both slots are equal-purpose
+# OTA targets. Custom, not the built-in two_ota table, because that one sizes its
+# app slots off the flash size: at 4MB it gave 1MB slots and the app hit 96% full.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# The two-OTA table needs ~3.1MB, which doesn't fit the ESP-IDF default 2MB
-# flash-size assumption (build fails at partition-table generation). 4MB is
-# the minimum step that fits it — NOT a measurement of this board's actual
-# flash chip, which isn't documented anywhere in this repo yet. Confirm the
-# real P4-NANO flash size (e.g. `esptool.py flash_id`) before ever flashing
-# OTA-built images to real hardware; if the chip is larger, raising this is
-# safe, but this value must never exceed the physical chip size.
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# The P4-NANO's flash chip is 16MB — CONFIRMED on hardware with `esptool.py
+# flash_id` (manufacturer c8, device 4018 = GD25Q128). The old 4MB value here was
+# a guess ("the minimum step that fits the two-OTA table"), and it capped the app
+# slots at 1MB. partitions.csv now gives each OTA slot 4MB. This value must never
+# exceed the physical chip size.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
