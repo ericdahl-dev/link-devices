@@ -4,7 +4,8 @@
 #include "fw_version.h"
 #include "web_status_json.h"
 #include "tempo_snapshot.h"
-#include "config_persist.h"   // ARC-022: debounced write-through for /live edits
+#include "config_persist.h"    // ARC-022: debounced write-through for /live edits
+#include "midi_clock_out_io.h" // ARC-024: MIDI writer tick health for /status
 #ifdef HAS_BATTERY_GAUGE
 #include "battery_snapshot.h"
 #endif
@@ -287,14 +288,20 @@ static void handle_update_upload() {
 // tempo_snapshot_read() (ARC-001 seam) — never tempo_source_* directly.
 static void handle_status() {
     TempoSnapshot ts; tempo_snapshot_read(&ts);
-    char buf[128];
+    char buf[256];   // ARC-024: the tick-health block roughly doubles the payload
+
+    // ARC-024: NULL unless the MIDI writer task is actually running, so the block is
+    // omitted rather than reported as a row of zeroes.
+    WebTickHealth th;
+    const WebTickHealth* tick = midi_clock_out_io_health(&th) ? &th : NULL;
+
 #ifdef HAS_BATTERY_GAUGE
     BatterySnapshot bs; battery_snapshot_read(&bs);
     web_status_json(buf, sizeof(buf), ts.bpm, ts.phase, ts.valid, ts.quantum, FW_VERSION,
-                     bs.present, bs.volts, bs.percent);
+                     bs.present, bs.volts, bs.percent, tick);
 #else
     web_status_json(buf, sizeof(buf), ts.bpm, ts.phase, ts.valid, ts.quantum, FW_VERSION,
-                     false, 0.0f, 0.0f);
+                     false, 0.0f, 0.0f, tick);
 #endif
     server.send(200, "application/json", buf);
 }
