@@ -22,6 +22,11 @@ void ks_web_publish_launch(const int state[KS_CLOCK_OUTPUTS]);
 // server. cfg_mutex (ARC-016) guards the /live patch against the clock task's read so
 // the task never sees a torn multi-field update; both hold it only for the copy.
 void ks_web_start(KsConfig* cfg, volatile uint32_t* gen, SemaphoreHandle_t cfg_mutex);
+// ARC-022: write the config blob to NVS if the /live edits have settled (debounced;
+// the policy is the pure config_persist module). Call it from a LOW-PRIORITY task --
+// a flash write freezes both cores, so it must never sit on the clock writer. Cheap
+// and non-blocking when nothing is owed, so it's safe to poll often.
+void ks_web_config_persist_tick(void);
 #ifdef __cplusplus
 }
 #endif

@@ -32,6 +32,7 @@
 #include "ks_web.h"
 #include "metronome_audio.h"   // P4-029: live vol/voice re-apply
 #include "transport_intent.h"   // ESP-011: quantized launch presses
+#include "config_persist.h"   // ARC-022: debounced write-through for /live edits
 
 #define RESULT_PAGE_MAX 1536   /* ui_result_page worst case + slack */
 #define UPDATE_PAGE_MAX 2560   /* ui_update_page worst case + slack */
@@ -40,6 +41,10 @@ static const char *TAG = "ks_web";
 static KsConfig *s_cfg = nullptr;
 static volatile uint32_t *s_gen = nullptr;   // bumped on /live so the clock task re-primes
 static SemaphoreHandle_t s_cfg_mutex = nullptr;  // ARC-016: guards the /live patch
+// ARC-022: a live edit is a real edit. /live marks this dirty; ks_web_config_persist_tick()
+// -- called from the low-priority status task -- does the actual blob write once the
+// edits settle. The policy is pure and host-tested; this is the only state it needs.
+static ConfigPersist s_persist;
 // ESP-011: last-seen per-output launch state, published by the clock task.
 static volatile int s_launch[KS_CLOCK_OUTPUTS] = {0,0,0,0};
 void ks_web_publish_launch(const int st[KS_CLOCK_OUTPUTS]) {
@@ -604,8 +609,37 @@ static esp_err_t live_handler(httpd_req_t *req)
     // if the metronome was off at boot — the codec isn't up until then).
     metronome_audio_set(s_cfg->metronome_volume, s_cfg->metronome_voice);
 
+    // ARC-022: mark it, don't write it. NVS is one blob and a slider drag lands
+    // dozens of these, so writing here would blob-write flash tens of times per
+    // gesture. The write happens once the edits settle, on the status task.
+    config_persist_mark(&s_persist, (uint32_t)(esp_timer_get_time() / 1000));
+
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_send(req, "ok", HTTPD_RESP_USE_STRLEN);
+}
+
+// ARC-022: poll from a LOW-PRIORITY task, never from the clock writer. A flash
+// write suspends the cache and freezes both cores regardless of priority, so this
+// cannot be made safe by ranking it -- it can only be kept off the RT path and made
+// rare. Debounce is what makes it rare.
+//
+// The snapshot is a file static, not a local: KsConfig is a few hundred bytes and
+// the status task's stack is 3 KB.
+void ks_web_config_persist_tick(void)
+{
+    if (!s_cfg) return;
+    if (!config_persist_due(&s_persist, (uint32_t)(esp_timer_get_time() / 1000))) return;
+
+    // Copy under the mutex, write outside it: the clock task takes this mutex every
+    // tick, and holding it across a flash write would stall the clock for the whole
+    // write on top of the unavoidable cache freeze.
+    static KsConfig snap;
+    if (s_cfg_mutex) xSemaphoreTake(s_cfg_mutex, portMAX_DELAY);
+    snap = *s_cfg;
+    if (s_cfg_mutex) xSemaphoreGive(s_cfg_mutex);
+
+    esp_err_t e = ks_config_save(&snap);
+    if (e != ESP_OK) ESP_LOGW(TAG, "live config save failed: %s", esp_err_to_name(e));
 }
 
 // P4-017: web-based OTA. The partition table is CONFIG_PARTITION_TABLE_TWO_OTA
@@ -693,6 +727,7 @@ void ks_web_start(KsConfig* cfg, volatile uint32_t* gen, SemaphoreHandle_t cfg_m
     s_cfg = cfg;
     s_gen = gen;
     s_cfg_mutex = cfg_mutex;
+    config_persist_reset(&s_persist);   // ARC-022: clean at boot — never write on the way up
     httpd_handle_t server = NULL;
     httpd_config_t hcfg = HTTPD_DEFAULT_CONFIG();
     if (httpd_start(&server, &hcfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }

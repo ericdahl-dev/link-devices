@@ -95,6 +95,7 @@ Notes:
 | `midi_clock.*` · `midi_bpm.*` · `midi_bpm_calc.*` | USB-MIDI adapter; `midi_bpm_calc` is the pure, host-tested BPM math. `midi_clock` also owns the shared USBMIDI endpoint + `midi_clock_send_f8()` for clock OUT |
 | `clock_ticker.{h,c}` | LNK-027/028 shared pure tick engine: quantizes `tempo_source_beats_now()` to N PPQN pulses (phase-locked, re-primes on re-origin) + a `BarReset` tracker that fires once per bar boundary (analog reset pulse). Host-tested |
 | `beat_synth.{h,c}` | LNK-033 pure free-run beat generator (`60000/bpm` interval + edge-detect); `tempo_source_beat()` delegates to it. Host-tested |
+| `config_persist.{h,c}` | ARC-022 pure debounce policy deciding **when** a live config edit is written to NVS: `mark()` on edit, `due()` from a low-priority poll. Config is one nvs blob, so a slider drag must collapse to one write; a quiet window settles a burst and a max-deferral bound stops a continuous stream from starving the write. Time is an argument — host-tested |
 | `midi_clock_out.{h,c}` + `midi_clock_out_io.cpp` | LNK-027 Link→USB-MIDI clock OUT; `midi_clock_out.{h,c}` is a thin 24-PPQN adapter over `clock_ticker`, `midi_clock_out_io.cpp` is the 1ms FreeRTOS task + TinyUSB writes |
 | `bpm_tracker.*` | change/threshold detection |
 | `bar.{h,c}` | ARC-003: a bar is `quantum` beats — `bar_beats()` / `bar_ms()`; one place owns beats-per-bar so non-4/4 `quantum` scales refresh/resend (was a hardcoded `4 *`) |
