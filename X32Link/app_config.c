@@ -37,6 +37,31 @@ void config_set_model(AppConfig* cfg, int model) {
     if (cfg->fx_slot < 1)   cfg->fx_slot = 1;
 }
 
+// ARC-020: the single owner of "is this persisted blob safe to load?" — see
+// app_config.h. Every gate is fail-closed: anything we cannot positively vouch
+// for becomes defaults, because loading a stale layout puts garbage into fields
+// the user never sees until the mixer gets OSC for the wrong FX slot.
+cfg_decode_result config_decode(AppConfig* out, const void* blob, size_t blob_len,
+                                bool version_present, uint32_t version) {
+    config_defaults(out);
+
+    // Bytes with no version key predate versioning: they could be any old
+    // layout, so no size coincidence earns them a load.
+    if (!blob || !version_present) return CFG_DECODE_DEFAULTED;
+
+    if (version != APP_CONFIG_VERSION || blob_len != sizeof(AppConfig))
+        return CFG_DECODE_DEFAULTED;
+
+    // Version and size both vouch for the layout; the bytes still have to be in
+    // range (bit-rot, or a layout shipped without a version bump).
+    AppConfig candidate;
+    memcpy(&candidate, blob, sizeof(candidate));
+    if (!config_validate(&candidate)) return CFG_DECODE_DEFAULTED;
+
+    *out = candidate;
+    return CFG_DECODE_OK;
+}
+
 bool app_config_set(AppConfig* cfg, AppConfigField field, int value) {
     AppConfig tmp = *cfg;                       // apply to a copy, keep iff it validates
     switch (field) {
