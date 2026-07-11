@@ -22,3 +22,7 @@ dependencies.lock
 tests/test_x32_port
 *.dSYM/
 KitchenSyncTouch/secrets.h
+
+# Web-flasher site: built by tools/build-flasher-site.sh, published by the release
+# workflow. Firmware binaries are release artifacts, never repo contents.
+site/
