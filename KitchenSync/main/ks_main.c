@@ -41,6 +41,7 @@
 #include "metro_strip.h"     /* pure WS2812 bar-position chase (P4-018) */
 #include "ks_led.h"       /* WS2812 strip glue (RMT) */
 #include "usb_midi_pack.h"
+#include "usb_midi_batch.h"   /* P4-034: one bulk transfer per tick, not one per output */
 #include "midi_uart_out.h"   /* ESP-015: DIN MIDI out mirror + downbeat strobe */
 #include "transport.h"        /* Link play/stop -> MIDI Start/Stop (P4-008) */
 #include "link_protocol.h"
@@ -79,6 +80,48 @@ static KsConfig g_cfg;   /* loaded from NVS in app_main; edited via the web UI *
 static volatile uint32_t g_cfg_gen = 0;   /* bumped by web POST /live; clock task re-primes on change (P4-015) */
 static SemaphoreHandle_t g_cfg_mutex;     /* ARC-016: guards g_cfg/g_cfg_gen vs the /live writer */
 
+/* P4-033: the clock task must NEVER call ESP_LOGx.
+ *
+ * The console is a BLOCKING UART write: at 115200 baud one ~110-char status line
+ * costs 7.5-12 ms. Measured on the bench with a per-stage tick probe -- every other
+ * stage in the 1 ms loop was single-digit microseconds while the log alone was
+ * 7537 us. That stalls the clock generator, and the catch-up is capped by MAX_BURST,
+ * so pulses are DROPPED, not merely delayed. The logic analyzer saw it directly:
+ * ~100 ms gaps in the 0xF8 stream followed by bytes emitted 0.32 ms apart.
+ *
+ * Worst of all was the per-transition transport log -- it fired at the downbeat, the
+ * one moment a stall is guaranteed to be audible.
+ *
+ * So the clock task publishes plain scalars here and a low-priority task does the
+ * printing. A torn read just prints a slightly stale number; nothing depends on it. */
+static volatile struct {
+    int      peers;
+    float    bpm;
+    bool     locked, usb, playing;
+    uint32_t pulses, clicks;
+    uint32_t usb_dropped;         /* P4-034: USB packets binned by a busy endpoint */
+    int64_t  max_gap, max_work;   /* tick-health probe; reset by the logger */
+    uint32_t overruns;
+} s_stat;
+
+static void status_task(void *arg)
+{
+    (void)arg;
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        ESP_LOGI(TAG, "link peers %d  bpm %.2f  phase %s  usb %s  clock TX %lu  play %d  usbdrop %lu",
+                 s_stat.peers, s_stat.bpm, s_stat.locked ? "locked" : "free",
+                 s_stat.usb ? "ready" : "-", (unsigned long)s_stat.pulses, s_stat.playing,
+                 (unsigned long)s_stat.usb_dropped);
+        if (s_stat.overruns) {
+            ESP_LOGW(TAG, "tick health: overruns=%lu max_gap=%lldus max_work=%lldus",
+                     (unsigned long)s_stat.overruns,
+                     (long long)s_stat.max_gap, (long long)s_stat.max_work);
+        }
+        s_stat.overruns = 0; s_stat.max_gap = 0; s_stat.max_work = 0;
+    }
+}
+
 static void clock_out_task(void *arg)
 {
     KsTickState ts;  ks_tick_reset(&ts, g_cfg_gen);
@@ -91,7 +134,22 @@ static void clock_out_task(void *arg)
     int64_t     last_led = 0;           /* throttle the WS2812 refresh (P4-018) */
     bool        led_showing = false;    /* is the strip currently lit (to clear once when off) */
 
+    /* Tick-overrun probe: the analyzer caught the DIN clock stalling ~100 ms and then
+     * emitting a capped catch-up burst (dropping pulses). Everything below shares this
+     * one 1 ms task -- socket I/O, the Link reads, I2S metronome, WS2812 RMT -- so any
+     * blocking call stalls the clock. `gap` (previous tick's end -> this tick's start)
+     * separates the two possible causes: a large gap means the task was never scheduled
+     * (starved / flash-cache stall), a large `work` means one of OUR calls blocked. */
+    int64_t prev_end = 0;
+
+    /* P4-034: persists ACROSS ticks -- if the USB endpoint is busy the batch is held
+     * and retried next tick rather than dropped. */
+    UsbMidiBatch usb_batch = {0};
+
     while (1) {
+        int64_t tk0 = esp_timer_get_time();
+        int64_t gap = prev_end ? (tk0 - prev_end) : 0;
+
         /* Drive the measurement client (ping/pong -> GhostXForm). Opens its own
          * unicast socket lazily; non-blocking, so it is safe in this 1 ms loop. */
         link_measure_io_poll();
@@ -137,7 +195,14 @@ static void clock_out_task(void *arg)
          * tick, low the next -- a clean rising edge on the Link bar boundary. */
         midi_uart_out_strobe(plan.downbeat);
 
-        /* Execute the clock fan-out: plan.pulses[o] 0xF8 packets on output o's cable. */
+        /* Execute the clock fan-out: plan.pulses[o] 0xF8 packets on output o's cable.
+         *
+         * P4-034: USB events are STAGED into one batch and submitted as a single bulk
+         * transfer at the end of the tick. Never call usb_midi_host_send() per output:
+         * it holds one in-flight transfer (~1 ms, a whole USB frame) and drops anything
+         * offered while busy, so the old per-output calls delivered only the FIRST
+         * output and silently binned the rest. Batching also puts every output's clock
+         * in the same USB frame, so they stay aligned to each other. */
         bool usb_ready = in.usb_ready;   /* gate USB sends; the DIN wire emits regardless */
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
             for (int i = 0; i < plan.pulses[o]; i++) {
@@ -148,7 +213,7 @@ static void clock_out_task(void *arg)
                 if (usb_ready) {
                     uint8_t pkt[4];
                     usb_midi_pack_single(cfg.clock[o].cable, 0xF8, pkt);
-                    usb_midi_host_send(pkt, 4);
+                    usb_midi_batch_add(&usb_batch, pkt);
                 }
                 pulses++;
             }
@@ -162,17 +227,25 @@ static void clock_out_task(void *arg)
             if (usb_ready) {
                 uint8_t pkt[4];
                 usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
-                usb_midi_host_send(pkt, 4);
+                usb_midi_batch_add(&usb_batch, pkt);   /* P4-034: staged, not submitted */
             }
-            ESP_LOGI(TAG, "transport out%d %s", o + 1,
-                     plan.transport[o] == TRANSPORT_START ? "START" : "STOP");
+            /* No ESP_LOG here (P4-033): this runs ON the bar line, so a blocking
+             * ~10 ms console write would stall the clock at the exact instant the
+             * downbeat lands. The web UI's transport pill already shows the state. */
         }
-        /* Metronome click on the onboard speaker (P4-006). */
+
+        /* P4-034: ONE bulk transfer for the whole tick. If the endpoint is still busy
+         * the batch is KEPT and retried next tick -- 16 events of headroom against
+         * ~0.27 events/ms of real traffic, so a one-tick stall is absorbed, not lost. */
+        if (usb_ready && usb_batch.len > 0) {
+            if (usb_midi_host_send(usb_batch.buf, usb_batch.len)) usb_midi_batch_reset(&usb_batch);
+        }
+        /* Metronome click on the onboard speaker (P4-006). Counted, not logged
+         * (P4-033): this fires every beat, so a per-click console write stalled the
+         * clock 2-3x a second. status_task reports the running count instead. */
         if (plan.click) {
             metronome_audio_click(plan.click_accent);
             clicks++;
-            ESP_LOGI(TAG, "metronome %-6s beat %.2f  clicks %lu",
-                     plan.click_accent ? "ACCENT" : "click", plan.beats, (unsigned long)clicks);
         }
 
         int64_t now = esp_timer_get_time();
@@ -210,14 +283,39 @@ static void clock_out_task(void *arg)
             }
         }
 
+        /* Publish, don't print (P4-033). Plain stores, ~microseconds; status_task
+         * owns the console. This is what used to be a 7.5 ms blocking UART write. */
         if (now - last_log >= 1000000) {
             last_log = now;
-            ESP_LOGI(TAG, "link peers %d  bpm %.2f  phase %s  usb %s  clock TX %lu  play %d",
-                     wifi_link_peers(), link_proto_bpm(),
-                     plan.locked ? "locked" : "free",
-                     usb_midi_host_ready() ? "ready" : "-", pulses,
-                     link_proto_playing());
+            s_stat.peers   = wifi_link_peers();
+            s_stat.bpm     = link_proto_bpm();
+            s_stat.locked  = plan.locked;
+            s_stat.usb     = usb_midi_host_ready();
+            s_stat.playing = link_proto_playing();
+            s_stat.pulses  = pulses;
+            s_stat.clicks  = clicks;
+            s_stat.usb_dropped = usb_midi_host_dropped() + usb_batch.dropped;
         }
+
+        /* Name the stall. gap >> 1ms => the task wasn't scheduled (starvation /
+         * flash-cache stall) and the culprit is OUTSIDE this loop; work >> 1ms => a
+         * call in here blocked, and the per-stage maxima say which.
+         *
+         * Reported at most once a second, NOT per overrun: an ESP_LOGW is a blocking
+         * ~13ms UART write at 115200, so logging every overrun delays the next tick
+         * and manufactures the very overrun it reports -- a feedback loop that fired
+         * 99x/sec on the first run and drowned the real signal. Accumulate, then
+         * report. prev_end is stamped after the log so the probe's own cost is never
+         * misread as a system stall. */
+        /* Tick health, published for status_task. Kept permanently: this probe is what
+         * caught the logging stall, and it costs two esp_timer reads per tick. A
+         * healthy clock reports no overruns at all. */
+        int64_t tk1  = esp_timer_get_time();
+        int64_t work = tk1 - tk0;
+        if (gap  > s_stat.max_gap)  s_stat.max_gap  = gap;
+        if (work > s_stat.max_work) s_stat.max_work = work;
+        if (gap > 5000 || work > 5000) s_stat.overruns++;
+        prev_end = tk1;
 
 #if PHASE_DEBUG
         /* LNK-026 offset hunt: P4's computed session phase + raw ingredients, for
@@ -270,4 +368,7 @@ void app_main(void)
     ks_led_start(LED_GPIO, LED_PIXELS);   /* WS2812 visual metronome; harmless if nothing wired (P4-018) */
     midi_uart_out_start(MIDI_TX_GPIO, MIDI_STROBE_GPIO);   /* ESP-015: DIN MIDI out + analyzer strobe */
     xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
+    /* P4-033: the console lives HERE, not in clock_out. Low priority (2) so a blocking
+     * UART write can never preempt the clock generator. */
+    xTaskCreate(status_task, "status", 3072, NULL, 2, NULL);
 }
