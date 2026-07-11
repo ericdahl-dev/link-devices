@@ -29,7 +29,8 @@ static ConfigPersist s_persist;
 // time from loopTask, and a multi-KB local is how the P4's httpd task earned a
 // stack-protection panic (ESP-013).
 #define RESULT_PAGE_MAX 1536   // ui_result_page worst case + slack
-#define UPDATE_PAGE_MAX 2560   // ui_update_page worst case + slack
+#define UPDATE_PAGE_MAX 3072   // ui_update_page worst case + slack (ESP-020: the fetch
+                               // variant renders 2386 bytes, so 2560 left only 174 spare)
 
 static WebServer  server(80);
 static DNSServer  s_dns;

@@ -107,6 +107,20 @@ void test_update_page_interpolates_product_and_version(void) {
     TEST_ASSERT_TRUE(has(buf, "Running FW 2.2.0 &middot; built Jul 10 2026"));
 }
 
+// ESP-020: the page must SAY that updating stops the clock. An OTA writes ~1 MB to
+// flash, and a flash write suspends the cache and freezes BOTH cores regardless of task
+// priority -- so the 1 ms MIDI writer cannot run for the duration. This is not a
+// borderline timing effect to be measured against the jitter floor; it is seconds
+// against a 1 ms tick. The device WILL stop clocking mid-update.
+//
+// So the page tells the truth instead of letting a user find out during a set. All three
+// firmwares share this page, and all three have exactly the same problem.
+void test_update_page_warns_that_the_clock_stops(void) {
+    ui_update_page(buf, sizeof(buf), "KitchenSync Touch", "2.2.0", "b", true);
+    TEST_ASSERT_TRUE(has(buf, "stops the clock"));
+    TEST_ASSERT_TRUE(has(buf, "Do not update mid-set"));
+}
+
 // The two OTA transports need different forms; that is the one thing this builder
 // switches on, because the markup differs, not the look.
 void test_update_page_multipart_selects_the_arduino_form(void) {
@@ -148,6 +162,7 @@ int main(void) {
     RUN_TEST(test_result_page_emits_literal_percent);
     RUN_TEST(test_result_page_reports_truncation);
     RUN_TEST(test_update_page_interpolates_product_and_version);
+    RUN_TEST(test_update_page_warns_that_the_clock_stops);
     RUN_TEST(test_update_page_multipart_selects_the_arduino_form);
     RUN_TEST(test_update_page_non_multipart_selects_the_fetch_uploader);
     RUN_TEST(test_update_page_emits_literal_percents);
