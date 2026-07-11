@@ -24,10 +24,12 @@
 #define MCK_CLOCK_TIMEOUT_MS  2000
 
 // KitchenSync Touch defaults — a MIDI product, NO mixer/OSC/model/fx anything.
-#define DEFAULT_QUANTUM_BEATS    4
+#define DEFAULT_QUANTUM_BEATS    4   // 4 beats = 1 bar (4/4); web UI edits in bars
 #define DEFAULT_CLOCK_ENABLE     1   // clock on by default (unlike X32Link's mixer product)
 #define DEFAULT_TRANSPORT_ENABLE 1
 #define DEFAULT_PLAY_ON_RELEASE  0   // 0 = fire on touch, 1 = on release
+#define DEFAULT_NUDGE_MBEATS     0   // DIN clock phase trim, millibeats
+#define DEFAULT_BRIGHTNESS       80  // LCD backlight percent
 
 // The board flag implies the on-device touch UI (LNK-014/015).
 #if defined(BOARD_WAVESHARE_S3_TOUCH_LCD_147) && !defined(HAS_TOUCH_DISPLAY)
