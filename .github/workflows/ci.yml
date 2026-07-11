@@ -26,6 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+      # KitchenSync Touch ships a sketch-local partitions.csv (16MB, dual-OTA, 4MB app
+      # slots). PartitionScheme=custom is what makes the ESP32 core USE that file --
+      # without it the core silently falls back to its 4MB `default` table and the app
+      # slot is 1.25MB, which is how the sketch quietly reached 87% full. Touch-only:
+      # X32Link has no partitions.csv, so `custom` would break its build.
+      TOUCH_FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom
       # Persisted core.a build cache (see the cache step below). Every compile
       # passes --build-cache-path here so the ESP32 core isn't recompiled each run.
       CORE_CACHE: ${{ github.workspace }}/.arduino-core-cache
@@ -117,7 +123,7 @@ jobs:
       # flag-juggling here; secrets.h is gitignored and the sketch builds without
       # it via __has_include.
       - name: Compile KitchenSyncTouch (ESP-016, Waveshare touch board)
-        run: arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" KitchenSyncTouch
+        run: arduino-cli compile --fqbn "$TOUCH_FQBN" --build-cache-path "$CORE_CACHE" KitchenSyncTouch
 
   loralink-compile:
     name: Firmware compile (LoraLink)
