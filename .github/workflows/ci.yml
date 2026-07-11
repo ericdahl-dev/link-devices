@@ -216,21 +216,29 @@ jobs:
           restore-keys: |
             idf-ccache-${{ runner.os }}-
 
+      # Pre-create so a cold miss still has a dir to mount + save (no Path
+      # Validation warning), and so ccache has somewhere to write on run one.
+      - name: Prepare ccache dir
+        run: mkdir -p KitchenSync/.ccache
+
       # Builds KitchenSync for the ESP32-P4 via the official ESP-IDF Docker action.
       # idf.py auto-downloads any managed components (esp_hosted / esp_wifi_remote
       # once the P4-004/005 glue lands). release-v5.5 has the esp32p4 min-rev gate.
-      # IDF_CCACHE_ENABLE makes cmake launch the compiler through ccache; the paths
-      # below are the container's view of the mounted workspace (/github/workspace),
-      # so ccache writes into the dir cached above. CCACHE_BASEDIR + NOHASHDIR make
-      # hits survive the per-run build path.
+      #
+      # The action is *composite* and only forwards IDF_TARGET into the container,
+      # so ccache env must be injected via extra_docker_args (-e). It mounts the
+      # workspace at /app/<owner>/<repo>, so CCACHE_DIR points there — that maps
+      # back to KitchenSync/.ccache on the host (the dir cached above).
+      # IDF_CCACHE_ENABLE makes idf.py launch the compiler through ccache;
+      # CCACHE_BASEDIR + NOHASHDIR keep hits alive across the per-run build path.
       - name: Compile KitchenSync for esp32p4
         uses: espressif/esp-idf-ci-action@v1
-        env:
-          IDF_CCACHE_ENABLE: "1"
-          CCACHE_DIR: /github/workspace/KitchenSync/.ccache
-          CCACHE_BASEDIR: /github/workspace
-          CCACHE_NOHASHDIR: "1"
         with:
           esp_idf_version: release-v5.5
           target: esp32p4
           path: 'KitchenSync'
+          extra_docker_args: >-
+            -e IDF_CCACHE_ENABLE=1
+            -e CCACHE_DIR=/app/${{ github.repository }}/KitchenSync/.ccache
+            -e CCACHE_BASEDIR=/app/${{ github.repository }}
+            -e CCACHE_NOHASHDIR=1
