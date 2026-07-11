@@ -370,8 +370,37 @@ void test_decode_unversioned_v1_sized_blob_still_defaults(void) {
     TEST_ASSERT_EQUAL_STRING("", out.wifi[0].ssid);
 }
 
+// ESP-011 per-output transport master. Default 1 = Link owns transport once the
+// session publishes it -- the behaviour before this flag existed, so an upgraded
+// unit acts exactly as it used to until the user opts an output into manual.
+void test_follow_link_defaults_to_link(void) {
+    KsConfig c; ks_config_defaults(&c);
+    for (int o = 0; o < KS_CLOCK_OUTPUTS; o++)
+        TEST_ASSERT_EQUAL_INT(1, c.clock[o].follow_link);
+    TEST_ASSERT_TRUE(ks_config_valid(&c));
+}
+
+// Only 0/1; anything else is rejected and the config is left alone.
+void test_follow_link_rejects_non_bool(void) {
+    KsConfig c; ks_config_defaults(&c);
+    c.clock[0].follow_link = 2;
+    TEST_ASSERT_FALSE(ks_config_valid(&c));
+}
+
+// The form/live path can set it per output ("clk<N>_follow").
+void test_follow_link_settable_per_output(void) {
+    KsConfig c; ks_config_defaults(&c);
+    TEST_ASSERT_TRUE(ks_config_set(&c, "clk1_follow", "0"));
+    TEST_ASSERT_EQUAL_INT(0, c.clock[1].follow_link);
+    TEST_ASSERT_EQUAL_INT(1, c.clock[0].follow_link);   // others untouched
+    TEST_ASSERT_FALSE(ks_config_set(&c, "clk1_follow", "2"));
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_follow_link_defaults_to_link);
+    RUN_TEST(test_follow_link_rejects_non_bool);
+    RUN_TEST(test_follow_link_settable_per_output);
     RUN_TEST(test_indexed_slot_keys);
     RUN_TEST(test_empty_ssid_forgets_the_whole_slot);
     RUN_TEST(test_wifi_slots_compacts_and_skips_empties);
