@@ -35,7 +35,9 @@
 #include "config_persist.h"   // ARC-022: debounced write-through for /live edits
 
 #define RESULT_PAGE_MAX 1536   /* ui_result_page worst case + slack */
-#define UPDATE_PAGE_MAX 2560   /* ui_update_page worst case + slack */
+#define UPDATE_PAGE_MAX 3072   /* ui_update_page worst case + slack. ESP-020 added the "updating
+                                * stops the clock" warning; the fetch variant this file renders
+                                * is now 2386 bytes, so 2560 left only 174 spare. */
 
 static const char *TAG = "ks_web";
 static KsConfig *s_cfg = nullptr;
