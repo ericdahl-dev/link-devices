@@ -44,7 +44,22 @@ typedef struct {
     // while the clock is still running.
     bool        had_stst;
     bool        held_playing;
+    /* P4-038: lifetime pulses discarded by a realign, banked ACROSS re-primes.
+     * clock_ticker_reset() zeroes each ticker's own `dropped` and says so: a pure struct
+     * cannot tell first-init from re-prime, so keeping the lifetime total is the caller's
+     * job. ARC-019 does exactly this inside ClockOutput for the 1 ms writer tasks;
+     * KitchenSync's plan loop keeps its own burst policy (KS_TICK_MAX_BURST 96 -- prefer
+     * catch-up over dropping, a per-product choice), so it banks here instead. */
+    uint32_t    dropped_total;
 } KsTickState;
+
+// Bank every ticker's `dropped` into the lifetime total. Called immediately BEFORE a
+// re-prime zeroes them -- otherwise the count of a stall bad enough to trip the realign
+// vanishes with the reset, which is the exact failure ESP-018 spent a bench session on.
+void ks_tick_bank_dropped(KsTickState* st);
+
+// Lifetime pulses discarded: banked total + whatever the live tickers hold right now.
+uint32_t ks_tick_dropped(const KsTickState* st);
 
 // Reset all grids + beat basis; adopt cfg_gen as the current generation.
 void ks_tick_reset(KsTickState* st, uint32_t cfg_gen);

@@ -37,6 +37,14 @@ static volatile uint32_t s_max_gap_us    = 0;
 static volatile uint32_t s_max_work_us   = 0;
 static volatile uint32_t s_overruns      = 0;
 static volatile uint32_t s_bursts        = 0;   // ticks that emitted >1 pulse = catch-up
+/* P4-038: re-prime episodes. clock_output_step() re-primes the grid whenever phase is
+ * invalid (pre-sync, peer loss, mid re-measure). That emits nothing and drops nothing, so
+ * it is invisible in every other counter -- yet the wire goes silent while it lasts. On
+ * the P4 the probe showed a perfectly-scheduled clock task (gap 1.5ms, zero overruns) whose
+ * wire still stalled 150 ms: a task that is never late cannot explain a wire that stops,
+ * unless the grid moved. Count the EPISODE (the valid->invalid edge), not the ticks. */
+static volatile uint32_t s_reprimes      = 0;
+static bool              s_phase_was_valid = true;
 static volatile int      s_core          = -1;  // which core this task ACTUALLY runs on
 static volatile uint32_t s_w_beats = 0, s_w_clock = 0;   // worst-tick stage split
 
@@ -55,6 +63,9 @@ bool midi_clock_out_io_health(WebTickHealth* out) {
     // is the number that matters most: a stall long enough to trip the realign
     // leaves no burst and no gap on the wire — this counter is the only trace.
     out->dropped     = clock_output_dropped(&s_out);
+    // P4-038: re-prime episodes. A stall that moves the GRID drops nothing and bursts
+    // nothing -- it is invisible in every counter above, yet the wire goes quiet.
+    out->reprimes    = s_reprimes;
     return true;
 }
 
@@ -83,6 +94,11 @@ static void midi_clock_out_task(void*) {
         uint32_t gap = prev_end ? (tk0 - prev_end) : 0;
 
         double beats = tempo_source_beats_now();   // <0 when phase not valid
+        if (beats < 0.0) {
+            if (s_phase_was_valid) { s_reprimes++; s_phase_was_valid = false; }  // P4-038
+        } else {
+            s_phase_was_valid = true;
+        }
         uint32_t t_beats = micros();
         // One call owns the whole derivation (ARC-019): reset-on-invalid +
         // dropped banking + burst cap inside clock_output_step. ppqn 24,
