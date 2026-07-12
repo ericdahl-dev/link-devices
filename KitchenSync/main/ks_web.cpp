@@ -110,6 +110,16 @@ background:linear-gradient(180deg,#2a1512,#1c0f0d);color:#ff7a6b;transition:back
 .tgl.playing{border-color:#7fbf1f;color:#0a0d07;background:linear-gradient(180deg,#caff5a,#9be32a)}
 .tgl:active{transform:translateY(1px)}
 .tgl:disabled{opacity:.45;cursor:not-allowed}
+/* ESP-019: keyboard transport. The shortcut is printed on the control it fires —
+   a key nobody can see is not a feature. */
+.kbd{flex:none;font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--mut);
+border:1px solid var(--line);border-radius:5px;padding:2px 6px;margin-left:8px;background:#12161b}
+/* A key aimed at a Link-owned output must not silently do nothing: flash the greyed
+   toggle and pulse the note that names the owner, so the user learns why. */
+@keyframes nak{0%,100%{border-color:var(--line);color:var(--mut)}30%,65%{border-color:var(--amber);color:var(--amber)}}
+@keyframes nakrow{0%,100%{background:transparent}30%{background:rgba(224,168,58,.14)}}
+.tgl.nak:disabled{animation:nak .6s ease-out}
+#townerrow.nak{animation:nakrow 1.2s ease-out;border-radius:7px}
 .folsw{margin-top:10px}
 .frow.head{padding:18px 0 12px}
 .frow.head .cap{font-family:var(--disp);font-weight:600;font-size:12.5px;letter-spacing:.12em;color:var(--ink);margin-bottom:12px}
@@ -171,7 +181,7 @@ background:linear-gradient(180deg,#2a1512,#1c0f0d);color:#ff7a6b;transition:back
 <div class="row"><label>MIDI Clock In</label><span class="val" id="min">&mdash;&mdash;.&mdash; BPM</span></div>
 <div class="row"><label>Clock Out</label><span class="val" id="tx">0 pulses</span></div>
 <div class="row"><label>Follow Beat</label><span class="val" id="follow">off</span></div>
-<div class="row"><label>Transport</label><span class="val"><span class="pill" id="tstate">Stopped</span><button type="button" class="tp" data-out="all" data-play="1">PLAY</button><button type="button" class="tp" data-out="all" data-play="0">STOP</button></span></div>
+<div class="row"><label>Transport</label><span class="val"><span class="pill" id="tstate">Stopped</span><button type="button" class="tp" data-out="all" data-play="1">PLAY</button><button type="button" class="tp" data-out="all" data-play="0">STOP</button><span class="kbd">space</span></span></div>
 <div class="row" id="townerrow" style="display:none;padding-top:0;border-top:0"><label></label><span class="val" id="towner" style="color:var(--amber);font-size:11px;letter-spacing:.12em">Link owns transport for outputs set to follow it</span></div>
 </div>
 <form method="POST" action="/save">
@@ -208,6 +218,7 @@ background:linear-gradient(180deg,#2a1512,#1c0f0d);color:#ff7a6b;transition:back
 var peersEl=document.getElementById('peers'),usbEl=document.getElementById('usb'),txEl=document.getElementById('tx'),minEl=document.getElementById('min');
 var followEl=document.getElementById('follow');
 var tstateEl=document.getElementById('tstate'),townerRow=document.getElementById('townerrow');
+var lastStatus=null;   // ESP-019: `space` flips whichever state the last /status showed
 // Overall transport state for the header pill. When a Link peer owns transport the
 // manual launch[] is frozen, so reflect the session's real play flag instead.
 function transportState(d){
@@ -216,6 +227,7 @@ var a=d.launch||[],run=false,arm=false;
 for(var i=0;i<a.length;i++){if(a[i]===2)run=true;else if(a[i]===1)arm=true;}
 return run?'PLAYING':(arm?'ARMING':'STOPPED');}
 function onStatus(d){
+lastStatus=d;
 peersEl.textContent=d.peers;
 usbEl.textContent=d.usb?'Connected':'Waiting';usbEl.className='pill'+(d.usb?' on':'');
 minEl.textContent=(d.min>0)?d.min.toFixed(1)+' BPM':'——.— BPM';
@@ -259,6 +271,46 @@ Array.prototype.forEach.call(document.querySelectorAll('.tgl'),function(b){
 b.addEventListener('click',function(){
 var play=((+(b.dataset.state||0))===0)?1:0;
 fetch('/transport?out='+b.dataset.out+'&play='+play,{method:'POST'}).catch(function(){})})});
+// ESP-019: keyboard transport. `1`..`4` toggle Clock Out 1..4, `space` toggles all.
+// The key never posts anything itself — it clicks the button the mouse would, so the
+// key and the click are one path that cannot drift into two.
+//
+// The guard that decides whether this feature is correct: a number typed into a text
+// field must NEVER fire a transport. A WiFi passphrase containing a `1` would
+// otherwise launch a drum machine mid-set.
+function typingInto(t){if(!t)return false;
+var n=(t.tagName||'').toLowerCase();
+return n==='input'||n==='select'||n==='textarea'||!!t.isContentEditable}
+// An output is keyable only if the clock-out feature is on AND that output is enabled.
+function outEnabled(o){var m=document.querySelector('input[name="clock_out"]');
+if(m&&!m.checked)return false;
+var cb=document.querySelector('input[name="clk'+o+'_en"]');return !!(cb&&cb.checked)}
+// A key on a Link-owned output must not act — but it must not fail *silently* either,
+// or the user concludes the feature is broken. Flash the greyed toggle and pulse the
+// note that already says who owns the transport.
+function nak(b){
+if(b){b.classList.remove('nak');void b.offsetWidth;b.classList.add('nak');
+setTimeout(function(){b.classList.remove('nak')},600)}
+townerRow.classList.remove('nak');void townerRow.offsetWidth;townerRow.classList.add('nak');
+setTimeout(function(){townerRow.classList.remove('nak')},1200)}
+document.addEventListener('keydown',function(e){
+if(typingInto(e.target))return;
+if(e.ctrlKey||e.metaKey||e.altKey||e.repeat)return;
+var b=null;
+if(e.key===' '||e.key==='Spacebar'){
+// The "all" transport is a PLAY/STOP pair, not a toggle: press whichever one flips
+// the state the page is currently showing.
+var st=lastStatus?transportState(lastStatus):'STOPPED';
+b=document.querySelector('.tp[data-out="all"][data-play="'+(st==='STOPPED'?'1':'0')+'"]')}
+else if(e.key>='1'&&e.key<='4'){
+var o=+e.key-1;                       // Clock Out 1..4 are data-out 0..3
+if(!outEnabled(o))return;             // disabled output: nothing to start
+b=document.querySelector('.tgl[data-out="'+o+'"]')}
+else return;
+e.preventDefault();   // space must not scroll the page or re-press a focused button
+if(!b)return;
+if(b.disabled){nak(b.classList.contains('tgl')?b:null);return}   // Link owns this one
+b.click()});
 var liveT=null;
 Array.prototype.forEach.call(document.querySelectorAll('.live'),function(el){
 var num=el.type==='number';
@@ -343,8 +395,11 @@ static std::string build_outputs()
         // ESP-011: one Touch-style toggle per output (stopped/arming/playing), plus
         // the per-output transport master. Follow Link on => this output tracks the
         // session and its toggle greys out; off => the toggle is yours.
+        // ESP-019: the key that fires this toggle is printed on it. Clock Out 1..4 are
+        // data-out 0..3, so the badge is the 1-based label the user already reads.
         s += std::string("<div class=\"fld\"><span class=\"pre\">RUN</span>")
-             + "<button type=\"button\" class=\"tgl\" data-out=\"" + N + "\">STOPPED</button></div>";
+             + "<button type=\"button\" class=\"tgl\" data-out=\"" + N + "\">STOPPED</button>"
+             + "<span class=\"kbd\">" + std::to_string(o + 1) + "</span></div>";
         s += std::string("<label class=\"sw folsw\"><input type=\"checkbox\" class=\"live\" name=\"clk") + N
              + "_follow\" value=\"1\"" + (c->follow_link ? " checked" : "")
              + "><span class=\"track\"><span class=\"knob\"></span></span>"
