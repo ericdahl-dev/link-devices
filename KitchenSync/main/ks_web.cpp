@@ -732,6 +732,11 @@ void ks_web_start(KsConfig* cfg, volatile uint32_t* gen, SemaphoreHandle_t cfg_m
     config_persist_reset(&s_persist);   // ARC-022: clean at boot — never write on the way up
     httpd_handle_t server = NULL;
     httpd_config_t hcfg = HTTPD_DEFAULT_CONFIG();
+    // P4-037: purge the least-recently-used connection when httpd's pool is full, rather
+    // than refusing the new one. Defence in depth beside the real fix (LWIP_MAX_SOCKETS=16
+    // in sdkconfig.defaults): the pool is 7 with 3 reserved internally, so 4 client slots,
+    // and a desktop browser opens up to 6 keep-alive connections to one host.
+    hcfg.lru_purge_enable = true;
     if (httpd_start(&server, &hcfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
     httpd_uri_t root       = { .uri = "/",       .method = HTTP_GET,  .handler = root_handler,        .user_ctx = NULL };
     httpd_uri_t status     = { .uri = "/status", .method = HTTP_GET,  .handler = status_handler,      .user_ctx = NULL };
