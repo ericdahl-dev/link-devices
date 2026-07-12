@@ -393,7 +393,23 @@ void app_main(void)
         follow_beat_io_start();   /* mic-based tempo detection, display-only v1 (P4-020) */
     ks_led_start(LED_GPIO, LED_PIXELS);   /* WS2812 visual metronome; harmless if nothing wired (P4-018) */
     midi_uart_out_start(MIDI_TX_GPIO, MIDI_STROBE_GPIO);   /* ESP-015: DIN MIDI out + analyzer strobe */
-    xTaskCreate(clock_out_task, "clock_out", 4096, NULL, 6, NULL);
+    /* P4-038: priority 19, core 1 — the ESP-018 fix, ported to the LAST firmware that
+     * never got it. This task ran at 6, which is BELOW lwIP's tcpip_task (18): the
+     * network stack could legally preempt the clock generator, and it did. Measured on
+     * the analyzer against a live Link session: the 24-PPQN clock stopped for 611-766 ms
+     * under web traffic, losing ~35 pulses outright in one run (permanent +741 ms drift)
+     * and dumping a 28-byte catch-up burst in another.
+     *
+     * The Touch (ktouch_midi_out.cpp) and X32Link (midi_clock_out_io.cpp, ARC-024) have
+     * been at 19/core-1 since ESP-018. KitchenSync -- the firmware ARC-019 calls the deep
+     * exemplar -- was the one still exposed. Same sandwich, same reasons:
+     *   - ABOVE lwIP (18), so serving the web UI cannot deschedule the clock.
+     *   - BELOW WiFi (23), because starving the radio to feed the clock loses the Link
+     *     session, and a perfectly-timed clock with no tempo is worth nothing.
+     * Core 1 keeps it off the core the network stack runs on. Note this does NOT cure a
+     * flash-cache stall (that freezes both cores regardless) -- ARC-022 keeping NVS writes
+     * on the priority-2 status task is what handles those. */
+    xTaskCreatePinnedToCore(clock_out_task, "clock_out", 4096, NULL, 19, NULL, 1);
     /* P4-033: the console lives HERE, not in clock_out. Low priority (2) so a blocking
      * UART write can never preempt the clock generator. */
     xTaskCreate(status_task, "status", 3072, NULL, 2, NULL);
