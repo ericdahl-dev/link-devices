@@ -12,7 +12,7 @@ void tearDown(void) {}
 // All fields present; usb/follow_enabled/follow_valid serialize as real JSON bools.
 void test_all_fields_present(void) {
     char b[300];
-    ks_status_json(b, sizeof(b), 132.0f, 120.5f, 1, true, 583, "2.1.0", true, 128.3f, 3.1f, true, kNoLaunch, false, false);
+    ks_status_json(b, sizeof(b), 132.0f, 120.5f, 1, true, 583, "2.1.0", true, 128.3f, 3.1f, true, kNoLaunch, false, false, NULL);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"bpm\":132.0"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"min\":120.5"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"peers\":1"));
@@ -27,14 +27,14 @@ void test_all_fields_present(void) {
 
 void test_usb_false_is_json_bool(void) {
     char b[300];
-    ks_status_json(b, sizeof(b), 0.0f, 0.0f, 0, false, 0, "2.1.0", false, 0.0f, 0.0f, false, kNoLaunch, false, false);
+    ks_status_json(b, sizeof(b), 0.0f, 0.0f, 0, false, 0, "2.1.0", false, 0.0f, 0.0f, false, kNoLaunch, false, false, NULL);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"usb\":false"));
 }
 
 // follow_valid false serializes as the bool false, not 0/"false".
 void test_follow_valid_false_is_json_bool(void) {
     char b[300];
-    ks_status_json(b, sizeof(b), 0.0f, 0.0f, 0, false, 0, "2.1.0", false, 0.0f, 0.0f, false, kNoLaunch, false, false);
+    ks_status_json(b, sizeof(b), 0.0f, 0.0f, 0, false, 0, "2.1.0", false, 0.0f, 0.0f, false, kNoLaunch, false, false, NULL);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"follow_valid\":false"));
 }
 
@@ -44,24 +44,24 @@ void test_follow_valid_false_is_json_bool(void) {
 // independently, not just mirror each other.
 void test_follow_enabled_independent_of_valid(void) {
     char b[300];
-    ks_status_json(b, sizeof(b), 0.0f, 0.0f, 0, false, 0, "2.1.0", true, 0.0f, 0.0f, false, kNoLaunch, false, false);
+    ks_status_json(b, sizeof(b), 0.0f, 0.0f, 0, false, 0, "2.1.0", true, 0.0f, 0.0f, false, kNoLaunch, false, false, NULL);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"follow_enabled\":true"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"follow_valid\":false"));
 }
 
 void test_return_value_is_snprintf_style_length(void) {
     char b[300];
-    int n = ks_status_json(b, sizeof(b), 132.0f, 120.5f, 1, true, 583, "2.1.0", true, 128.3f, 3.1f, true, kNoLaunch, false, false);
+    int n = ks_status_json(b, sizeof(b), 132.0f, 120.5f, 1, true, 583, "2.1.0", true, 128.3f, 3.1f, true, kNoLaunch, false, false, NULL);
     TEST_ASSERT_EQUAL_INT((int)strlen(b), n);
 
     char tiny[4];
-    int n2 = ks_status_json(tiny, sizeof(tiny), 132.0f, 120.5f, 1, true, 583, "2.1.0", true, 128.3f, 3.1f, true, kNoLaunch, false, false);
+    int n2 = ks_status_json(tiny, sizeof(tiny), 132.0f, 120.5f, 1, true, 583, "2.1.0", true, 128.3f, 3.1f, true, kNoLaunch, false, false, NULL);
     TEST_ASSERT_TRUE(n2 > (int)sizeof(tiny) - 1);  // truncated but length still reported
 }
 
 void test_fw_string_passes_through(void) {
     char b[300];
-    ks_status_json(b, sizeof(b), 120.0f, 0.0f, 0, false, 0, "9.9.9-rc1", false, 0.0f, 0.0f, false, kNoLaunch, false, false);
+    ks_status_json(b, sizeof(b), 120.0f, 0.0f, 0, false, 0, "9.9.9-rc1", false, 0.0f, 0.0f, false, kNoLaunch, false, false, NULL);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"fw\":\"9.9.9-rc1\""));
 }
 
@@ -70,7 +70,7 @@ void test_fw_string_passes_through(void) {
 void test_launch_state_array_present(void) {
     char b[300];
     const int ls[4] = { 2, 1, 0, 0 };
-    ks_status_json(b, sizeof(b), 132.0f, 0.0f, 1, true, 0, "2.1.0", false, 0.0f, 0.0f, false, ls, false, false);
+    ks_status_json(b, sizeof(b), 132.0f, 0.0f, 1, true, 0, "2.1.0", false, 0.0f, 0.0f, false, ls, false, false, NULL);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"launch\":[2,1,0,0]"));
 }
 
@@ -78,7 +78,7 @@ void test_launch_state_array_present(void) {
 // transport, so the UI can reflect play/stop and grey the manual buttons.
 void test_transport_state_fields(void) {
     char b[300];
-    ks_status_json(b, sizeof(b), 126.0f, 0.0f, 2, false, 0, "2.1.0", false, 0.0f, 0.0f, false, kNoLaunch, true, true);
+    ks_status_json(b, sizeof(b), 126.0f, 0.0f, 2, false, 0, "2.1.0", false, 0.0f, 0.0f, false, kNoLaunch, true, true, NULL);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"playing\":true"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"link_owns\":true"));
 }
@@ -86,13 +86,62 @@ void test_transport_state_fields(void) {
 // ...and both serialize as real JSON bools when false (not 0), independently.
 void test_transport_state_false_bools(void) {
     char b[300];
-    ks_status_json(b, sizeof(b), 126.0f, 0.0f, 0, false, 0, "2.1.0", false, 0.0f, 0.0f, false, kNoLaunch, false, false);
+    ks_status_json(b, sizeof(b), 126.0f, 0.0f, 0, false, 0, "2.1.0", false, 0.0f, 0.0f, false, kNoLaunch, false, false, NULL);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"playing\":false"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"link_owns\":false"));
 }
 
+// P4-038: the 1 ms clock task's health has to reach /status. KitchenSync already HAD
+// this probe and threw it away into a once-a-second serial log, so a 766 ms clock stall
+// (measured on the analyzer) left no trace unless someone had serial attached at that
+// exact moment. Published, or it may as well not exist.
+void test_tick_health_block_published(void) {
+    char b[420];
+    WebTickHealth t = { .dropped = 35, .bursts = 2, .max_gap_us = 766116, .max_work_us = 480,
+                        .overruns = 3, .w_beats = 62, .w_clock = 5038, .core = 1 };
+    ks_status_json(b, sizeof(b), 120.0f, 0.0f, 1, true, 900, "2.2.0", false, 0.0f, 0.0f, false,
+                   kNoLaunch, false, false, &t);
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"drop\":35"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"burst\":2"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"gap\":766116"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"work\":480"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"over\":3"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"core\":1"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"w_beats\":62"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"w_clock\":5038"));
+}
+
+// NULL tick => the block is ABSENT, not zero-filled. A row of zeroes reads as
+// "measured, all clean" -- which is exactly the lie this probe exists to prevent.
+void test_no_tick_health_omits_block_rather_than_zero_filling(void) {
+    char b[420];
+    ks_status_json(b, sizeof(b), 120.0f, 0.0f, 1, true, 900, "2.2.0", false, 0.0f, 0.0f, false,
+                   kNoLaunch, false, false, NULL);
+    TEST_ASSERT_NULL(strstr(b, "\"gap\""));
+    TEST_ASSERT_NULL(strstr(b, "\"drop\""));
+    TEST_ASSERT_NULL(strstr(b, "\"core\""));
+    TEST_ASSERT_NULL(strstr(b, "\"gap\":0"));      // the zero-filled row we must never emit
+    TEST_ASSERT_EQUAL_CHAR('}', b[strlen(b) - 1]); // still closes
+}
+
+// The tick block made the payload ~90 bytes longer. Truncation must still be
+// DETECTABLE (snprintf semantics: return what it WOULD have written), or ks_web
+// silently serves half a JSON object and the UI just stops updating.
+void test_truncation_still_detectable_with_tick_block(void) {
+    char tiny[64];
+    WebTickHealth t = { .dropped = 35, .bursts = 2, .max_gap_us = 766116, .max_work_us = 480,
+                        .overruns = 3, .w_beats = 62, .w_clock = 5038, .core = 1 };
+    int n = ks_status_json(tiny, sizeof(tiny), 120.0f, 0.0f, 1, true, 900, "2.2.0",
+                           false, 0.0f, 0.0f, false, kNoLaunch, false, false, &t);
+    TEST_ASSERT_GREATER_THAN_INT((int)sizeof(tiny), n);   // caller can see it did not fit
+    TEST_ASSERT_EQUAL_CHAR('\0', tiny[sizeof(tiny) - 1]); // and we never ran off the end
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_tick_health_block_published);
+    RUN_TEST(test_no_tick_health_omits_block_rather_than_zero_filling);
+    RUN_TEST(test_truncation_still_detectable_with_tick_block);
     RUN_TEST(test_launch_state_array_present);
     RUN_TEST(test_all_fields_present);
     RUN_TEST(test_usb_false_is_json_bool);
