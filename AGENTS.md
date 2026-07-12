@@ -27,6 +27,7 @@ bridge and emulator only. Don't edit `cli/` when working here.
 | Flash   | `arduino-cli upload  --fqbn esp32:esp32:adafruit_qtpy_esp32s3_n4r2:PartitionScheme=min_spiffs -p /dev/ttyACM0 X32Link` |
 | Host tests | `cd test && make`  (Unity; pure-logic suites, runs on the dev box) |
 | Emulator seam tests | `cd tests && make run` (native gcc — `x32_port`) |
+| Bench Link peer | `cmake -S tools/linkcli -B tools/linkcli/build && cmake --build tools/linkcli/build`, then `./tools/linkcli/build/linkcli` (see **Bench Link peer** below — required for any device tempo/transport test) |
 | Emulator compile | `arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc X32_emulator` |
 
 Notes:
@@ -84,13 +85,46 @@ Notes:
 - Normalization lives in `osc_out.c:bpm_to_normalized()` — delay ms = 60000/BPM,
   clamped to 3000 ms, scaled to 0.0–1.0.
 
+## Bench Link peer (`tools/linkcli`)
+
+**The firmware cannot form a Link session on its own.** `X32Link/link_protocol.c` is a
+*listener* — it parses the gossip timeline but never transmits. A device alone on the
+network therefore sees `peers:0`, and `/transport` returns 200 and then silently drops
+the intent. `tools/linkcli` is the Ableton stand-in that makes the session real, and it
+is a prerequisite for **any** device tempo or transport test.
+
+It is a genuine Link peer built against the vendored SDK (`LinkAudioPoC/third_party/link`
+— asio is bundled at `modules/asio-standalone`, nothing to fetch). It drives
+`ableton::Link` directly rather than through the SDK's `linkhut` audio engine, so there is
+no CoreAudio dependency and no click track. Source: `tools/linkcli/main.cpp`.
+
+Keys: `↑`/`↓` tempo ±1, `←`/`→` tempo ±0.1, `space` start/stop, `q`/`Q` quantum,
+`p` force beat 0 onto *now* (a known downbeat to trigger the analyzer on), `s` start/stop
+sync, `a` Link on/off, `x` quit. Flags: `--tempo N`, `--quantum N`, `--play`.
+
+Two behaviours that will otherwise read as firmware bugs:
+
+- **A peer that joins an already-playing session stays stopped.** This is Link's design,
+  not a bug: start/stop is last-writer-wins by timestamp (`Controller.hpp:89`), and a
+  booting peer initialises its start/stop state with `timestamp = hostTime`
+  (`Controller.hpp:67`) — so its fresh "stopped" is *newer* than an earlier "playing" and
+  wins. Tempo, by contrast, *is* adopted by late joiners, which makes the asymmetry
+  extra confusing. **Form the session first, then press play.** A device that reboots
+  mid-test comes back stopped even though the session is playing — re-press play rather
+  than hunting for a transport bug.
+- **It is a live peer.** Pressing play starts every Link app on the LAN (Ableton Live,
+  Note on a phone). A peer count higher than expected is usually a real device, not a bug.
+
+Ableton Link is GPLv2. A dev tool that is never distributed is unencumbered; shipping any
+of it is a licensing question, not an engineering one.
+
 ## Modules (roles — the directory is the source of truth for the file list)
 
 | Module | Job |
 |---|---|
 | `X32Link.ino` | app core: setup/loop, WiFi + AP fallback, FreeRTOS bpm/led tasks, factory reset |
 | `tempo_source.{h,cpp}` | the input **seam** — one interface, dispatches to Link or MIDI by `input_source` |
-| `link_listener.*` + `link_protocol.*` | Link adapter; `link_protocol.c` is our own ~100-line gossip parser (the vendored `lib/link/` SDK is **not** used at runtime) |
+| `link_listener.*` + `link_protocol.*` | Link adapter; `link_protocol.c` is our own ~100-line gossip parser — **receive-only, it never transmits**, so the firmware joins a session but cannot create one (see **Bench Link peer**). The vendored Ableton SDK (`LinkAudioPoC/third_party/link`) is **not** used at runtime — only by `tools/linkcli` on the host |
 | `link_measurement.{h,c}` + `link_measurement_session.{h,c}` + `link_measurement_io.cpp` | Link measurement (ping/pong) client. `link_measurement.c` = pure TLV build/parse + median/offset math; `link_measurement_session.c` = pure orchestrator (LNK-031: peer targeting, re-measure, epoch-reset, watchdog — the policy where LNK-026 lived, host-tested via an action list); `link_measurement_io.cpp` = thin WiFiUDP glue executing the session's actions — pinger-only, no PingResponder |
 | `midi_clock.*` · `midi_bpm.*` · `midi_bpm_calc.*` | USB-MIDI adapter; `midi_bpm_calc` is the pure, host-tested BPM math. `midi_clock` also owns the shared USBMIDI endpoint + `midi_clock_send_f8()` for clock OUT |
 | `clock_ticker.{h,c}` | LNK-027/028 shared pure tick engine: quantizes `tempo_source_beats_now()` to N PPQN pulses (phase-locked, re-primes on re-origin) + a `BarReset` tracker that fires once per bar boundary (analog reset pulse). Host-tested |
