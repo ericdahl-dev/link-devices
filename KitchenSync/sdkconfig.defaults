@@ -28,6 +28,16 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# Socket budget (P4-037). The ESP-IDF default of 10 cannot hold this device's
+# tenants: the httpd wants 8 (1 listener + max_open_sockets 7), Link's multicast
+# socket (wifi_link.c) 1, the Link measurement socket (link_measure_io.c) 1, and
+# mDNS ~2 — about 12. LWIP ran dry, so `accept()` failed with ENFILE and the web
+# UI wedged for good after ONE desktop-browser visit (a browser opens up to 6
+# keep-alive connections). httpd's lru_purge_enable alone does NOT save it: purge
+# only fires when httpd's own pool is full, and LWIP was empty before that.
+# Verified on hardware: 10 dies on one Chromium load, 16 survives.
+CONFIG_LWIP_MAX_SOCKETS=16
+
 # The P4-NANO's flash chip is 16MB — CONFIRMED on hardware with `esptool.py
 # flash_id` (manufacturer c8, device 4018 = GD25Q128). The old 4MB value here was
 # a guess ("the minimum step that fits the two-OTA table"), and it capped the app
