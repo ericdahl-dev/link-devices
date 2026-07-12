@@ -32,6 +32,7 @@
 #include "ks_web.h"
 #include "metronome_audio.h"   // P4-029: live vol/voice re-apply
 #include "transport_intent.h"   // ESP-011: quantized launch presses
+#include "ks_tick_health.h"      // P4-038: 1ms clock task probe -> /status
 #include "config_persist.h"   // ARC-022: debounced write-through for /live edits
 
 #define RESULT_PAGE_MAX 1536   /* ui_result_page worst case + slack */
@@ -475,16 +476,21 @@ static esp_err_t root_handler(httpd_req_t *req)
 
 static esp_err_t status_handler(httpd_req_t *req)
 {
-    char buf[320];   // launch[] (ESP-011) + follow (P4-020) + transport state; matches test_ks_status.c's margin
+    // P4-038 grew this by the tick-health block (~90 bytes worst case); 448 keeps the
+    // same headroom test_ks_status.c asserts against.
+    char buf[448];
     bool fb_enabled = s_cfg && s_cfg->follow_beat_enable;
     FollowBeatOut fb = fb_enabled ? follow_beat_io_status() : FollowBeatOut{};
     int ls[KS_CLOCK_OUTPUTS];
     for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) ls[i] = s_launch[i];
+    WebTickHealth tick;                                  // P4-038: the 1 ms clock task's health
+    bool have_tick = ks_tick_health(&tick);
     ks_status_json(buf, sizeof(buf),
                       (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
                       wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx(),
                       FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid, ls,
-                      link_proto_playing(), link_proto_start_stop_seen());
+                      link_proto_playing(), link_proto_start_stop_seen(),
+                      have_tick ? &tick : nullptr);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }
