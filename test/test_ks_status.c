@@ -98,7 +98,7 @@ void test_transport_state_false_bools(void) {
 void test_tick_health_block_published(void) {
     char b[420];
     WebTickHealth t = { .dropped = 35, .bursts = 2, .max_gap_us = 766116, .max_work_us = 480,
-                        .overruns = 3, .w_beats = 62, .w_clock = 5038, .core = 1 };
+                        .overruns = 3, .w_beats = 62, .w_clock = 5038, .core = 1, .reprimes = 7 };
     ks_status_json(b, sizeof(b), 120.0f, 0.0f, 1, true, 900, "2.2.0", false, 0.0f, 0.0f, false,
                    kNoLaunch, false, false, &t);
     TEST_ASSERT_NOT_NULL(strstr(b, "\"drop\":35"));
@@ -109,6 +109,7 @@ void test_tick_health_block_published(void) {
     TEST_ASSERT_NOT_NULL(strstr(b, "\"core\":1"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"w_beats\":62"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"w_clock\":5038"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"reprime\":7"));
 }
 
 // NULL tick => the block is ABSENT, not zero-filled. A row of zeroes reads as

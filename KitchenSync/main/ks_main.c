@@ -115,6 +115,11 @@ static volatile struct {
     int64_t  w_beats, w_clock;    /* worst tick, per stage: session read / emit */
     int      core;                /* which core the writer REALLY landed on -- report,
                                    * never assume (ESP-018's core premise was wrong) */
+    uint32_t reprimes;            /* times the beat grid was RE-PRIMED (basis switch, phase
+                                   * invalid, live-config edit). The one number that tells a
+                                   * SCHEDULING stall from a PHASE stall: a re-prime emits
+                                   * nothing and drops nothing, so it is invisible in every
+                                   * other counter here -- yet the wire goes silent. */
 } s_stat;
 
 /* Priority 2 — the lowest thing running, and deliberately so. It logs (a blocking
@@ -170,6 +175,7 @@ bool ks_tick_health(WebTickHealth* out)
     out->w_beats     = (uint32_t)(s_stat.w_beats > 0 ? s_stat.w_beats : 0);
     out->w_clock     = (uint32_t)(s_stat.w_clock > 0 ? s_stat.w_clock : 0);
     out->core        = s_stat.core;
+    out->reprimes    = s_stat.reprimes;
     return true;
 }
 
@@ -201,12 +207,6 @@ static void clock_out_task(void *arg)
     /* P4-038: report the core the task ACTUALLY landed on. ESP-018's premise about core
      * assignment turned out to be wrong and only the measurement caught it. */
     s_stat.core = xPortGetCoreID();
-
-    /* P4-038: clock_ticker_reset() zeroes its own `dropped` and says so -- banking a
-     * LIFETIME total across resets is explicitly "the glue's job", because a pure struct
-     * cannot tell first-init from re-prime. Reset only fires when phase is invalid (no
-     * clock to drop anyway), so a decrease just re-baselines. */
-    uint32_t prev_dropped = 0;
 
     while (1) {
         int64_t tk0 = esp_timer_get_time();
@@ -261,6 +261,7 @@ static void clock_out_task(void *arg)
         };
         transport_intent_take(in.launch);   /* ESP-011: one press, one action */
         KsTickPlan plan = ks_tick_step(&ts, &in);
+        if (plan.reprime) s_stat.reprimes++;   /* P4-038: the grid moved under us */
         {   /* ESP-011: surface arming state to the web UI. */
             int ls[KS_CLOCK_OUTPUTS];
             for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) ls[o] = (int)plan.launch_state[o];
@@ -343,13 +344,10 @@ static void clock_out_task(void *arg)
             for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
                 if (plan.pulses[o] > 1) { s_stat.bursts++; break; }
             }
-            /* Pulses the ticker threw away past the burst cap. These leave NO gap and NO
-             * burst on the wire -- without this counter a stall long enough to trip the
-             * realign is completely invisible (ESP-018). */
-            uint32_t cur = 0;
-            for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) cur += ts.cts[o].dropped;
-            if (cur >= prev_dropped) s_stat.dropped += (cur - prev_dropped);
-            prev_dropped = cur;   /* a decrease = a reset re-primed the grid; re-baseline */
+            /* Pulses the ticker threw away past the burst cap. Banked in the PURE step
+             * (ks_tick_bank_dropped, host-tested) so a re-prime cannot erase them --
+             * the same design ARC-019 uses inside ClockOutput for the 1 ms writers. */
+            s_stat.dropped = ks_tick_dropped(&ts);
         }
         /* Metronome click on the onboard speaker (P4-006). Counted, not logged
          * (P4-033): this fires every beat, so a per-click console write stalled the

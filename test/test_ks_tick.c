@@ -397,8 +397,31 @@ void test_manual_stop_is_immediate_while_session_plays(void) {
     TEST_ASSERT_EQUAL_INT(TL_STOPPED, p.launch_state[0]);
 }
 
+// P4-038: a re-prime ZEROES each ClockTicker's own `dropped` (a pure struct cannot tell
+// first-init from re-prime, so clock_ticker.c says banking the lifetime total is the
+// caller's job -- ARC-019 does exactly that inside ClockOutput for the 1 ms writers).
+// KitchenSync keeps its own burst policy (KS_TICK_MAX_BURST 96: prefer catch-up over
+// dropping), so it needs the same banking HERE, in the pure step, not in the glue.
+void test_dropped_total_survives_a_reprime(void) {
+    KsTickState st;
+    ks_tick_reset(&st, 0);
+    st.cts[0].dropped = 12;           // the ticker discarded 12 pulses on a realign
+    st.cts[1].dropped = 5;
+
+    ks_tick_bank_dropped(&st);        // a re-prime is about to zero them
+    TEST_ASSERT_EQUAL_UINT32(17, ks_tick_dropped(&st));
+
+    st.cts[0].dropped = 0;            // ...and it did
+    st.cts[1].dropped = 0;
+    TEST_ASSERT_EQUAL_UINT32(17, ks_tick_dropped(&st));   // lifetime total survives
+
+    st.cts[0].dropped = 3;            // new drops accumulate on top of the banked total
+    TEST_ASSERT_EQUAL_UINT32(20, ks_tick_dropped(&st));
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_dropped_total_survives_a_reprime);
     RUN_TEST(test_manual_output_survives_session_stop);
     RUN_TEST(test_session_start_reaches_only_following_outputs);
     RUN_TEST(test_manual_stop_is_immediate_while_session_plays);

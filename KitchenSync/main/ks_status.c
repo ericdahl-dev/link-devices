@@ -21,11 +21,12 @@ int ks_status_json(char* buf, size_t len, float bpm, float midi_bpm, int peers, 
     if (tick && (size_t)n < len) {
         int m = snprintf(buf + n, len - (size_t)n,
                          ",\"drop\":%lu,\"burst\":%lu,\"gap\":%lu,\"work\":%lu,\"over\":%lu,\"core\":%d,"
-                         "\"w_beats\":%lu,\"w_clock\":%lu",
+                         "\"w_beats\":%lu,\"w_clock\":%lu,\"reprime\":%lu",
                          (unsigned long)tick->dropped, (unsigned long)tick->bursts,
                          (unsigned long)tick->max_gap_us, (unsigned long)tick->max_work_us,
                          (unsigned long)tick->overruns, tick->core,
-                         (unsigned long)tick->w_beats, (unsigned long)tick->w_clock);
+                         (unsigned long)tick->w_beats, (unsigned long)tick->w_clock,
+                         (unsigned long)tick->reprimes);
         if (m < 0) return m;
         n += m;
     }
