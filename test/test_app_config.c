@@ -240,8 +240,95 @@ void test_set_rejects_bad_input_source(void) {
     TEST_ASSERT_EQUAL_INT(0, cfg.input_source);
 }
 
+// ---------------------------------------------------------------- ARC-020
+// config_decode: the one owner of "is this persisted blob safe to load?".
+// Mirrors test_ks_config.c. Every gate is fail-closed -> defaults.
+
+// A blob written by this build decodes back verbatim.
+void test_decode_round_trip(void) {
+    AppConfig saved; config_defaults(&saved);
+    TEST_ASSERT_TRUE(app_config_set(&saved, ACF_MODEL, MODEL_X32));
+    TEST_ASSERT_TRUE(app_config_set(&saved, ACF_FX_SLOT, 7));       // X32-only slot
+    TEST_ASSERT_TRUE(app_config_set(&saved, ACF_QUANTUM_BEATS, 8));
+    strcpy(saved.wifi_ssid, "studio");
+    strcpy(saved.mixer_ip,  "10.0.0.9");
+
+    AppConfig out;
+    cfg_decode_result r = config_decode(&out, &saved, sizeof(saved),
+                                        true, APP_CONFIG_VERSION);
+    TEST_ASSERT_EQUAL_INT(CFG_DECODE_OK, r);
+    TEST_ASSERT_EQUAL_INT(MODEL_X32, out.model);
+    TEST_ASSERT_EQUAL_INT(7, out.fx_slot);
+    TEST_ASSERT_EQUAL_INT(8, out.quantum_beats);
+    TEST_ASSERT_EQUAL_STRING("studio",   out.wifi_ssid);
+    TEST_ASSERT_EQUAL_STRING("10.0.0.9", out.mixer_ip);
+}
+
+// No blob at all (fresh flash) -> defaults.
+void test_decode_absent_blob_defaults(void) {
+    AppConfig out;
+    TEST_ASSERT_EQUAL_INT(CFG_DECODE_DEFAULTED, config_decode(&out, NULL, 0, false, 0));
+    TEST_ASSERT_TRUE(config_validate(&out));
+    TEST_ASSERT_EQUAL_INT(MODEL_XR18, out.model);   // == defaults
+}
+
+// Bytes present but no version key (predates versioning) -> not vouched for.
+void test_decode_no_version_defaults(void) {
+    AppConfig saved; config_defaults(&saved);
+    app_config_set(&saved, ACF_MODEL, MODEL_X32);
+
+    AppConfig out;
+    TEST_ASSERT_EQUAL_INT(CFG_DECODE_DEFAULTED,
+                          config_decode(&out, &saved, sizeof(saved), false, 0));
+    TEST_ASSERT_EQUAL_INT(MODEL_XR18, out.model);   // NOT X32
+}
+
+// A version we don't know -> defaults (never guess a layout).
+void test_decode_wrong_version_defaults(void) {
+    AppConfig saved; config_defaults(&saved);
+    app_config_set(&saved, ACF_MODEL, MODEL_X32);
+
+    AppConfig out;
+    TEST_ASSERT_EQUAL_INT(CFG_DECODE_DEFAULTED,
+                          config_decode(&out, &saved, sizeof(saved), true,
+                                        APP_CONFIG_VERSION + 99u));
+    TEST_ASSERT_EQUAL_INT(MODEL_XR18, out.model);
+}
+
+// Right version, wrong size -> the struct moved under us. Defaults.
+void test_decode_size_mismatch_defaults(void) {
+    AppConfig saved; config_defaults(&saved);
+    app_config_set(&saved, ACF_MODEL, MODEL_X32);
+
+    AppConfig out;
+    TEST_ASSERT_EQUAL_INT(CFG_DECODE_DEFAULTED,
+                          config_decode(&out, &saved, sizeof(saved) - 4, true,
+                                        APP_CONFIG_VERSION));
+    TEST_ASSERT_EQUAL_INT(MODEL_XR18, out.model);
+}
+
+// Version and size both vouch for it, but a field is out of range (bit-rot, or a
+// layout shipped without a version bump). The guard still runs. Defaults.
+void test_decode_invalid_contents_defaults(void) {
+    AppConfig saved; config_defaults(&saved);
+    saved.mixer_ip[0] = '\0';     // config_validate rejects an empty mixer IP
+
+    AppConfig out;
+    TEST_ASSERT_EQUAL_INT(CFG_DECODE_DEFAULTED,
+                          config_decode(&out, &saved, sizeof(saved), true,
+                                        APP_CONFIG_VERSION));
+    TEST_ASSERT_TRUE(config_validate(&out));
+    TEST_ASSERT_TRUE(out.mixer_ip[0] != '\0');
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_decode_round_trip);
+    RUN_TEST(test_decode_absent_blob_defaults);
+    RUN_TEST(test_decode_no_version_defaults);
+    RUN_TEST(test_decode_wrong_version_defaults);
+    RUN_TEST(test_decode_size_mismatch_defaults);
+    RUN_TEST(test_decode_invalid_contents_defaults);
     RUN_TEST(test_set_applies_valid_value);
     RUN_TEST(test_set_rejects_out_of_range_keeps_old);
     RUN_TEST(test_set_quantum_incdec_bounds_via_setter);
