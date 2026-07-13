@@ -73,6 +73,27 @@ static volatile float s_dbg_beats = 0.0f;
 static volatile int   s_dbg_locked = -1;
 static volatile int   s_dbg_active = -1;
 
+/* ESP-028: the only honest answer to "is the clock alive?" is BYTES ON THE WIRE.
+ *
+ * /status used to report `sync` = tempo_source_phase_valid() -- whether a phase ESTIMATE
+ * exists. That says nothing about whether pulses reach the jack, and during ESP-027 it read
+ * sync:1 peers:1 clock:1 drop:0 with ZERO bytes on the wire for 138 seconds. Every counter
+ * green. It did not merely fail to report the fault; it actively said the device was healthy,
+ * which is why finding it needed a logic analyzer instead of a glance at /status.
+ *
+ * The writer is the only thing that knows. It counts what it emits. */
+static volatile uint32_t s_pulses        = 0;   // lifetime 0xF8 written to the UART
+static volatile uint32_t s_last_pulse_ms = 0;   // when the last one went out
+
+/* ESP-028: the SAME lie, one field over. /status reported bpm from tempo_source_bpm() ->
+ * link_proto_bpm(), which zeroes the moment peers drop. So a device free-running perfectly
+ * at 120 BPM on the master_clock reported bpm 0.0 -- while emitting a 120 BPM clock.
+ *
+ * Take it from the timeline the WRITER is actually clocking off (the arbiter's, which
+ * survives peer loss), exactly as P4-039 did for the P4: "derive from the settled timeline,
+ * which survives peer loss -- not link_proto_bpm(), which a caller may zero independently." */
+static volatile float s_bpm = 0.0f;
+
 uint32_t ktouch_midi_max_gap(void)  { return s_max_gap_us; }
 uint32_t ktouch_midi_max_work(void) { return s_max_work_us; }
 uint32_t ktouch_midi_overruns(void) { return s_overruns; }
@@ -84,6 +105,22 @@ int      ktouch_midi_core(void)     { return s_core; }
 float    ktouch_midi_beats(void)    { return s_dbg_beats; }
 int      ktouch_midi_locked(void)   { return s_dbg_locked; }
 int      ktouch_midi_bs_active(void){ return s_dbg_active; }
+
+// ESP-028. A monotonic pulse count makes "is the wire alive?" answerable by polling, with
+// no analyzer. And the state answers it in one word.
+uint32_t ktouch_midi_pulses(void) { return s_pulses; }
+float    ktouch_midi_bpm(void)    { return s_bpm; }
+
+// At 120 BPM a pulse is due every ~20.8 ms; the slowest tempo we allow is far inside 500 ms.
+// So half a second of silence is not slow -- it is STOPPED.
+#define KTOUCH_SILENT_AFTER_MS 500
+
+const char* ktouch_midi_clock_state(void) {
+    // Never emitted anything at all: not "locked", not "free". Silent.
+    if (s_pulses == 0) return "silent";
+    if ((uint32_t)(millis() - s_last_pulse_ms) > KTOUCH_SILENT_AFTER_MS) return "silent";
+    return s_dbg_locked == 1 ? "locked" : "free";
+}
 
 static void writer_task(void*) {
     s_core = xPortGetCoreID();   // ESP-018: confirm, don't assume
@@ -152,6 +189,8 @@ static void writer_task(void*) {
                                              esp_timer_get_time());
         if (bs.reprime) clock_output_reset(&s_out);   // realign, don't burst
         s_dbg_beats = (float)bs.beats; s_dbg_locked = bs.locked; s_dbg_active = bs.active;
+        s_bpm = (bs.active && mc.tl.micros_per_beat > 0)          // ESP-028
+                  ? (float)(60.0e6 / (double)mc.tl.micros_per_beat) : 0.0f;
         double beats = bs.active ? bs.beats : -1.0;
         uint32_t t_beats = micros();
         // One call owns the whole derivation (ARC-019): reset-on-invalid +
@@ -199,6 +238,7 @@ static void writer_task(void*) {
 
         // Clock, AFTER transport (see above).
         for (int i = 0; i < n; i++) din_midi_out_byte(0xF8);
+        if (n > 0) { s_pulses += (uint32_t)n; s_last_pulse_ms = millis(); }   // ESP-028
 
         uint32_t tk1  = micros();
         uint32_t work = tk1 - tk0;
