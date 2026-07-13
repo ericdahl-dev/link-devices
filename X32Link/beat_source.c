@@ -4,6 +4,8 @@ void beat_source_reset(BeatSource* s) {
     beat_clock_reset(&s->bc);
     s->was_locked = false;
     s->running    = false;
+    s->last_beats = 0.0;
+    s->have_last  = false;
 }
 
 BeatSourceOut beat_source_step(BeatSource* s, bool have_session,
@@ -18,6 +20,7 @@ BeatSourceOut beat_source_step(BeatSource* s, bool have_session,
             beat_clock_reset(&s->bc);
             s->was_locked = false;
             s->running    = false;
+            s->have_last  = false;
             o.reprime     = true;
         }
         return o;
@@ -38,6 +41,13 @@ BeatSourceOut beat_source_step(BeatSource* s, bool have_session,
         if (reprime) beat_clock_reset(&s->bc);   // entering free from lock: restart at 0
         beats = beat_clock_advance(&s->bc, now_us, tl.micros_per_beat);
     }
+
+    // ESP-027: a backwards step means the session re-originated. The basis did not switch
+    // (locked is unchanged), so the rule above sees nothing -- and clock_ticker then waits
+    // for beats to climb back to its primed grid, emitting silence for as long as that takes.
+    if (s->have_last && beats < s->last_beats - BEAT_SOURCE_BACKSTEP_BEATS) reprime = true;
+    s->last_beats = beats;
+    s->have_last  = true;
 
     s->was_locked = locked;
     s->running    = true;

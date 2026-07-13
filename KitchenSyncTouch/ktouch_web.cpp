@@ -217,7 +217,8 @@ static void handle_status() {
              "{\"bpm\":%.1f,\"sync\":%d,\"peers\":%d,\"clock\":%d,\"transport\":%d,"
              "\"cue\":%d,\"tfail\":%lu,\"tzero\":%lu,\"ccancel\":%lu,"
              "\"drop\":%lu,\"burst\":%lu,\"gap\":%lu,\"work\":%lu,\"over\":%lu,\"core\":%d,"
-             "\"wbeats\":%lu,\"wclock\":%lu,\"wtport\":%lu}",
+             "\"wbeats\":%lu,\"wclock\":%lu,\"wtport\":%lu,"
+             "\"beats\":%.2f,\"locked\":%d,\"bsactive\":%d}",
              (double)bpm, sync, link_proto_peers(),
              g_config.clock_enable ? 1 : 0, ktouch_transport_state(),
              ktouch_cueing(), (unsigned long)ktouch_touch_fails(),
@@ -226,7 +227,8 @@ static void handle_status() {
              (unsigned long)ktouch_midi_max_gap(), (unsigned long)ktouch_midi_max_work(),
              (unsigned long)ktouch_midi_overruns(), ktouch_midi_core(),
              (unsigned long)ktouch_midi_w_beats(), (unsigned long)ktouch_midi_w_clock(),
-             (unsigned long)ktouch_midi_w_tport());
+             (unsigned long)ktouch_midi_w_tport(),
+             (double)ktouch_midi_beats(), ktouch_midi_locked(), ktouch_midi_bs_active());
     server.send(200, "application/json", buf);
 }
 
@@ -239,6 +241,32 @@ static void handle_nudge() {
     if (server.hasArg("mb") && app_config_set(&g_config, ACF_NUDGE_MBEATS, server.arg("mb").toInt()))
         config_persist_mark(&s_persist, millis());
     server.send(200, "text/plain", "ok");
+}
+
+// ESP-025 transport over HTTP. The Touch could only be driven from its LCD, which leaves
+// a HEADLESS unit -- the bench rig -- with no way to start the clock at all. It also makes
+// the ESP-023 analyzer check (is 0xFA emitted BEFORE the downbeat 0xF8?) scriptable instead
+// of dependent on a human finger, which is what ESP-024's timing runs need.
+//
+// Posts an INTENT, exactly like a button or a touch. It does not touch the wire: the 1 ms
+// writer owns transport_launch and fires START on the bar line (STOP is immediate).
+//
+//   POST /transport?play=1   PLAY      (arms; fires on the next bar line)
+//   POST /transport?play=0   STOP      (immediate)
+//   POST /transport?realign=1          (arms; 0xFC then 0xFA on the next bar line)
+static void handle_transport() {
+    if (server.hasArg("realign")) {
+        ktouch_transport_post(TL_INTENT_REALIGN);
+        server.send(200, "text/plain", "realign armed\n");
+        return;
+    }
+    if (server.hasArg("play")) {
+        bool play = server.arg("play").toInt() != 0;
+        ktouch_transport_post(play ? TL_INTENT_PLAY : TL_INTENT_STOP);
+        server.send(200, "text/plain", play ? "play armed\n" : "stopped\n");
+        return;
+    }
+    server.send(400, "text/plain", "want ?play=1|0 or ?realign=1\n");
 }
 
 // Live backlight brightness. Same pattern as /nudge: apply now, persist once settled.
@@ -306,6 +334,7 @@ void ktouch_web_begin(void) {
     server.on("/status", handle_status);
     server.on("/save",   HTTP_POST, handle_save);
     server.on("/nudge",  HTTP_POST, handle_nudge);
+    server.on("/transport", HTTP_POST, handle_transport);   // ESP-025: headless transport
     server.on("/bright", HTTP_POST, handle_bright);
     server.on("/update", HTTP_GET,  handle_update_page);              // ESP-020
     server.on("/update", HTTP_POST, handle_update_result, handle_update_upload);
