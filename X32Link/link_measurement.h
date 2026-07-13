@@ -211,6 +211,13 @@ LinkGhostXForm link_measurement_current_xform(void);
 // valid-then-invalid at exactly the moment the estimate became good.
 bool link_measurement_have_phase_estimate(void);
 
+/* ESP-028: invalidate the committed mapping WITHOUT zeroing the P4-038 phase-health gauge.
+ * This is what a peer churn wants: the old session's origin must stop being served (ESP-027),
+ * but the lifetime record of how badly commits have been throwing the origin must survive --
+ * a churn is exactly when that history is worth having. link_measurement_reset() is the full
+ * boot reset and blanks the gauge too. */
+void link_measurement_invalidate_xform(void);
+
 // Lifecycle only — true while a measurement attempt is in flight. For the
 // measurement pump's attempt orchestration; NOT a phase-validity signal.
 // Callers deciding whether phase can be trusted must use

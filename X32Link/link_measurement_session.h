@@ -24,6 +24,12 @@ extern "C" {
 #define LINK_SESSION_MAX_TIMEOUTS   5         // 5 * 50 ms = 250 ms -> abandon attempt
 #define LINK_SESSION_REMEASURE_US   2000000   // 2 s periodic re-measure
 
+// Most actions any single on_* call can emit. on_trigger is the worst case, and since
+// ESP-028 it is exactly this: RESET_XFORM + FLUSH_RX + START_ATTEMPT + SEND_PING. Callers
+// MUST size their action buffer with this — the emitters are all `if (n < max)`, so an
+// under-sized buffer does not error, it silently drops the TAIL, and the tail is the ping.
+#define LINK_SESSION_MAX_ACTIONS    4
+
 typedef enum {
     LS_FLUSH_RX = 1,     // discard any buffered pongs before a fresh attempt
     LS_START_ATTEMPT,    // begin sample collection (link_measurement_attempt_begin)
@@ -66,8 +72,15 @@ int link_session_on_epoch_reset(LinkSession* s, LinkSessionAct* out, int max);
 // Trigger check each poll. peer_found + {ip,port} come from
 // link_proto_peer_endpoint(); active mirrors link_measurement_active(). Starts a
 // fresh attempt (FLUSH_RX, START_ATTEMPT, first SEND_PING) when a different peer
-// appeared or the re-measure timer is due and no attempt is in flight. If no peer
-// endpoint is available, forgets the reference. Returns action count.
+// appeared or the re-measure timer is due and no attempt is in flight.
+//
+// ESP-028: the reference ENDPOINT is the session identity this module can see. When it
+// disappears or moves (a restarted Link peer returns on a new ephemeral mep4 port), the
+// committed GhostXForm maps to a ghost epoch that no longer exists, so this emits
+// LS_RESET_XFORM *first* — before the flush and the fresh attempt. Serving a stale mapping
+// as a valid phase estimate is what silenced the DIN clock for 138 s (ESP-027).
+// Invariant: a committed xform is never served for an endpoint we are no longer targeting.
+// Returns action count.
 int link_session_on_trigger(LinkSession* s, bool peer_found, uint32_t ip, uint16_t port,
                             int64_t now_us, bool active, LinkSessionAct* out, int max);
 

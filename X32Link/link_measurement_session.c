@@ -21,18 +21,67 @@ int link_session_on_epoch_reset(LinkSession* s, LinkSessionAct* out, int max) {
 
 int link_session_on_trigger(LinkSession* s, bool peer_found, uint32_t ip, uint16_t port,
                             int64_t now_us, bool active, LinkSessionAct* out, int max) {
+    int n = 0;
+
     if (!peer_found) {
-        // No advertised endpoint — the ref vanished or hasn't published mep4 yet.
-        // Forget it so a reappearing/new peer re-triggers a fresh attempt.
-        s->have_ref = false;
-        return 0;
+        // No advertised endpoint — the ref vanished (ByeBye, or PEER_TTL_MS=15 s of
+        // silence in link_protocol.c) or hasn't published mep4 yet. Forget it so a
+        // reappearing/new peer re-triggers a fresh attempt.
+        //
+        // ESP-028: forgetting the ref was ALL LNK-031 did here, and that is the defect.
+        // The committed GhostXForm was measured against THAT peer's ghost epoch, and
+        // link_measurement_have_phase_estimate() reports nothing but s_xform.valid — which
+        // nobody was clearing. So the dead session's mapping kept being served as a live
+        // phase estimate.
+        //
+        // Measured on the analyzer (ESP-027): kill the only Link peer, let it rejoin, and
+        // `beats` stepped BACKWARDS 276 beats while /status still said sync:1. clock_ticker
+        // had primed its grid at beat 290 on the old session; the new session read 14
+        // through the old origin; the ticker waited for beats to climb back — 276 beats =
+        // 138 SECONDS of zero bytes on the wire, with every counter green.
+        //
+        // No estimate is honest: beat_source free-runs through it (ESP-027) and
+        // master_clock originates. A stale estimate lies, and the wire goes quiet.
+        if (s->have_ref) {
+            if (n < max) out[n++].type = LS_RESET_XFORM;
+            s->have_ref        = false;
+            s->next_measure_us = 0;   // measure the instant a peer reappears
+        }
+        return n;
     }
 
-    bool different = !s->have_ref || ip != s->ref_ip || port != s->ref_port;
+    // ESP-028: {ip,port} is the only session identity visible from here — link_protocol
+    // exposes no session id, and a Link peer that restarts comes back on a NEW ephemeral
+    // mep4 port. So a moved endpoint means the committed xform maps to a ghost epoch we
+    // can no longer reach: it is a re-target, not a re-measure.
+    bool moved     = s->have_ref && (ip != s->ref_ip || port != s->ref_port);
+    bool different = !s->have_ref || moved;
     bool due       = now_us >= s->next_measure_us;
     if (!((different || due) && !active)) return 0;
 
-    int n = 0;
+    // ESP-028: drop the dead mapping BEFORE the fresh attempt, never after it commits.
+    // Two failure modes ride on this ordering:
+    //   1. The attempt needs ~4 round trips and may fail outright — LS_END_FAIL leaves the
+    //      committed xform untouched by design (ARC-002). Without this, the stale mapping
+    //      is served for the whole attempt, and FOREVER if the attempt fails.
+    //   2. link_measurement_attempt_end() slews a commit that lands within 1 s of an
+    //      ESTABLISHED origin (LINK_MEASUREMENT_MAX_SLEW_US = 20 ms/commit, P4-038's noise
+    //      clamp). Against a DEAD origin that clamp fights the new session instead of
+    //      protecting the bar line: a 500 ms epoch difference would need ~25 re-measures
+    //      (~50 s at LINK_SESSION_REMEASURE_US) to walk off. Clearing `valid` first makes
+    //      the first commit adopt the new session's origin whole — which is exactly what
+    //      the clamp's re-origin escape hatch was written to allow.
+    //
+    // Cost when the endpoint moves but the SESSION does not (peer A leaves a 3-peer session
+    // and the pump re-targets to B — link_protocol's swap-remove reshuffles peer[0]): one
+    // wasted invalidation. The re-measure lands within milliseconds of the old intercept,
+    // far under beat_source's 0.25-beat re-prime threshold, and the gap free-runs. A
+    // needless re-measure costs a free-run window in milliseconds. A stale mapping cost 138
+    // seconds of silence. The asymmetry decides it.
+    if (moved) {
+        if (n < max) out[n++].type = LS_RESET_XFORM;
+    }
+
     // LNK-026 bug 2: flush stale pongs before this attempt's own pings.
     if (n < max) out[n++].type = LS_FLUSH_RX;
 
