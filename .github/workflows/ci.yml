@@ -351,3 +351,38 @@ jobs:
             -e CCACHE_DIR=/app/${{ github.repository }}/KitchenSync/.ccache
             -e CCACHE_BASEDIR=/app/${{ github.repository }}
             -e CCACHE_NOHASHDIR=1
+
+  # ---------------------------------------------------------------------------
+  # GATE. This job compiles nothing.
+  #
+  # Branch protection on master requires the status context
+  # "Firmware compile (X32Link + KitchenSyncTouch + X32 emulator)". That used to be a
+  # real job. Fanning it out into a matrix renamed it, so the required context stopped
+  # ever reporting -- and auto-merge sat BLOCKED forever with every check green. (It did.)
+  #
+  # So this keeps that exact name and gates on every compile leg instead. Now the matrix
+  # can grow, shrink or get renamed without anyone editing repo settings, and a green
+  # tick here genuinely means every board built.
+  #
+  # if: always() + explicit result checks -- `needs` alone would SKIP this job when a
+  # dependency fails, and a skipped required check is not a failing one, which would let a
+  # broken build merge.
+  # ---------------------------------------------------------------------------
+  firmware-compile-gate:
+    name: Firmware compile (X32Link + KitchenSyncTouch + X32 emulator)
+    runs-on: ubuntu-latest
+    needs: [changes, firmware-compile, bench-rig-compile]
+    if: always()
+    steps:
+      - name: All board compiles must have passed
+        run: |
+          echo "changes:          ${{ needs.changes.result }}"
+          echo "firmware-compile: ${{ needs.firmware-compile.result }}"
+          echo "bench-rig:        ${{ needs.bench-rig-compile.result }}"
+          # A docs-only PR skips the compiles by design -- that is a pass, not a failure.
+          if [ "${{ needs.changes.outputs.code }}" != "true" ]; then
+            echo "no code changed; compiles skipped by design"; exit 0
+          fi
+          [ "${{ needs.firmware-compile.result }}" = "success" ] || exit 1
+          [ "${{ needs.bench-rig-compile.result }}"  = "success" ] || exit 1
+          echo "every board compiled"
