@@ -25,6 +25,7 @@
 #include "usb_midi_host.h"
 #include "fw_version.h"      /* LNK-038: shared FW_VERSION / FW_BUILD (X32Link/ include path) */
 #include "ks_status.h"
+#include "link_measurement.h"   // P4-038: LinkPhaseHealth
 #include "follow_beat_io.h"   /* P4-020: mic tempo-follow estimate for /status (Task 9 creates this header) */
 #include "ks_config.h"
 #include "ks_config_nvs.h"
@@ -533,7 +534,13 @@ static esp_err_t status_handler(httpd_req_t *req)
 {
     // P4-038 grew this by the tick-health block (~90 bytes worst case); 448 keeps the
     // same headroom test_ks_status.c asserts against.
-    char buf[448];
+    char buf[576];
+    /* P4-038: the origin-step gauge. `max_step_us` is how far a GhostXForm commit has thrown
+     * the beat origin -- the number that, unread, cost 138 seconds of silent DIN clock in
+     * ESP-027. It survives a peer churn now (ESP-028 split invalidate from reset), so this
+     * is a lifetime record and not a fresh page every time a laptop closes. */
+    LinkPhaseHealth phase;
+    link_measurement_phase_health(&phase);
     bool fb_enabled = s_cfg && s_cfg->follow_beat_enable;
     FollowBeatOut fb = fb_enabled ? follow_beat_io_status() : FollowBeatOut{};
     int ls[KS_CLOCK_OUTPUTS];
@@ -545,7 +552,7 @@ static esp_err_t status_handler(httpd_req_t *req)
                       wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx(),
                       FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid, ls,
                       link_proto_playing(), link_proto_start_stop_seen(),
-                      have_tick ? &tick : nullptr);
+                      have_tick ? &tick : nullptr, &phase);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }

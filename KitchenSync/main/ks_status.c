@@ -4,7 +4,7 @@
 int ks_status_json(char* buf, size_t len, float bpm, float midi_bpm, int peers, bool usb, uint32_t tx,
                    const char* fw, bool follow_enabled, float follow_bpm, float follow_confidence,
                    bool follow_valid, const int launch[4], bool playing, bool link_owns,
-                   const WebTickHealth* tick) {
+                   const WebTickHealth* tick, const LinkPhaseHealth* phase) {
     int n = snprintf(buf, len,
                      "{\"bpm\":%.1f,\"min\":%.1f,\"peers\":%d,\"usb\":%s,\"tx\":%lu,\"fw\":\"%s\","
                      "\"follow_enabled\":%s,\"follow_bpm\":%.1f,\"follow_confidence\":%.1f,\"follow_valid\":%s,"
@@ -31,6 +31,18 @@ int ks_status_json(char* buf, size_t len, float bpm, float midi_bpm, int peers, 
         n += m;
     }
 
+    /* P4-038: phase health. `xf_step` is the number that moves the BAR LINE -- the
+     * GhostXForm is only an origin, and a commit steps it with no slew. */
+    if (phase && (size_t)n < len) {
+        int m = snprintf(buf + n, len - (size_t)n,
+                         ",\"xf\":%lu,\"xf_step\":%lu,\"xf_max\":%lu,"
+                         "\"rtt_min\":%lu,\"rtt_max\":%lu",
+                         (unsigned long)phase->commits, (unsigned long)phase->last_step_us,
+                         (unsigned long)phase->max_step_us, (unsigned long)phase->rtt_min_us,
+                         (unsigned long)phase->rtt_max_us);
+        if (m < 0) return m;
+        n += m;
+    }
     if ((size_t)n < len) {
         int m = snprintf(buf + n, len - (size_t)n, "}");
         if (m < 0) return m;
