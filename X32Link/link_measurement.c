@@ -247,18 +247,34 @@ static bool           s_active = false;
 static LinkGhostXForm s_xform  = {0, false};
 
 void link_measurement_reset(void) {
-    link_measurement_samples_reset();
-    s_active = false;
-    s_xform.intercept_us = 0;
-    s_xform.valid = false;
+    link_measurement_invalidate_xform();
     /* P4-038: the gauge is module state too. A reset that leaves it behind reports a step
      * count from a previous life -- ks_tick_reset forgot exactly this and the host test
-     * caught it as a phantom +1. */
+     * caught it as a phantom +1. This is the FULL reset (boot); see
+     * link_measurement_invalidate_xform() for why a peer churn must NOT come through here. */
     s_ph_commits      = 0;
     s_ph_last_step_us = 0;
     s_ph_max_step_us  = 0;
     s_ph_rtt_min_us   = UINT32_MAX;
     s_ph_rtt_max_us   = 0;
+}
+
+/* ESP-028: drop the MAPPING without wiping the GAUGE.
+ *
+ * A peer churn must invalidate the committed xform -- serving a dead session's origin as a
+ * valid phase estimate is what silenced the DIN wire for 138 seconds (ESP-027). But it must
+ * NOT zero the P4-038 phase-health counters, which are documented as lifetime: a churn is
+ * precisely the moment you want the history of how far commits have been throwing the origin.
+ * Routing LS_RESET_XFORM through the full reset would blank the gauge on every peer bounce.
+ *
+ * Safe to keep the gauge across this: `valid` is now false, so the next commit computes no
+ * step against the dead origin (see attempt_end) -- there is no "previous life" contamination
+ * to inherit, which is the only thing the full reset was protecting against. */
+void link_measurement_invalidate_xform(void) {
+    link_measurement_samples_reset();
+    s_active = false;
+    s_xform.intercept_us = 0;
+    s_xform.valid = false;
 }
 
 void link_measurement_attempt_begin(void) {

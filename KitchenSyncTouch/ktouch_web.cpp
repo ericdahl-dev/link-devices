@@ -18,6 +18,7 @@ static inline uint32_t ktouch_btn_lows(void)    { return 0; }
 static inline int      ktouch_btn_level(void)   { return -1; }   // -1 = no buttons fitted
 #endif
 #include "config_persist.h"   // ARC-022: debounced write-through for live edits
+#include <string.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <Update.h>           // ESP-020: OTA into the inactive app slot
@@ -146,8 +147,14 @@ var peersEl=document.getElementById('peers'),syncEl=document.getElementById('syn
     clkEl=document.getElementById('clk'),tpEl=document.getElementById('tp');
 function onStatus(d){
 peersEl.textContent=d.peers;
-var s=d.sync;syncEl.textContent=s===1?'Synced':s===0?'Linking':'No Link';syncEl.className='pill'+(s===1?' on':'');
-clkEl.textContent=d.clock?'On':'Off';clkEl.className='pill'+(d.clock?' on':'');
+/* ESP-028: these pills used to describe INTENT, not reality. Sync showed whether a phase
+   estimate existed and MIDI Clock showed a CONFIG FLAG -- so both read healthy through 138
+   seconds of a dead wire. They now report what the writer is actually doing. */
+var s=d.sync;syncEl.textContent=s===1?'Locked':s===0?'Free Run':'No Link';syncEl.className='pill'+(s===1?' on':'');
+/* SILENT is the state that must never be quiet about itself. Not 'on' (green) -- it is a
+   fault, and a green pill over a dead jack is how ESP-027 hid for 138 seconds. */
+var c=d.clk;clkEl.textContent=c==='locked'?'Locked':c==='free'?'Free Run':d.clock?'SILENT':'Off';
+clkEl.className='pill'+((c==='locked'||c==='free')?' on':'');
 var t=d.transport;tpEl.textContent=t===2?'Playing':t===1?'Arming':'Stopped';tpEl.className='pill'+(t===2?' on':'');
 }
 poll();setInterval(poll,1000);
@@ -217,18 +224,39 @@ static void handle_save() {
     ESP.restart();
 }
 
-// Live status for the 1 Hz poll: BPM, sync state, peers, clock on/off, transport.
+// Live status for the 1 Hz poll.
+//
+// ESP-028: `sync` used to be tempo_source_phase_valid() -- whether a phase ESTIMATE exists.
+// That is not what anyone is asking. During ESP-027 it reported sync:1 peers:1 clock:1 drop:0
+// while the DIN wire was DEAD for 138 seconds. It did not merely fail to show the fault; it
+// said the device was healthy, which is why the fault needed a logic analyzer to find.
+//
+// `sync` now reports whether PULSES ARE REACHING THE JACK, sourced from the writer, which is
+// the only thing that knows:
+//     1  locked  -- phase-locked to a Link session, pulses flowing
+//     0  free    -- free-running (no xform, or solo via master_clock), pulses flowing
+//    -1  silent  -- NOT EMITTING. The state that must never be invisible again.
+//
+// `clk` carries the same thing as a word, and `pulses` is a lifetime 0xF8 count so a poller
+// can watch the wire advance without an analyzer.
 static void handle_status() {
-    float bpm = tempo_source_bpm();
-    int   sync = tempo_source_phase_valid() ? 1 : (tempo_source_active() ? 0 : -1);
-    char buf[400];
+    // ESP-028: from the WRITER, not link_proto_bpm() -- see ktouch_midi_out.h. A free-running
+    // clock has a tempo; reporting 0.0 while emitting 120 BPM is the same class of lie as sync.
+    float       bpm  = ktouch_midi_bpm();
+    if (bpm <= 0.0f) bpm = tempo_source_bpm();   // pre-writer (clock disabled): fall back
+    const char* clk  = ktouch_midi_clock_state();          // "locked" | "free" | "silent"
+    int         sync = (strcmp(clk, "locked") == 0) ?  1
+                     : (strcmp(clk, "free")   == 0) ?  0
+                     :                                -1;
+    char buf[460];
     snprintf(buf, sizeof(buf),
              "{\"bpm\":%.1f,\"sync\":%d,\"peers\":%d,\"clock\":%d,\"transport\":%d,"
              "\"cue\":%d,\"tfail\":%lu,\"tzero\":%lu,\"ccancel\":%lu,"
              "\"drop\":%lu,\"burst\":%lu,\"gap\":%lu,\"work\":%lu,\"over\":%lu,\"core\":%d,"
              "\"wbeats\":%lu,\"wclock\":%lu,\"wtport\":%lu,"
              "\"beats\":%.2f,\"locked\":%d,\"bsactive\":%d,"
-             "\"btn\":%d,\"btnlows\":%lu,\"btnpress\":%lu}",
+             "\"btn\":%d,\"btnlows\":%lu,\"btnpress\":%lu,"
+             "\"clk\":\"%s\",\"pulses\":%lu}",
              (double)bpm, sync, link_proto_peers(),
              g_config.clock_enable ? 1 : 0, ktouch_transport_state(),
              ktouch_cueing(), (unsigned long)ktouch_touch_fails(),
@@ -239,7 +267,8 @@ static void handle_status() {
              (unsigned long)ktouch_midi_w_beats(), (unsigned long)ktouch_midi_w_clock(),
              (unsigned long)ktouch_midi_w_tport(),
              (double)ktouch_midi_beats(), ktouch_midi_locked(), ktouch_midi_bs_active(),
-             ktouch_btn_level(), (unsigned long)ktouch_btn_lows(), (unsigned long)ktouch_btn_presses());
+             ktouch_btn_level(), (unsigned long)ktouch_btn_lows(), (unsigned long)ktouch_btn_presses(),
+             clk, (unsigned long)ktouch_midi_pulses());
     server.send(200, "application/json", buf);
 }
 

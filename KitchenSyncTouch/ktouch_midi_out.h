@@ -28,3 +28,15 @@ uint32_t ktouch_midi_w_tport(void); // worst-tick: transport step
 float ktouch_midi_beats(void);
 int   ktouch_midi_locked(void);
 int   ktouch_midi_bs_active(void);
+
+// ESP-028: the writer's own truth. `pulses` is a lifetime count of 0xF8 bytes actually
+// written to the UART; `clock_state` is "locked" | "free" | "silent". A wire that has gone
+// quiet must be visible in /status without a logic analyzer -- that is the entire lesson of
+// ESP-027, where /status reported sync:1 through 138 seconds of silence.
+uint32_t    ktouch_midi_pulses(void);
+
+// ESP-028: the BPM the writer is actually clocking off -- from the arbiter's timeline,
+// which survives peer loss. link_proto_bpm() zeroes when peers drop, so /status used to
+// report 0.0 BPM while emitting a perfectly good 120 BPM clock.
+float       ktouch_midi_bpm(void);
+const char* ktouch_midi_clock_state(void);
