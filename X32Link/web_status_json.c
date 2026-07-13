@@ -42,11 +42,12 @@ int web_status_json(char* buf, size_t buf_len, float bpm, float phase, bool vali
     if (tick)
         app(&p, &left, &total,
             ",\"drop\":%lu,\"burst\":%lu,\"gap\":%lu,\"work\":%lu,\"over\":%lu,\"core\":%d,"
-            "\"w_beats\":%lu,\"w_clock\":%lu",
+            "\"w_beats\":%lu,\"w_clock\":%lu,\"reprime\":%lu",
             (unsigned long)tick->dropped, (unsigned long)tick->bursts,
             (unsigned long)tick->max_gap_us, (unsigned long)tick->max_work_us,
             (unsigned long)tick->overruns, tick->core,
-            (unsigned long)tick->w_beats, (unsigned long)tick->w_clock);
+            (unsigned long)tick->w_beats, (unsigned long)tick->w_clock,
+            (unsigned long)tick->reprimes);
 
     app(&p, &left, &total, "}");
     return total;

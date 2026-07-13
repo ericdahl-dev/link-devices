@@ -4,6 +4,11 @@
 
 void ks_tick_reset(KsTickState* st, uint32_t cfg_gen) {
     beat_source_reset(&st->src);
+    /* P4-038: INITIALISE the lifetime counter. Callers do `KsTickState ts;
+     * ks_tick_reset(&ts, gen);` — leaving this alone means it starts as stack garbage and
+     * can never be trusted, the same trap clock_ticker.c calls out for `dropped`. The host
+     * test caught precisely that: a phantom +1 on a fresh state. */
+    st->dropped_total = 0;
     for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) clock_ticker_reset(&st->cts[i]);
     metronome_reset(&st->mt);
     for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) {
@@ -47,6 +52,7 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
     bool reprime = bs.reprime;
     if (in->cfg_gen != st->seen_gen) { reprime = true; st->seen_gen = in->cfg_gen; }
     if (reprime) {
+        ks_tick_bank_dropped(st);   /* P4-038: bank BEFORE the reset zeroes the counters */
         for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) clock_ticker_reset(&st->cts[i]);
         metronome_reset(&st->mt);
         bar_reset_reset(&st->bar);   // a re-origin must not fire a false downbeat
@@ -170,4 +176,21 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
         }
     }
     return plan;
+}
+
+/* P4-038: see ks_tick.h. The ticker's own counter dies at every re-prime; the lifetime
+ * total has to live one level up, where "first init" and "re-prime" are distinguishable. */
+void ks_tick_bank_dropped(KsTickState* st) {
+    if (!st) return;
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) {
+        st->dropped_total += st->cts[i].dropped;
+        st->cts[i].dropped = 0;
+    }
+}
+
+uint32_t ks_tick_dropped(const KsTickState* st) {
+    if (!st) return 0;
+    uint32_t live = 0;
+    for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) live += st->cts[i].dropped;
+    return st->dropped_total + live;
 }
