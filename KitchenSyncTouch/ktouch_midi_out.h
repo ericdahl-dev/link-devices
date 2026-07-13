@@ -23,3 +23,8 @@ int      ktouch_midi_core(void);    // which core the writer really runs on
 uint32_t ktouch_midi_w_beats(void); // worst-tick: time inside tempo_source_beats_now()
 uint32_t ktouch_midi_w_clock(void); // worst-tick: clock scheduling + DIN writes
 uint32_t ktouch_midi_w_tport(void); // worst-tick: transport step
+
+// ESP-027 diagnostic.
+float ktouch_midi_beats(void);
+int   ktouch_midi_locked(void);
+int   ktouch_midi_bs_active(void);

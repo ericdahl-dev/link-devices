@@ -72,8 +72,13 @@ static void buttons_begin() {
     button_reset(&s_btn_realign);
 }
 
+static const char* tl_name(int s) {
+    return s == TL_RUNNING ? "RUNNING" : s == TL_ARMED ? "ARMED" : "STOPPED";
+}
+
 static void buttons_tick() {
     uint32_t now = millis();
+
 
     // Post intents; never touch the wire from loop(). A transport byte emitted here
     // would land wherever loop() happened to be, not on the bar line -- the writer
@@ -81,10 +86,26 @@ static void buttons_tick() {
     if (button_update(&s_btn_transport, digitalRead(BTN_TRANSPORT_PIN) == LOW, now)) {
         bool running = ktouch_transport_state() != TL_STOPPED;
         ktouch_transport_post(running ? TL_INTENT_STOP : TL_INTENT_PLAY);
+        Serial.printf("[btn] TRANSPORT (gpio%d) -> %s\n", BTN_TRANSPORT_PIN,
+                      running ? "STOP (immediate)" : "PLAY (arms; fires on the bar line)");
     }
     if (button_update(&s_btn_realign, digitalRead(BTN_REALIGN_PIN) == LOW, now)) {
         ktouch_transport_post(TL_INTENT_REALIGN);
+        Serial.printf("[btn] REALIGN (gpio%d) -> arms; 0xFC+0xFA on the bar line\n",
+                      BTN_REALIGN_PIN);
     }
+
+    // Serial IS the feedback surface until the lit buttons are wired. A quantized press
+    // does nothing for up to a whole bar, so without SOMETHING saying "armed" it reads as
+    // a dead button -- that is the entire reason transport_led exists. Log the edges only;
+    // logging every loop() would drown the console (and this is loop(), never the 1 ms
+    // writer, where an ESP_LOGx/Serial write is a blocking UART stall -- P4-033).
+    static int  s_last_state   = -1;
+    static bool s_last_realign = false;
+    int  st = ktouch_transport_state();
+    bool ra = ktouch_transport_realign_armed();
+    if (st != s_last_state)     { Serial.printf("[transport] %s\n", tl_name(st)); s_last_state = st; }
+    if (ra != s_last_realign)   { Serial.printf("[realign] %s\n", ra ? "ARMED" : "fired/cleared"); s_last_realign = ra; }
 
     digitalWrite(LED_TRANSPORT_PIN,
         transport_led_on((TransportLaunchState)ktouch_transport_state(), now) ? HIGH : LOW);

@@ -21,10 +21,25 @@
 extern "C" {
 #endif
 
+// ESP-027: a BACKWARDS beat step is not physics -- time does not run backwards. It means
+// the session re-originated: a fresh GhostXForm commit maps "now" to a different beat.
+//
+// This matters because clock_ticker primes its grid on the beat position. If beats then
+// jump backwards it waits for them to climb back, emitting NOTHING the whole time. Measured
+// on the analyzer: kill a Link peer and let it rejoin, and the beat position steps back 276
+// beats with `locked` unchanged -- so no basis switch, so no re-prime -- and the DIN clock
+// went silent for over TWO MINUTES while /status cheerfully reported sync:1 peers:1.
+//
+// 0.25 beat = 6 pulses at 24 PPQN. Smaller backsteps (an ordinary xform refinement, sub-ms)
+// cost a few pulses of quantisation and are absorbed; anything past this is a re-origin.
+#define BEAT_SOURCE_BACKSTEP_BEATS 0.25
+
 typedef struct {
     BeatClock bc;          // free-run accumulator (owned)
     bool      was_locked;  // did the last active step read session phase?
     bool      running;     // did the last step have a session?
+    double    last_beats;  // ESP-027: previous step's beat position
+    bool      have_last;   // is last_beats meaningful?
 } BeatSource;
 
 typedef struct {
