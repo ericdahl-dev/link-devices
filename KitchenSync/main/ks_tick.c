@@ -12,6 +12,8 @@ void ks_tick_reset(KsTickState* st, uint32_t cfg_gen) {
     }
     bar_reset_reset(&st->bar);
     st->seen_gen = cfg_gen;
+    st->had_stst = false;
+    st->held_playing = false;
 }
 
 KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
@@ -26,6 +28,17 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
     plan.active = bs.active;
     plan.locked = bs.locked;
     plan.beats  = bs.beats;
+    // P4-039: derive from the settled timeline, which survives peer loss —
+    // not link_proto_bpm(), which a caller may zero independently of it.
+    plan.bpm    = (bs.active && in->tl.micros_per_beat > 0)
+                    ? (float)(60.0e6 / (double)in->tl.micros_per_beat) : 0.0f;
+
+    // P4-039: latch the last known transport-playing state once the session has
+    // ever reported one. A peer-loss reset of start_stop_seen (link_protocol.c)
+    // must not snap this back to false — that's what made /status lie about a
+    // clock that was still running.
+    if (in->start_stop_seen) { st->had_stst = true; st->held_playing = in->playing; }
+    plan.playing = st->had_stst ? st->held_playing : in->playing;
 
     // Reprime fold: a basis switch/session loss (bs.reprime) OR a live config edit
     // (P4-015: g_cfg_gen bumped) shifts the beat grid — re-prime the tick + click

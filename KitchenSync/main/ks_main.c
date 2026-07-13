@@ -299,10 +299,13 @@ static void clock_out_task(void *arg)
         if (now - last_log >= 1000000) {
             last_log = now;
             s_stat.peers   = wifi_link_peers();
-            s_stat.bpm     = link_proto_bpm();
+            /* P4-039: plan.bpm/plan.playing hold the settled/last-known values —
+             * link_proto_bpm()/link_proto_playing() zero out on peer loss even
+             * while the clock (locked to the settled timeline) keeps running. */
+            s_stat.bpm     = plan.bpm;
             s_stat.locked  = plan.locked;
             s_stat.usb     = usb_midi_host_ready();
-            s_stat.playing = link_proto_playing();
+            s_stat.playing = plan.playing;
             s_stat.pulses  = pulses;
             s_stat.clicks  = clicks;
             s_stat.usb_dropped = usb_midi_host_dropped() + usb_batch.dropped;
