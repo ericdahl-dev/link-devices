@@ -30,6 +30,7 @@
 #include "wifi_link.h"
 #include "usb_midi_host.h"
 #include "ks_web.h"
+#include "ks_tick_health.h"   /* P4-038: publish the 1 ms clock task's probe in /status */
 #include "ks_config.h"
 #include "ks_config_nvs.h"
 #include "beat_source.h"      /* basis selector: session phase vs free-run (ARC-007) */
@@ -101,8 +102,24 @@ static volatile struct {
     bool     locked, usb, playing;
     uint32_t pulses, clicks;
     uint32_t usb_dropped;         /* P4-034: USB packets binned by a busy endpoint */
-    int64_t  max_gap, max_work;   /* tick-health probe; reset by the logger */
-    uint32_t overruns;
+    /* P4-038 tick health. LIFETIME, never reset on read -- that is the entire point.
+     * These numbers already existed, but they were windowed and thrown away into a
+     * once-a-second log, so the 766 ms clock stall the analyzer caught left no trace
+     * anywhere unless someone happened to have serial attached at that second. A
+     * worst-case that scrolled past is not a measurement. Published in /status now, in
+     * X32Link's exact key names (ARC-024), so one script audits the whole fleet. */
+    int64_t  max_gap, max_work;   /* worst inter-tick gap / worst time inside a tick */
+    uint32_t overruns;            /* ticks where gap or work blew past the threshold */
+    uint32_t bursts;              /* ticks that emitted >1 pulse (catch-up) */
+    uint32_t dropped;             /* pulses the ticker THREW AWAY on a realign (ESP-018) */
+    int64_t  w_beats, w_clock;    /* worst tick, per stage: session read / emit */
+    int      core;                /* which core the writer REALLY landed on -- report,
+                                   * never assume (ESP-018's core premise was wrong) */
+    uint32_t reprimes;            /* times the beat grid was RE-PRIMED (basis switch, phase
+                                   * invalid, live-config edit). The one number that tells a
+                                   * SCHEDULING stall from a PHASE stall: a re-prime emits
+                                   * nothing and drops nothing, so it is invisible in every
+                                   * other counter here -- yet the wire goes silent. */
 } s_stat;
 
 /* Priority 2 — the lowest thing running, and deliberately so. It logs (a blocking
@@ -125,13 +142,41 @@ static void status_task(void *arg)
                  s_stat.peers, s_stat.bpm, s_stat.locked ? "locked" : "free",
                  s_stat.usb ? "ready" : "-", (unsigned long)s_stat.pulses, s_stat.playing,
                  (unsigned long)s_stat.usb_dropped);
-        if (s_stat.overruns) {
-            ESP_LOGW(TAG, "tick health: overruns=%lu max_gap=%lldus max_work=%lldus",
+        /* P4-038: the counters are LIFETIME now (/status owns them), so this no longer
+         * zeroes them. Log on the EDGE -- only when the count has grown since the last
+         * pass -- which keeps the old "shout when something happened" serial behaviour
+         * without a log per overrun. (A log per overrun is a blocking ~13 ms UART write
+         * that delays the next tick, which overruns, which logs: the feedback loop that
+         * manufactured 3945 phantom overruns in 40 s on the Touch.) */
+        static uint32_t logged_overruns = 0;
+        if (s_stat.overruns != logged_overruns) {
+            logged_overruns = s_stat.overruns;
+            ESP_LOGW(TAG, "tick health: overruns=%lu max_gap=%lldus max_work=%lldus "
+                          "drop=%lu burst=%lu core=%d",
                      (unsigned long)s_stat.overruns,
-                     (long long)s_stat.max_gap, (long long)s_stat.max_work);
+                     (long long)s_stat.max_gap, (long long)s_stat.max_work,
+                     (unsigned long)s_stat.dropped, (unsigned long)s_stat.bursts, s_stat.core);
         }
-        s_stat.overruns = 0; s_stat.max_gap = 0; s_stat.max_work = 0;
     }
+}
+
+/* P4-038: publish the probe. Same struct and same JSON keys as X32Link's ARC-024
+ * accessor, so a fleet script reads every device with one parser. Always true: unlike
+ * X32Link (whose writer only runs when clock-out is enabled), KitchenSync's clock task
+ * runs from boot, so there is always a real measurement to report. */
+bool ks_tick_health(WebTickHealth* out)
+{
+    if (!out) return false;
+    out->dropped     = s_stat.dropped;
+    out->bursts      = s_stat.bursts;
+    out->max_gap_us  = (uint32_t)(s_stat.max_gap  > 0 ? s_stat.max_gap  : 0);
+    out->max_work_us = (uint32_t)(s_stat.max_work > 0 ? s_stat.max_work : 0);
+    out->overruns    = s_stat.overruns;
+    out->w_beats     = (uint32_t)(s_stat.w_beats > 0 ? s_stat.w_beats : 0);
+    out->w_clock     = (uint32_t)(s_stat.w_clock > 0 ? s_stat.w_clock : 0);
+    out->core        = s_stat.core;
+    out->reprimes    = s_stat.reprimes;
+    return true;
 }
 
 static void clock_out_task(void *arg)
@@ -159,6 +204,10 @@ static void clock_out_task(void *arg)
      * and retried next tick rather than dropped. */
     UsbMidiBatch usb_batch = {0};
 
+    /* P4-038: report the core the task ACTUALLY landed on. ESP-018's premise about core
+     * assignment turned out to be wrong and only the measurement caught it. */
+    s_stat.core = xPortGetCoreID();
+
     while (1) {
         int64_t tk0 = esp_timer_get_time();
         int64_t gap = prev_end ? (tk0 - prev_end) : 0;
@@ -171,6 +220,10 @@ static void clock_out_task(void *arg)
         bool link_have_session = wifi_link_timeline(&link_tl) && link_tl.micros_per_beat > 0;
         LinkGhostXForm link_xform = link_measurement_current_xform();
         int64_t        t_now = esp_timer_get_time();
+        /* Stage 1 (w_beats): everything above -- getting the session's beat position.
+         * On the Touch this stage was 62us idle and 5038us under web load: an 80x blowup
+         * with no lock anywhere in it. It was never blocking, it was being preempted. */
+        if (t_now - tk0 > s_stat.w_beats) s_stat.w_beats = t_now - tk0;
 
         /* P4-040: arbiter picks Link vs internal/tap. Always defers to Link
          * when a peer is present (this device never broadcasts, so there is
@@ -208,6 +261,7 @@ static void clock_out_task(void *arg)
         };
         transport_intent_take(in.launch);   /* ESP-011: one press, one action */
         KsTickPlan plan = ks_tick_step(&ts, &in);
+        if (plan.reprime) s_stat.reprimes++;   /* P4-038: the grid moved under us */
         {   /* ESP-011: surface arming state to the web UI. */
             int ls[KS_CLOCK_OUTPUTS];
             for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) ls[o] = (int)plan.launch_state[o];
@@ -216,6 +270,7 @@ static void clock_out_task(void *arg)
 
         /* One pulse per bar to the analyzer trigger line (ESP-015); high for this
          * tick, low the next -- a clean rising edge on the Link bar boundary. */
+        int64_t emit0 = esp_timer_get_time();   /* P4-038: stage 2 (w_clock) starts here */
         midi_uart_out_strobe(plan.downbeat);
 
         bool usb_ready = in.usb_ready;   /* gate USB sends; the DIN wire emits regardless */
@@ -278,6 +333,21 @@ static void clock_out_task(void *arg)
          * ~0.27 events/ms of real traffic, so a one-tick stall is absorbed, not lost. */
         if (usb_ready && usb_batch.len > 0) {
             if (usb_midi_host_send(usb_batch.buf, usb_batch.len)) usb_midi_batch_reset(&usb_batch);
+        }
+        {   /* P4-038: stage 2 (w_clock) -- scheduling + the DIN/USB writes. Paired with
+             * w_beats above, this says WHICH half of the tick blocked when work blows up. */
+            int64_t emit_us = esp_timer_get_time() - emit0;
+            if (emit_us > s_stat.w_clock) s_stat.w_clock = emit_us;
+            /* A tick that emits >1 pulse on any output is a catch-up burst: the grid ran
+             * late and is cramming. Invisible in the pulse COUNT (nothing is lost) but
+             * very audible on the wire, so count the ticks, not the pulses. */
+            for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
+                if (plan.pulses[o] > 1) { s_stat.bursts++; break; }
+            }
+            /* Pulses the ticker threw away past the burst cap. Banked in the PURE step
+             * (ks_tick_bank_dropped, host-tested) so a re-prime cannot erase them --
+             * the same design ARC-019 uses inside ClockOutput for the 1 ms writers. */
+            s_stat.dropped = ks_tick_dropped(&ts);
         }
         /* Metronome click on the onboard speaker (P4-006). Counted, not logged
          * (P4-033): this fires every beat, so a per-click console write stalled the

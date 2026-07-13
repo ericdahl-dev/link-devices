@@ -77,12 +77,12 @@ void test_battery_fields_omitted_when_absent(void) {
 void test_tick_health_fields_included_when_present(void) {
     char buf[256];
     WebTickHealth t = { .dropped = 7, .bursts = 2, .max_gap_us = 5038, .max_work_us = 124,
-                        .overruns = 3, .w_beats = 90, .w_clock = 34, .core = 1 };
+                        .overruns = 3, .w_beats = 90, .w_clock = 34, .core = 1, .reprimes = 9 };
     web_status_json(buf, sizeof(buf), 120.0f, 1.25f, true, 4, "2.2.0", false, 0.0f, 0.0f, &t);
     TEST_ASSERT_EQUAL_STRING(
         "{\"bpm\":120.0,\"phase\":1.2500,\"valid\":true,\"quantum\":4,\"fw\":\"2.2.0\","
         "\"drop\":7,\"burst\":2,\"gap\":5038,\"work\":124,\"over\":3,\"core\":1,"
-        "\"w_beats\":90,\"w_clock\":34}", buf);
+        "\"w_beats\":90,\"w_clock\":34,\"reprime\":9}", buf);
 }
 
 // NULL omits the whole block -- a build with no probe keeps the old schema byte for
@@ -105,7 +105,7 @@ void test_battery_and_tick_health_together(void) {
         "{\"bpm\":120.0,\"phase\":1.2500,\"valid\":true,\"quantum\":4,\"fw\":\"2.2.0\","
         "\"batt_v\":3.85,\"batt_pct\":62.5,"
         "\"drop\":0,\"burst\":0,\"gap\":1002,\"work\":62,\"over\":0,\"core\":1,"
-        "\"w_beats\":41,\"w_clock\":12}", buf);
+        "\"w_beats\":41,\"w_clock\":12,\"reprime\":0}", buf);
 }
 
 // Truncation stays snprintf-style with the block on: the caller can still detect it,

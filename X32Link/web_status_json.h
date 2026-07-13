@@ -34,6 +34,16 @@ typedef struct {
     uint32_t w_beats;       // worst tick, stage: tempo_source_beats_now()
     uint32_t w_clock;       // worst tick, stage: scheduling + DIN/USB writes
     int      core;          // core the writer task actually runs on
+    /* P4-038: times the beat grid was RE-PRIMED (phase went invalid, basis switched,
+     * a GhostXForm re-commit moved the origin). This is the counter that tells a
+     * SCHEDULING stall apart from a PHASE stall, and nothing else can.
+     *
+     * The probe proved KitchenSync's clock task was scheduled perfectly (gap 1.5 ms,
+     * work 1.7 ms, zero overruns) while the analyzer watched its wire go silent for
+     * 150 ms and then burst. A task that is never late cannot explain a wire that
+     * stops -- unless the grid underneath it moved. A re-prime emits nothing and
+     * counts no drops, so it is invisible in every other number here. */
+    uint32_t reprimes;
 } WebTickHealth;
 
 // Formats {"bpm":F,"phase":F,"valid":bool,"quantum":N,"fw":"S"} into buf.
