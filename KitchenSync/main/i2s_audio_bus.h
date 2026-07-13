@@ -1,4 +1,12 @@
 #pragma once
+
+/* ESP-026: the ES8311 codec (P4-006) exists only on the P4-NANO. On the S3 / classic ESP32 the
+ * hardware is not fitted, so the header hands back no-op stubs and the APP CORE
+ * compiles unchanged -- no #ifdefs sprayed through ks_main.c / ks_web.cpp. Same shape
+ * as HAS_USB_MIDI / HAS_TOUCH_DISPLAY / LED_NONE elsewhere in this repo (ADR-0003:
+ * the glue is thin and per-target; the logic is pure and shared). */
+#include "sdkconfig.h"
+#if CONFIG_IDF_TARGET_ESP32P4
 // KitchenSync shared I2S bus + ES8311 codec owner (P4-020). The ES8311 is one
 // physical codec on one I2S bus (MCLK=GPIO13 BCLK=GPIO12 WS=GPIO10, DOUT=GPIO9
 // speaker out, DIN=GPIO11 mic in) -- metronome_audio.c (TX) and follow_beat_io.c
@@ -73,4 +81,16 @@ es8311_handle_t audio_bus_codec(void);
 
 #ifdef __cplusplus
 }
+#endif
+
+#else  /* hardware not fitted on this board */
+#include <stdbool.h>
+#include <stdint.h>
+#define AUDIO_BUS_SAMPLE_RATE   16000
+#define AUDIO_BUS_MCLK_MULTIPLE 384
+static inline void     audio_bus_init(uint32_t sr)        { (void)sr; }
+static inline bool     audio_bus_ready(void)              { return false; }
+static inline uint32_t audio_bus_sample_rate(void)        { return 0; }
+static inline bool     audio_bus_reclock(uint32_t sr)     { (void)sr; return false; }
+
 #endif
