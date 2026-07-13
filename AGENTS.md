@@ -223,7 +223,10 @@ LNK-024 (2026-07-08); its `midi_*` files moved into `X32Link/`.
 
 `tasks/`, prefixes: `LNK-` (X32Link — the Link tempo firmware), `MCK-`
 (historical: the standalone MIDI-clock sketch, merged into X32Link by LNK-010
-and its directory retired by LNK-024), `ESP-` (X32 emulator), `ARC-`
+and its directory retired by LNK-024), `ESP-` (originally the X32 emulator; since ESP-011 it is the general
+firmware/clock prefix -- ESP-016 DIN MIDI, ESP-018 clock stalls, ESP-023 transport order,
+ESP-025 the bench rig, ESP-026 the ESP-IDF convergence, ESP-027/028 the clock-silence bugs),
+`ARC-`
 (cross-cutting firmware architecture), `P4-` (the planned ESP32-P4 hub tier). OSC node references live in
 `docs/xr18-xair-osc-cheatsheet.md` and `docs/x32-osc-protocol.md`.
 
