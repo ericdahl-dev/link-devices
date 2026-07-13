@@ -12,7 +12,15 @@
 // MIDI TX pin on the Waveshare ESP32-S3-Touch-LCD-1.47: GPIO11 is free and broken
 // out on the right header next to 3V3 + GND (see the s3-touch pinout / ESP-016).
 // Any free header GPIO works -- UART routes to any pin via the matrix.
+#if defined(BOARD_ESP32_DEVKIT)
+// ESP-025 bench rig (classic ESP32 DevKit): GPIO17 = UART2 TX, broken out on the
+// screw terminals. Do NOT use the terminals marked TX/RX (GPIO1/3) -- on this board
+// those ARE the CP2102 console, so MIDI would spray into the serial log and the log
+// would spray into the MIDI wire.
+#define MIDI_TX_GPIO 17
+#else
 #define MIDI_TX_GPIO 11
+#endif
 
 #ifdef __cplusplus
 extern "C" {
