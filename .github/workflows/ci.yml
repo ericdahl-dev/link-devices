@@ -359,6 +359,14 @@ jobs:
       # main/CMakeLists.txt, and its headers hand back no-op stubs, so the app core compiles
       # unchanged on all three. A build that fails here means somebody reached for P4 hardware
       # from shared code.
+      # idf.py writes `sdkconfig` pinned to the target it built, and KitchenSync/sdkconfig is
+      # TRACKED (the P4's). Reusing the same directory for the next target makes CMake read a
+      # config for the wrong chip and die with exit 2. Wipe it between targets; each one
+      # regenerates from sdkconfig.defaults.
+      - name: Reset sdkconfig between targets
+        if: needs.changes.outputs.code == 'true'
+        run: rm -rf KitchenSync/build KitchenSync/sdkconfig
+
       - name: Compile KitchenSync for esp32s3 (ESP-026 multi-target)
         if: needs.changes.outputs.code == 'true'
         uses: espressif/esp-idf-ci-action@v1
@@ -366,6 +374,14 @@ jobs:
           esp_idf_version: release-v5.5
           target: esp32s3
           path: 'KitchenSync'
+
+      # idf.py writes `sdkconfig` pinned to the target it built, and KitchenSync/sdkconfig is
+      # TRACKED (the P4's). Reusing the same directory for the next target makes CMake read a
+      # config for the wrong chip and die with exit 2. Wipe it between targets; each one
+      # regenerates from sdkconfig.defaults.
+      - name: Reset sdkconfig between targets
+        if: needs.changes.outputs.code == 'true'
+        run: rm -rf KitchenSync/build KitchenSync/sdkconfig
 
       - name: Compile KitchenSync for esp32 (ESP-026, the bench-rig chip)
         if: needs.changes.outputs.code == 'true'
