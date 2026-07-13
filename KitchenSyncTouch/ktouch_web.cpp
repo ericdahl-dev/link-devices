@@ -8,6 +8,15 @@
 #include "ktouch_transport.h" // transport state for /status
 #include "ktouch_display.h"   // live backlight brightness
 #include "ktouch_midi_out.h"  // ESP-018 tick health
+// ESP-025 bench-rig button telemetry. Only the DevKit has buttons, and these live in the
+// .ino behind HAS_BUTTONS -- referencing them unconditionally breaks the S3 product link.
+#ifdef HAS_BUTTONS
+uint32_t ktouch_btn_presses(void); uint32_t ktouch_btn_lows(void); int ktouch_btn_level(void);
+#else
+static inline uint32_t ktouch_btn_presses(void) { return 0; }
+static inline uint32_t ktouch_btn_lows(void)    { return 0; }
+static inline int      ktouch_btn_level(void)   { return -1; }   // -1 = no buttons fitted
+#endif
 #include "config_persist.h"   // ARC-022: debounced write-through for live edits
 #include <WebServer.h>
 #include <WiFi.h>
@@ -218,7 +227,8 @@ static void handle_status() {
              "\"cue\":%d,\"tfail\":%lu,\"tzero\":%lu,\"ccancel\":%lu,"
              "\"drop\":%lu,\"burst\":%lu,\"gap\":%lu,\"work\":%lu,\"over\":%lu,\"core\":%d,"
              "\"wbeats\":%lu,\"wclock\":%lu,\"wtport\":%lu,"
-             "\"beats\":%.2f,\"locked\":%d,\"bsactive\":%d}",
+             "\"beats\":%.2f,\"locked\":%d,\"bsactive\":%d,"
+             "\"btn\":%d,\"btnlows\":%lu,\"btnpress\":%lu}",
              (double)bpm, sync, link_proto_peers(),
              g_config.clock_enable ? 1 : 0, ktouch_transport_state(),
              ktouch_cueing(), (unsigned long)ktouch_touch_fails(),
@@ -228,7 +238,8 @@ static void handle_status() {
              (unsigned long)ktouch_midi_overruns(), ktouch_midi_core(),
              (unsigned long)ktouch_midi_w_beats(), (unsigned long)ktouch_midi_w_clock(),
              (unsigned long)ktouch_midi_w_tport(),
-             (double)ktouch_midi_beats(), ktouch_midi_locked(), ktouch_midi_bs_active());
+             (double)ktouch_midi_beats(), ktouch_midi_locked(), ktouch_midi_bs_active(),
+             ktouch_btn_level(), (unsigned long)ktouch_btn_lows(), (unsigned long)ktouch_btn_presses());
     server.send(200, "application/json", buf);
 }
 
