@@ -16,6 +16,7 @@ idf_component_register(
          "ks_config.c"
          "ks_hostname.c"
          "ks_tick.c"
+         "master_clock.c"
          "transport_intent.c"
          "ks_form.c"
          "ks_config_nvs.c"

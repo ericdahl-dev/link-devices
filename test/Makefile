@@ -53,6 +53,7 @@ LORAPKT    = ../LoraLink/lora_bpm_packet.c
 LORAFRESH  = ../LoraLink/lora_freshness.c
 BATTGAUGE = ../X32Link/battery_gauge.c
 BEATSTAMP = ../LinkAudioPoC/main/beat_stamper.c
+MASTERCLOCK = ../KitchenSync/main/master_clock.c
 
 # Every test depends on every header. Coarse on purpose: the rules below list
 # only .c prerequisites, so editing a header used to leave a stale binary that
@@ -68,7 +69,7 @@ HEADERS = $(wildcard ../X32Link/*.h ../KitchenSync/main/*.h ../LoraLink/*.h \
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper test_transport_launch test_ks_hostname test_ui_chrome test_ktouch_ui test_ktouch_config test_usb_midi_batch test_config_persist
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper test_transport_launch test_ks_hostname test_ui_chrome test_ktouch_ui test_ktouch_config test_usb_midi_batch test_config_persist test_master_clock
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -117,6 +118,7 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_ktouch_ui
 	./test_ktouch_config
 	./test_config_persist
+	./test_master_clock
 	./check_docs.sh
 
 test_bpm_tracker: test_bpm_tracker.c $(TRACKER) $(UNITY) $(HEADERS)
@@ -268,3 +270,6 @@ test_follow_beat: test_follow_beat.c $(FOLLOWBEAT) $(UNITY) $(HEADERS)
 
 test_beat_stamper: test_beat_stamper.c $(BEATSTAMP) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) -I../LinkAudioPoC/main $(filter %.c,$^) -o $@ -lm
+
+test_master_clock: test_master_clock.c $(MASTERCLOCK) $(PHASE) $(PROTO) $(SESSIONTL) $(MEAS) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) -I../KitchenSync/main $(filter %.c,$^) -o $@ -lm

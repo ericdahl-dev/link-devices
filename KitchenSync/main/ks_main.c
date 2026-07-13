@@ -49,6 +49,7 @@
 #include "link_measure_io.h"    /* unicast ping/pong measurement client */
 #include "clock_output.h"       /* per-output division + phase-nudge (P4-010) */
 #include "ks_tick.h"
+#include "master_clock.h"       /* P4-040: internal/tap tempo source, solo fallback */
 #include "transport_intent.h"   /* ESP-011: web UI launch presses */            /* ARC-015: pure clock-tick orchestration */
 
 static const char *TAG = "kitchensync";
@@ -136,6 +137,7 @@ static void status_task(void *arg)
 static void clock_out_task(void *arg)
 {
     KsTickState ts;  ks_tick_reset(&ts, g_cfg_gen);
+    MasterClock mclock; master_clock_reset(&mclock);   /* P4-040 */
     uint32_t    pulses = 0;
     uint32_t    clicks = 0;
     int64_t     last_log = 0;
@@ -165,10 +167,20 @@ static void clock_out_task(void *arg)
          * unicast socket lazily; non-blocking, so it is safe in this 1 ms loop. */
         link_measure_io_poll();
 
-        LinkTimeline tl;
-        bool have_session = wifi_link_timeline(&tl) && tl.micros_per_beat > 0;
-        LinkGhostXForm xform = link_measurement_current_xform();
+        LinkTimeline link_tl;
+        bool link_have_session = wifi_link_timeline(&link_tl) && link_tl.micros_per_beat > 0;
+        LinkGhostXForm link_xform = link_measurement_current_xform();
         int64_t        t_now = esp_timer_get_time();
+
+        /* P4-040: arbiter picks Link vs internal/tap. Always defers to Link
+         * when a peer is present (this device never broadcasts, so there is
+         * no competing session to merge); solo, falls back to the internal
+         * tempo, seeded from whatever Link last showed. */
+        MasterArbiterOut mc_out = master_clock_arbiter(&mclock, wifi_link_peers(),
+                                                        link_have_session, link_tl, link_xform);
+        bool           have_session = mc_out.have_session;
+        LinkTimeline   tl           = mc_out.tl;
+        LinkGhostXForm xform        = mc_out.xform;
 
         /* Link transport gates the metronome + strip (P4-019): quiet when stopped
          * since the beat keeps advancing (and jumps on a re-origin) while stopped.
