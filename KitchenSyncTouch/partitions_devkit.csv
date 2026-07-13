@@ -1,0 +1,26 @@
+# ESP-025 bench rig partition table — classic ESP32 DevKit (WROOM-32), 4 MB flash.
+#
+# NOT the product table. partitions.csv is a 16 MB layout for the Waveshare S3 and is
+# INVALID on this chip: its app0 alone is 0x400000 at offset 0x10000, which runs past
+# the end of a 4 MB part. The bootloader rejects the table outright and the board
+# boot-loops with "partition 2 invalid ... exceeds flash chip size" -- no app, no serial
+# banner, nothing to debug against. Arduino gives a sketch exactly ONE partitions.csv,
+# so the two boards cannot share it.
+#
+# Do not swap this in by hand -- use tools/build-bench.sh, which swaps the board flag
+# AND this table together and restores both on exit. Committing a half-swap breaks the
+# product build.
+#
+# Dual-OTA so the bench rig can take a web/OTA push like the product does. 0x1A0000
+# (1.625 MB) per slot vs a ~1.0 MB image = ~60% used, room to grow. nvs and otadata sit
+# at the Arduino default offsets (0x9000 / 0xe000) so an OTA preserves saved WiFi/config.
+#
+# 0x10000 + 2*0x1A0000 = 0x350000, then spiffs + coredump end exactly at 4 MB.
+#
+# Name,     Type, SubType,  Offset,    Size,      Flags
+nvs,        data, nvs,      0x9000,    0x5000,
+otadata,    data, ota,      0xe000,    0x2000,
+app0,       app,  ota_0,    0x10000,   0x1A0000,
+app1,       app,  ota_1,    0x1B0000,  0x1A0000,
+spiffs,     data, spiffs,   0x350000,  0xA0000,
+coredump,   data, coredump, 0x3F0000,  0x10000,

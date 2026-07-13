@@ -20,6 +20,9 @@ AXS     = ../X32Link/axs5106l.c
 TOUCHUI = ../X32Link/touch_ui.c
 SNAP    = ../X32Link/tempo_snapshot.c
 BAR     = ../X32Link/bar.c
+BUTTONS = ../X32Link/buttons.c
+TLED    = ../X32Link/transport_led.c
+TLAUNCH = ../X32Link/transport_launch.c
 MIDIOUT = ../X32Link/midi_clock_out.c
 CLOCKTICK = ../X32Link/clock_ticker.c
 METRO   = ../X32Link/metronome.c
@@ -69,7 +72,7 @@ HEADERS = $(wildcard ../X32Link/*.h ../KitchenSync/main/*.h ../LoraLink/*.h \
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper test_transport_launch test_ks_hostname test_ui_chrome test_ktouch_ui test_ktouch_config test_usb_midi_batch test_config_persist test_master_clock
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper test_transport_launch test_ks_hostname test_ui_chrome test_ktouch_ui test_ktouch_config test_usb_midi_batch test_config_persist test_master_clock test_buttons test_transport_led
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -85,6 +88,8 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_touch_ui
 	./test_tempo_snapshot
 	./test_bar
+	./test_buttons
+	./test_transport_led
 	./test_midi_clock_out
 	./test_clock_ticker
 	./test_beat_synth
@@ -169,6 +174,12 @@ test_tempo_snapshot: test_tempo_snapshot.c $(SNAP) $(UNITY) $(HEADERS)
 test_bar: test_bar.c $(BAR) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
+test_buttons: test_buttons.c $(BUTTONS) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
+
+test_transport_led: test_transport_led.c $(TLED) $(TLAUNCH) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
+
 test_midi_clock_out: test_midi_clock_out.c $(MIDIOUT) $(CLOCKTICK) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
@@ -206,7 +217,7 @@ test_battery_gauge: test_battery_gauge.c $(BATTGAUGE) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
 clean:
-	rm -f test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_axs5106l test_touch_ui test_tempo_snapshot test_bar
+	rm -f test_buttons test_transport_led test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_axs5106l test_touch_ui test_tempo_snapshot test_bar
 
 test_config_persist: test_config_persist.c $(CFGPERSIST) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@

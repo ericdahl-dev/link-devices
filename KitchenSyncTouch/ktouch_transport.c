@@ -23,3 +23,9 @@ TransportLaunchIntent ktouch_transport_take(void) {
 
 void ktouch_transport_publish_state(int launch_state) { s_state = launch_state; }
 int  ktouch_transport_state(void)                     { return s_state; }
+
+// ESP-025. Plain scalar, one writer (the 1 ms MIDI task) and one reader (loop()) —
+// same shape as the launch-state publish above, no lock needed.
+static volatile bool s_realign_armed = false;
+void ktouch_transport_publish_realign(bool armed) { s_realign_armed = armed; }
+bool ktouch_transport_realign_armed(void)         { return s_realign_armed; }
