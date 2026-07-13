@@ -189,7 +189,10 @@ test_clock_ticker: test_clock_ticker.c $(CLOCKTICK) $(UNITY) $(HEADERS)
 test_beat_synth: test_beat_synth.c $(BEATSYNTH) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
-test_link_measurement_session: test_link_measurement_session.c $(SESSION) $(PHASE) $(PROTO) $(SESSIONTL) $(UNITY) $(HEADERS)
+# ESP-028: links $(MEAS) so the stale-xform tests can assert on the REAL committed mapping
+# (link_measurement_have_phase_estimate) rather than on the action enum the session emits.
+# The defect was never the enum — it was that the estimate stayed valid.
+test_link_measurement_session: test_link_measurement_session.c $(SESSION) $(MEAS) $(PHASE) $(PROTO) $(SESSIONTL) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
 test_session_timeline: test_session_timeline.c $(SESSIONTL) $(PHASE) $(PROTO) $(UNITY) $(HEADERS)
