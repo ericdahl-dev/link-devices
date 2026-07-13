@@ -6,7 +6,8 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include "web_status_json.h"   /* P4-038: WebTickHealth — the SAME struct and the same
+#include "web_status_json.h"
+#include "link_measurement.h"   /* P4-038: LinkPhaseHealth — the origin-step gauge */   /* P4-038: WebTickHealth — the SAME struct and the same
                                 * JSON keys X32Link publishes (ARC-024). One shape across
                                 * the fleet, so one script audits every device. */
 #ifdef __cplusplus
@@ -45,7 +46,7 @@ extern "C" {
 int ks_status_json(char* buf, size_t len, float bpm, float midi_bpm, int peers, bool usb, uint32_t tx,
                    const char* fw, bool follow_enabled, float follow_bpm, float follow_confidence,
                    bool follow_valid, const int launch[4], bool playing, bool link_owns,
-                   const WebTickHealth* tick);
+                   const WebTickHealth* tick, const LinkPhaseHealth* phase);
 
 #ifdef __cplusplus
 }
