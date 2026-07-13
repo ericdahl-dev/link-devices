@@ -1,7 +1,17 @@
 # 7. Shared pure C is compiled by path, not symlinked
 
 Date: 2026-07-09
-Status: accepted
+Status: superseded by [ADR-0009](0009-converge-the-clock-box-on-esp-idf.md)
+
+> **Superseded 2026-07-12.** Two claims below did not survive contact with the repo.
+> (1) "Symlinking is no longer a sharing mechanism … `X32_emulator/fw_version.h` is the
+> only instance" is **factually false**: `KitchenSyncTouch/` symlinks 41 files out of
+> `X32Link/` and `LoraLink/` symlinks 8. Symlinks into a flat sketch root are, and always
+> were, the sharing mechanism for arduino-cli consumers. (2) Keeping the shared engine in
+> `X32Link/` is not merely untidy — it caused a real defect (the ESP-025 bench rig was
+> built into the mixer firmware and had to be backed out). ADR-0009 moves the engine to a
+> home owned by the primary product, bundled with the KitchenSyncTouch → ESP-IDF migration
+> so the move is symlink-neutral.
 
 Supersedes [ADR-0006](0006-shared-pure-c-lives-in-arduino-sketch-root.md).
 Amends the sharing-mechanism paragraph of [ADR-0003](0003-firmware-pure-c-glue-split.md).

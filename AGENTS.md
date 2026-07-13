@@ -1,6 +1,41 @@
-# esp32 — Agent Guide
+# link-devices — Agent Guide
 
-## What this firmware is
+## Which firmware am I touching? (read this first)
+
+**`KitchenSync` is the primary product of this repo.** The others are *related* products
+that share its engine — not scratch work, but not the thing either.
+
+The section below describes **X32Link**, which is one of those related products, NOT the
+primary one — and `X32Link/` is *also* the shared-pure-C library home. That is exactly how
+a clock-box feature ends up in the mixer bridge by accident. It has happened.
+
+**Every board is an ESP32 variant.** There is no Arduino hardware anywhere in this repo.
+"Arduino" below means only the **build framework** — .ino sketches built with
+`arduino-cli` against the `esp32:esp32` core — as opposed to **ESP-IDF** (CMake +
+`idf.py`). Both target ESP32s.
+
+| Directory | What it is | Chip | Framework |
+|---|---|---|---|
+| **`KitchenSync/`** | **THE PRIMARY PRODUCT** — the Link-native clock box: Link in → MIDI/analog clock + transport out. | ESP32-P4 | ESP-IDF |
+| `KitchenSyncTouch/` | The same clock engine, related product. Two boards: the S3 touch-LCD unit, and the **ESP-025 bench rig** (classic ESP32 DevKit + two lit buttons). Pick the board in its `config.h`; build the rig with `tools/build-bench.sh`. | ESP32-S3 / ESP32 | Arduino |
+| `X32Link/` | Related product: tempo → **XR18/X32 mixer** FX-delay sync over OSC. **Also the shared-pure-C home (ADR-0003/0007)** — every other sketch symlinks modules out of here. | ESP32-S3 | Arduino |
+| `LoraLink/` | Related product: LoRa tempo bridge. | ESP32-S3 | Arduino |
+| `X32_emulator/` | X32 console emulator, for on-device tests. | ESP32-S3 | Arduino |
+| `LinkAudioPoC/` | Link Audio feasibility spike. Also vendors the **Ableton Link SDK**. | ESP32-P4 | ESP-IDF |
+| `tools/linkcli/` | Host-side Ableton Link peer — **required** for any device tempo/transport test. | — | host |
+
+The framework split is why the shared logic is **pure C** (ADR-0003): it is the only thing
+both an Arduino sketch and an ESP-IDF component can compile. Firmware-specific glue is not
+portable between them; the pure modules are.
+
+**The rule:** a **clock-box** feature (clock out, transport, buttons, MIDI/analog outputs)
+goes in **KitchenSync** — or KitchenSyncTouch when it's the Arduino/bench side of the same
+engine. Touch `X32Link/` only for (a) a *mixer/OSC* feature, or (b) a **shared pure
+module** — and a shared module lives in `X32Link/` purely because arduino-cli can't compile
+outside a sketch root. That is a build constraint, not a statement about which product
+matters.
+
+## What X32Link is
 
 **Tempo → XR18/X32 FX delay sync.** One ESP32 firmware that reads a musical
 tempo from one of two sources and writes the matching delay time to an FX slot
@@ -27,6 +62,7 @@ bridge and emulator only. Don't edit `cli/` when working here.
 | Flash   | `arduino-cli upload  --fqbn esp32:esp32:adafruit_qtpy_esp32s3_n4r2:PartitionScheme=min_spiffs -p /dev/ttyACM0 X32Link` |
 | Host tests | `cd test && make`  (Unity; pure-logic suites, runs on the dev box) |
 | Emulator seam tests | `cd tests && make run` (native gcc — `x32_port`) |
+| **Bench rig** (ESP-025) | `tools/build-bench.sh [port]` — KitchenSyncTouch on the classic ESP32 DevKit. Swaps the board flag **and** the partition table together and restores both on exit. Never hand-swap: the product's 16 MB table on the DevKit's 4 MB chip boot-loops with no app and no banner, which looks exactly like a brick |
 | Bench Link peer | `cmake -S tools/linkcli -B tools/linkcli/build && cmake --build tools/linkcli/build`, then `./tools/linkcli/build/linkcli` (see **Bench Link peer** below — required for any device tempo/transport test) |
 | Emulator compile | `arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc X32_emulator` |
 
@@ -139,6 +175,8 @@ of it is a licensing question, not an engineering one.
 | `tempo_snapshot.{h,c}` | ARC-001 seam: atomic `{bpm,phase,valid,quantum}` — one writer (`bpm_task`), many readers (web `/status`, UI, serial); replaces the old loose `g_current_*` globals + mutex |
 | `ui_chrome.{h,c}` | ARC-017 shared web chrome for both config UIs: `ui_chrome_css()` / `ui_chrome_js()` (static, sent as chunks) + `ui_result_page()` / `ui_update_page()` (snprintf builders). Pure C, no Arduino/ESP-IDF. The *forms* stay per-firmware; only the look + client plumbing is shared. Host-tested. **Never edit this to fix one page** — anything a single page needs goes in that page's own `<style>`. The P4 page (`KitchenSync/main/ks_web.cpp`) is the brand/UX reference every page mirrors; see ADR-0008 |
 | `din_midi_out.{h,cpp}` | ESP-016 hardware DIN MIDI OUT on the S3 (KitchenSync Touch): HardwareSerial UART1 TX @31250 8N1 on GPIO11, mirroring `midi_clock_send_f8()` onto a 5-pin DIN so the S3 clocks DIN gear (RC-505) with no host. Arduino glue; byte timing is the pure midi_clock_out engine |
+| `buttons.{h,c}` | ESP-025 pure debounce for physical buttons (bench rig). Caller reads the pin and passes the raw level, so there is no Arduino/GPIO dependency. A button held at boot is seeded as already-down and cannot fire an action on power-up. Host-tested |
+| `transport_led.{h,c}` | ESP-025 lamp state for the illuminated transport buttons: dark stopped, **blinking armed**, solid running. Exists because a quantized button is invisible without it — press Play mid-bar and nothing happens for up to a bar, which reads as a dead button. Host-tested |
 | `web_config.*` | rack-panel config web UI + captive portal + `/status` live-BPM endpoint + `/update` OTA firmware upload (LNK-034, Arduino core's Update library) |
 | `config.h` | per-firmware constants (Link/MIDI timing, first-boot defaults) |
 | `touch_display.{h,cpp}` | on-device 1.47" LCD + touch UI (raw LovyanGFX, no LVGL): status / settings / IP-keypad screens. X32Link-only, gated `HAS_TOUCH_DISPLAY` (LNK-014/015) |

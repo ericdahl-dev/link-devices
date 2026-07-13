@@ -102,19 +102,43 @@ static void writer_task(void*) {
         // (ESP-017 parity; the derivation already supports both).
         int n = clock_output_step(&s_out, beats, 24, g_config.nudge_mbeats, 0);
         if (n > 1) s_bursts++;   // more than one pulse in a 1ms tick = catching up
-        for (int i = 0; i < n; i++) din_midi_out_byte(0xF8);
 
-        uint32_t t_clock = micros();
-
-        // Transport: a touch press arms via transport_launch, which fires START on
-        // the next bar line (STOP is immediate). Single writer, so no interleave
-        // with the clock bytes above. DIN only.
+        /* TRANSPORT FIRST, THEN CLOCK -- and the order is the whole point (ESP-023).
+         *
+         * The MIDI spec is explicit: a slave begins playing on the FIRST CLOCK IT
+         * RECEIVES AFTER a Start. So the Start must arrive BEFORE the clock byte that
+         * marks the downbeat. Emit the clock first and the slave discards it (it has
+         * not started yet) and begins on the NEXT one -- exactly one 24-PPQN tick late,
+         * on every single start, forever: 20.8 ms at 120 BPM. That is what "the drum
+         * machine falls behind when I start it from stopped" IS.
+         *
+         * ESP-023 measured this on the analyzer and fixed it on the P4 (ks_main.c).
+         * The Touch had the same bug and never got the fix -- it emitted clock at the
+         * top of the tick and transport at the bottom. Both bytes go out the same UART
+         * in the order written, so the order of these two blocks is the entire fix. */
         double q = (double)g_config.quantum_beats;
         TransportLaunchOut o = transport_launch_step(&s_tl, ktouch_transport_take(),
                                                      beats, q, beats >= 0.0);
-        if (o.action == TL_START) din_midi_out_byte(0xFA);
-        else if (o.action == TL_STOP) din_midi_out_byte(0xFC);
+        switch (o.action) {
+            case TL_START:   din_midi_out_byte(0xFA); break;
+            case TL_STOP:    din_midi_out_byte(0xFC); break;
+            case TL_RESTART:
+                // ESP-025 realign: Stop then Start, in that order, on the bar line.
+                // 0xFA is "play from the top", so the slave's pattern restarts at step 1
+                // aligned to the bar -- without ever passing through a stopped state.
+                din_midi_out_byte(0xFC);
+                din_midi_out_byte(0xFA);
+                break;
+            case TL_NONE:
+            default: break;
+        }
         ktouch_transport_publish_state(o.state);   // stopped/armed/running -> display
+        ktouch_transport_publish_realign(o.realign_armed);   // ESP-025 -> lit button
+
+        // Clock, AFTER transport (see above).
+        for (int i = 0; i < n; i++) din_midi_out_byte(0xF8);
+
+        uint32_t t_clock = micros();
 
         uint32_t tk1  = micros();
         uint32_t work = tk1 - tk0;

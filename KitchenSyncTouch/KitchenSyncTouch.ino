@@ -14,7 +14,14 @@
 #include "fw_version.h"
 #include "app_config.h"
 #include "tempo_source.h"
+#ifdef HAS_TOUCH_DISPLAY
 #include "ktouch_display.h"
+#endif
+#ifdef HAS_BUTTONS
+#include "buttons.h"            // ESP-025: pure debounce (shared, ADR-0007)
+#include "transport_led.h"      // ESP-025: lamp state for the two lit buttons
+#include "ktouch_transport.h"   // ESP-025: the same mailbox the touch UI posts to
+#endif
 #include "ktouch_web.h"
 
 AppConfig g_config;                       // the one config instance
@@ -29,6 +36,63 @@ static void start_ap(void) {
     Serial.println("[KSTouch] SoftAP 'KSTouch-Config' @ 192.168.4.1 for setup");
 }
 
+
+#ifdef HAS_BUTTONS
+// ESP-025 bench rig (classic ESP32 DevKit + screw-terminal breakout). Two illuminated
+// buttons are this board's transport surface, in place of the Touch's LCD. They post
+// the SAME TransportLaunchIntent into the SAME ktouch_transport mailbox the touch UI
+// uses, so the 1 ms writer is identical on both boards -- what the bench measures is
+// what the product runs.
+//
+// GPIO32/33 are the cleanest inputs on this board: no strapping role, real internal
+// pull-ups. Deliberately NOT 34/35/VP/VN (input-only, and they have NO internal
+// pull-up, so INPUT_PULLUP compiles and silently does nothing), and not 0/2/5/12/15
+// (strapping -- GPIO12 held high at boot sets the flash rail to 1.8 V and the board
+// will not come up). Switch to GND + INPUT_PULLUP: pressed reads LOW.
+//
+// The lamps are load-bearing, not decoration: a press is QUANTIZED, so nothing happens
+// for up to a bar. Without the blink that reads as a dead button and the user presses
+// again. See transport_led.h.
+#define BTN_TRANSPORT_PIN 32
+#define BTN_REALIGN_PIN   33
+#define LED_TRANSPORT_PIN 25
+#define LED_REALIGN_PIN   26
+
+static Button s_btn_transport;
+static Button s_btn_realign;
+
+static void buttons_begin() {
+    pinMode(BTN_TRANSPORT_PIN, INPUT_PULLUP);
+    pinMode(BTN_REALIGN_PIN,   INPUT_PULLUP);
+    pinMode(LED_TRANSPORT_PIN, OUTPUT);
+    pinMode(LED_REALIGN_PIN,   OUTPUT);
+    digitalWrite(LED_TRANSPORT_PIN, LOW);
+    digitalWrite(LED_REALIGN_PIN,   LOW);
+    button_reset(&s_btn_transport);
+    button_reset(&s_btn_realign);
+}
+
+static void buttons_tick() {
+    uint32_t now = millis();
+
+    // Post intents; never touch the wire from loop(). A transport byte emitted here
+    // would land wherever loop() happened to be, not on the bar line -- the writer
+    // owns transport_launch and fires it on the grid.
+    if (button_update(&s_btn_transport, digitalRead(BTN_TRANSPORT_PIN) == LOW, now)) {
+        bool running = ktouch_transport_state() != TL_STOPPED;
+        ktouch_transport_post(running ? TL_INTENT_STOP : TL_INTENT_PLAY);
+    }
+    if (button_update(&s_btn_realign, digitalRead(BTN_REALIGN_PIN) == LOW, now)) {
+        ktouch_transport_post(TL_INTENT_REALIGN);
+    }
+
+    digitalWrite(LED_TRANSPORT_PIN,
+        transport_led_on((TransportLaunchState)ktouch_transport_state(), now) ? HIGH : LOW);
+    digitalWrite(LED_REALIGN_PIN,
+        realign_led_on(ktouch_transport_realign_armed(), now) ? HIGH : LOW);
+}
+#endif // HAS_BUTTONS
+
 void setup() {
     Serial.begin(115200);
     delay(200);
@@ -42,7 +106,12 @@ void setup() {
         strlcpy(g_config.wifi_pass, KSTOUCH_WIFI_PASS, sizeof(g_config.wifi_pass));
     }
 
+#ifdef HAS_TOUCH_DISPLAY
     ktouch_display_begin();
+#endif
+#ifdef HAS_BUTTONS
+    buttons_begin();
+#endif
     tempo_source_select(TEMPO_SRC_LINK);
     tempo_source_pre_net();
 
@@ -75,6 +144,11 @@ void setup() {
 void loop() {
     ktouch_web_tick();
     if (!g_ap_mode) tempo_source_poll();
+#ifdef HAS_TOUCH_DISPLAY
     ktouch_display_tick();
+#endif
+#ifdef HAS_BUTTONS
+    buttons_tick();
+#endif
     delay(5);
 }

@@ -1,3 +1,19 @@
+// ============================================================================
+//  X32Link — tempo -> XR18/X32 mixer FX-delay sync over OSC.
+//
+//  THIS IS NOT THE CLOCK BOX. KitchenSync/ is the repo's PRIMARY product (Link in
+//  -> MIDI/analog clock + transport out); KitchenSyncTouch/ is that same engine built
+//  on the Arduino core instead of ESP-IDF. X32Link is a RELATED product, not the
+//  primary one. Clock-out, transport, buttons, MIDI and analog outputs belong THERE.
+//
+//  X32Link/ is ALSO the shared-pure-C home (ADR-0003/0007): every other sketch
+//  symlinks modules out of this directory. That is an arduino-cli constraint --
+//  it can only compile files inside a sketch root -- and NOT a statement that
+//  this firmware is the product. Adding a shared pure module here is right.
+//  Adding a clock-box FEATURE here is how it ends up in the wrong firmware.
+//
+//  See the firmware map at the top of AGENTS.md.
+// ============================================================================
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include "config.h"
