@@ -16,6 +16,11 @@
 #include "tempo_source.h"
 #include "transport_launch.h"   // bar-quantized PLAY/STOP (ESP-011 pure engine)
 #include "ktouch_transport.h"   // one-slot press mailbox
+#include "beat_source.h"        // ESP-027: free-run through a lost GhostXForm (ARC-007)
+#include "master_clock.h"       // ESP-027: originate a clock when solo (P4-040)
+#include "link_protocol.h"      // link_proto_timeline()
+#include "link_measurement.h"   // link_measurement_current_xform()
+#include "esp_timer.h"          // esp_timer_get_time()
 #include "app_config.h"         // quantum_beats
 #include <Arduino.h>
 
@@ -25,6 +30,8 @@ extern AppConfig g_config;
 // shared with X32Link's writer instead of copy-pasted into each task (ARC-019).
 static ClockOutput     s_out;
 static TransportLaunch s_tl;
+static BeatSource      s_bs;   // ESP-027
+static MasterClock     s_mc;   // ESP-027
 
 // 1 ms writer task: quantize the current Link beat to 24 PPQN, emit due 0xF8 on
 // the DIN wire. Resets when phase isn't valid so we never clock off a stale/absent
@@ -61,6 +68,10 @@ static volatile int      s_core        = -1;  // which core this task actually r
 // 124us (idle) to 2431us the moment a Link session came up -- so a call in here starts
 // BLOCKING once there is a real timeline. These say which one.
 static volatile uint32_t w_beats = 0, w_clock = 0, w_tport = 0;
+// ESP-027 diagnostic: what beat position is the writer ACTUALLY seeing, and from where.
+static volatile float s_dbg_beats = 0.0f;
+static volatile int   s_dbg_locked = -1;
+static volatile int   s_dbg_active = -1;
 
 uint32_t ktouch_midi_max_gap(void)  { return s_max_gap_us; }
 uint32_t ktouch_midi_max_work(void) { return s_max_work_us; }
@@ -70,11 +81,16 @@ uint32_t ktouch_midi_w_beats(void)  { return w_beats; }
 uint32_t ktouch_midi_w_clock(void)  { return w_clock; }
 uint32_t ktouch_midi_w_tport(void)  { return w_tport; }
 int      ktouch_midi_core(void)     { return s_core; }
+float    ktouch_midi_beats(void)    { return s_dbg_beats; }
+int      ktouch_midi_locked(void)   { return s_dbg_locked; }
+int      ktouch_midi_bs_active(void){ return s_dbg_active; }
 
 static void writer_task(void*) {
     s_core = xPortGetCoreID();   // ESP-018: confirm, don't assume
     clock_output_reset(&s_out);
     transport_launch_reset(&s_tl);
+    beat_source_reset(&s_bs);   // ESP-027
+    master_clock_reset(&s_mc);  // ESP-027
     uint32_t prev_end = 0;
     /* vTaskDelayUntil, NOT vTaskDelay (ESP-018).
      *
@@ -92,7 +108,51 @@ static void writer_task(void*) {
         uint32_t tk0 = micros();
         uint32_t gap = prev_end ? (tk0 - prev_end) : 0;
 
-        double beats = tempo_source_beats_now();   // <0 when phase not valid
+        /* ESP-027: the beat basis comes from beat_source (ARC-007), NOT straight from the
+         * Link phase estimate.
+         *
+         * It used to call tempo_source_beats_now(), which returns -1 the moment the
+         * committed GhostXForm is invalid -- and clock_output's reset-on-invalid rule then
+         * emits NOTHING. So any loss of the xform silenced the DIN wire. Measured on the
+         * analyzer: drop the Link session and the clock stops DEAD and never returns, while
+         * /status still cheerfully reports sync:1 peers:1 clock:1. Zero bytes in 6 s.
+         *
+         * beat_source is what the P4 has always used and the Touch never got: while a
+         * session exists it prefers the phase-locked position, and when the xform goes away
+         * it falls back to a FREE-RUNNING accumulator at the last known tempo. The clock
+         * keeps playing. It signals `reprime` on a basis switch so the tick grid realigns
+         * instead of dumping a catch-up burst.
+         *
+         * have_session stays true here off the gossiped timeline alone -- that is the whole
+         * point: the timeline is still arriving, only the local host<->ghost mapping is
+         * momentarily gone, and a clock box must never go silent for that. */
+        LinkTimeline   link_tl;
+        bool link_have_session = link_proto_timeline(&link_tl) && link_tl.micros_per_beat > 0;
+        LinkGhostXForm link_xform = link_measurement_current_xform();
+
+        /* ESP-027 / P4-040: the arbiter, NOT the raw Link state.
+         *
+         * beat_source alone was not enough: it free-runs only while a session EXISTS but the
+         * xform is invalid. On TOTAL session loss (the last peer leaves) have_session goes
+         * false, beat_source stops, and the wire goes silent -- measured: kill the only Link
+         * peer and the DIN clock dies within one beat and NEVER returns, while /status still
+         * reports sync:1 peers:1 clock:1.
+         *
+         * For a CLOCK BOX that is indefensible. Close the laptop and the drum machine must
+         * keep playing. master_clock_arbiter defers to Link whenever a peer is present and,
+         * on the peers>0 -> 0 edge, seeds an internal tempo from whatever Link last showed --
+         * so the output is continuous across the transition and needs no new UI.
+         *
+         * The P4 has had this since P4-040. The Touch never got it: master_clock.h said
+         * "KitchenSync (P4) only", written when the Touch was not yet the clock box. It is
+         * now the thing driving the RC-505, so it originates too. */
+        MasterArbiterOut mc = master_clock_arbiter(&s_mc, link_proto_peers(),
+                                                   link_have_session, link_tl, link_xform);
+        BeatSourceOut  bs = beat_source_step(&s_bs, mc.have_session, mc.xform, mc.tl,
+                                             esp_timer_get_time());
+        if (bs.reprime) clock_output_reset(&s_out);   // realign, don't burst
+        s_dbg_beats = (float)bs.beats; s_dbg_locked = bs.locked; s_dbg_active = bs.active;
+        double beats = bs.active ? bs.beats : -1.0;
         uint32_t t_beats = micros();
         // One call owns the whole derivation (ARC-019): reset-on-invalid +
         // dropped banking + burst cap inside clock_output_step; nudge trims

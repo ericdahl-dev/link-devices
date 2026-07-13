@@ -112,6 +112,49 @@ void test_reacquire_after_loss_restarts_free(void) {
     ASSERT_BEATS(0.0, o.beats);
 }
 
+
+
+
+/* ---- ESP-027: a backwards beat step is a re-origin, not physics ---------- */
+
+// THE BUG: a fresh GhostXForm commits, `locked` stays true (no basis switch, so the
+// old rule fires nothing), and the beat position steps BACKWARDS. Measured on the wire:
+// 276 beats backwards on a Link rejoin -- and clock_ticker, primed at the old position,
+// emitted SILENCE for over two minutes waiting for beats to climb back, while /status
+// reported sync:1 peers:1. Time does not run backwards; a backstep IS a re-origin.
+void test_backwards_beat_step_reprimes(void) {
+    // locked, beats advancing from a session whose origin is far in the past
+    BeatSourceOut o = beat_source_step(&s, true, locked_xform(0), tl, 100000000);
+    TEST_ASSERT_TRUE(o.locked);
+    double before = o.beats;
+
+    // re-origin: SAME basis (still locked), but the intercept moves so `now` maps to a
+    // much earlier beat (ghost = host + intercept, so a negative intercept steps back).
+    // The old rule sees locked==was_locked and re-primes nothing.
+    o = beat_source_step(&s, true, locked_xform(-90000000), tl, 100000000);
+    TEST_ASSERT_TRUE(o.locked);                 // basis did NOT switch
+    TEST_ASSERT_TRUE(o.beats < before - 1.0);   // and beats went backwards
+    TEST_ASSERT_TRUE(o.reprime);                // ...so THIS must fire
+}
+
+// An ordinary sub-millisecond xform refinement must NOT re-prime -- resetting the grid on
+// every tiny correction would be its own bug (the grid would never settle).
+void test_tiny_backstep_does_not_reprime(void) {
+    beat_source_step(&s, true, locked_xform(0), tl, 100000000);
+    // 10 ms of intercept = 0.02 beat at 120 BPM, well under BEAT_SOURCE_BACKSTEP_BEATS
+    BeatSourceOut o = beat_source_step(&s, true, locked_xform(-10000), tl, 100001000);
+    TEST_ASSERT_FALSE(o.reprime);
+}
+
+// Forward motion is the normal case and must never re-prime.
+void test_forward_motion_does_not_reprime(void) {
+    beat_source_step(&s, true, locked_xform(0), tl, 100000000);
+    for (int i = 1; i <= 20; i++) {
+        BeatSourceOut o = beat_source_step(&s, true, locked_xform(0), tl, 100000000 + i * 100000);
+        TEST_ASSERT_FALSE(o.reprime);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_idle_is_inactive);
@@ -122,5 +165,8 @@ int main(void) {
     RUN_TEST(test_lock_drop_to_free_reprimes_and_restarts);
     RUN_TEST(test_session_loss_reprimes_once);
     RUN_TEST(test_reacquire_after_loss_restarts_free);
+    RUN_TEST(test_backwards_beat_step_reprimes);
+    RUN_TEST(test_tiny_backstep_does_not_reprime);
+    RUN_TEST(test_forward_motion_does_not_reprime);
     return UNITY_END();
 }
