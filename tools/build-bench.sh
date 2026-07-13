@@ -31,13 +31,22 @@ trap restore EXIT
 cp "$SKETCH/config.h"       /tmp/ks_config.h.bak
 cp "$SKETCH/partitions.csv" /tmp/ks_partitions.bak
 
-# board flag: comment-swap
-sed -i '' \
-  -e 's|^#define BOARD_WAVESHARE_S3_TOUCH_LCD_147|// #define BOARD_WAVESHARE_S3_TOUCH_LCD_147|' \
-  -e 's|^// #define BOARD_ESP32_DEVKIT|#define BOARD_ESP32_DEVKIT|' \
-  "$SKETCH/config.h"
+# Board flag: comment-swap. awk + mv, NOT `sed -i`.
+#
+# `sed -i ''` is BSD/macOS syntax -- GNU sed reads the '' as a FILENAME and dies with
+# "sed: can't read : No such file or directory". This script therefore only ever worked on
+# a Mac, and every Linux user (and CI) got a hard failure. Caught the moment CI started
+# compiling the bench rig at all. awk behaves identically on both.
+awk '
+  /^#define BOARD_WAVESHARE_S3_TOUCH_LCD_147/ { print "// " $0; next }
+  /^\/\/ #define BOARD_ESP32_DEVKIT/          { sub(/^\/\/ +/, ""); print; next }
+  { print }
+' "$SKETCH/config.h" > "$SKETCH/config.h.tmp" && mv "$SKETCH/config.h.tmp" "$SKETCH/config.h"
+
 grep -q '^#define BOARD_ESP32_DEVKIT' "$SKETCH/config.h" || {
   echo "FAIL: could not select BOARD_ESP32_DEVKIT in $SKETCH/config.h" >&2; exit 1; }
+grep -q '^// #define BOARD_WAVESHARE_S3_TOUCH_LCD_147' "$SKETCH/config.h" || {
+  echo "FAIL: the S3 board flag is still active — config.h would #error on both" >&2; exit 1; }
 
 cp "$SKETCH/partitions_devkit.csv" "$SKETCH/partitions.csv"
 
