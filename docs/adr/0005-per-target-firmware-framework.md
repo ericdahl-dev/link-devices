@@ -1,7 +1,14 @@
 # 5. Per-target firmware framework: Arduino for the S3, ESP-IDF for the P4
 
 Date: 2026-07-05
-Status: accepted
+Status: amended by [ADR-0009](0009-converge-the-clock-box-on-esp-idf.md)
+
+> **Amended 2026-07-12.** The revisit condition below — *"if maintaining two glue layers
+> becomes a real burden (not expected)"* — **fired**. The 1 ms clock writer exists twice
+> (`ks_main.c` and `ktouch_midi_out.cpp`), and ESP-023 was fixed in the P4's copy while the
+> Touch silently kept the bug. ADR-0009 converges the CLOCK BOX on ESP-IDF. The rest of this
+> ADR stands: X32Link, LoraLink and X32_emulator are *related* products, do not duplicate the
+> clock engine, and stay on Arduino.
 
 ## Context
 

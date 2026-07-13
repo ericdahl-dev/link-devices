@@ -115,9 +115,34 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
                 // observation records state and emits nothing -- deliberate, so
                 // joining a session mid-play doesn't jump gear to bar 1, P4-008).
                 // Sync `tr` so a later session edge doesn't re-emit what we just sent.
-                plan.transport[o] = (lo.action == TL_START) ? TRANSPORT_START : TRANSPORT_STOP;
-                st->tr[o].primed  = true;
-                st->tr[o].playing = (lo.action == TL_START);
+                //
+                // An explicit switch, NOT `(action == TL_START) ? START : STOP`. That
+                // ternary silently mapped every non-START action to STOP, which was fine
+                // while START and STOP were the only two -- and became a trap the moment
+                // ESP-025 added TL_RESTART: the P4 would have emitted a bare Stop where a
+                // restart was asked for, on the bar line, with nothing in any log.
+                switch (lo.action) {
+                    case TL_START:
+                        plan.transport[o] = TRANSPORT_START;
+                        st->tr[o].primed  = true;
+                        st->tr[o].playing = true;
+                        break;
+                    case TL_STOP:
+                        plan.transport[o] = TRANSPORT_STOP;
+                        st->tr[o].primed  = true;
+                        st->tr[o].playing = false;
+                        break;
+                    case TL_RESTART:
+                        // Unreachable today: the P4 posts no TL_INTENT_REALIGN (only the
+                        // ESP-025 bench rig does). Supporting it here needs a plan-level
+                        // change -- a restart is TWO bytes (0xFC then 0xFA) in one tick,
+                        // and plan.transport[] holds exactly one action per output. Left
+                        // as an explicit no-op rather than silently degrading to Stop.
+                        break;
+                    case TL_NONE:
+                    default:
+                        break;
+                }
             }
         }
     }
