@@ -1,13 +1,19 @@
 dependencies:
-  # WiFi on the P4 is provided by the onboard ESP32-C6 over the ESP-Hosted stack.
-  espressif/esp_hosted: "~2"
+  # WiFi on the P4 comes from the onboard ESP32-C6 over ESP-Hosted -- the P4 has no radio
+  # of its own. The S3 and the classic ESP32 DO, so they use native esp_wifi and must NOT
+  # pull this stack in at all.
+  espressif/esp_hosted:
+    version: "~2"
+    rules:
+      - if: "target in [esp32p4]"
   espressif/esp_wifi_remote:
     version: ">=0.10,<2.0"
-  # ES8311 codec driver for the onboard-speaker metronome (P4-006). Target-
-  # agnostic I2C driver; the Waveshare P4-NANO uses ES8311 + NS4150B amp.
-  espressif/es8311: "^1.0.0"
-  # WS2812 driver (RMT backend) for the external visual-metronome strip (P4-018).
+    rules:
+      - if: "target in [esp32p4]"
+  # ES8311 codec: the P4-NANO's onboard speaker (P4-006). No other board has one.
+  espressif/es8311:
+    version: "^1.0.0"
+    rules:
+      - if: "target in [esp32p4]"
   espressif/led_strip: "^2.5.5"
-  # mDNS so the board is reachable at kitchensync-XXXX.local instead of whatever
-  # address DHCP handed it this boot (ESP-012).
   espressif/mdns: "^1.8.0"

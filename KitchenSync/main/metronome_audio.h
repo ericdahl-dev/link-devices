@@ -1,4 +1,12 @@
 #pragma once
+
+/* ESP-026: the onboard speaker (P4-006) exists only on the P4-NANO. On the S3 / classic ESP32 the
+ * hardware is not fitted, so the header hands back no-op stubs and the APP CORE
+ * compiles unchanged -- no #ifdefs sprayed through ks_main.c / ks_web.cpp. Same shape
+ * as HAS_USB_MIDI / HAS_TOUCH_DISPLAY / LED_NONE elsewhere in this repo (ADR-0003:
+ * the glue is thin and per-target; the logic is pure and shared). */
+#include "sdkconfig.h"
+#if CONFIG_IDF_TARGET_ESP32P4
 // KitchenSync audio glue (P4-006): the ES8311 codec + I2S tone-burst side of the
 // metronome. Pure scheduling (when to click / accent) lives in the host-tested
 // X32Link/metronome.c; this file is the platform-specific sound. Thin per
@@ -29,4 +37,13 @@ void metronome_audio_click(bool accent);
 
 #ifdef __cplusplus
 }
+#endif
+
+#else  /* hardware not fitted on this board */
+#include <stdbool.h>
+static inline void metronome_audio_start(int vol, int voice) { (void)vol; (void)voice; }
+static inline bool metronome_audio_ready(void)               { return false; }
+static inline void metronome_audio_set(int vol, int voice)   { (void)vol; (void)voice; }
+static inline void metronome_audio_click(bool accent)        { (void)accent; }
+
 #endif

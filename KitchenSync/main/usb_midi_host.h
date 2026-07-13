@@ -1,4 +1,12 @@
 #pragma once
+
+/* ESP-026: the USB-MIDI host (P4-003/005) exists only on the P4-NANO. On the S3 / classic ESP32 the
+ * hardware is not fitted, so the header hands back no-op stubs and the APP CORE
+ * compiles unchanged -- no #ifdefs sprayed through ks_main.c / ks_web.cpp. Same shape
+ * as HAS_USB_MIDI / HAS_TOUCH_DISPLAY / LED_NONE elsewhere in this repo (ADR-0003:
+ * the glue is thin and per-target; the logic is pure and shared). */
+#include "sdkconfig.h"
+#if CONFIG_IDF_TARGET_ESP32P4
 // KitchenSync glue: USB-MIDI host on the P4 Type-A OTG port. Enumerates a USB-MIDI
 // device, claims its MIDIStreaming interface, and sends 4-byte USB-MIDI event
 // packets out the bulk OUT endpoint. Proven in the scratchpad p4_midi_clock
@@ -37,4 +45,16 @@ uint32_t usb_midi_host_tx(void);
 
 #ifdef __cplusplus
 }
+#endif
+
+#else  /* hardware not fitted on this board */
+#include <stdbool.h>
+#include <stdint.h>
+static inline void     usb_midi_host_start(void)                            {}
+static inline bool     usb_midi_host_ready(void)                            { return false; }
+static inline bool     usb_midi_host_send(const uint8_t* d, int n)          { (void)d; (void)n; return false; }
+static inline uint32_t usb_midi_host_dropped(void)                          { return 0; }
+static inline uint32_t usb_midi_host_rx_clocks(void)                        { return 0; }
+static inline uint32_t usb_midi_host_tx(void)                               { return 0; }
+
 #endif
