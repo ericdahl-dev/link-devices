@@ -88,6 +88,47 @@ void test_enabled_output_emits_pulses(void) {
     TEST_ASSERT_GREATER_THAN_INT(0, run_pulses(true, 1, 1));   // usb ready, clock on, out on
 }
 
+// P4-039: plan.bpm derives from the settled timeline the caller already holds
+// (in->tl), not a separate value that a caller could zero out independently —
+// so a frozen/held timeline (peer loss, session still settled) keeps reporting
+// its real tempo instead of drifting to whatever a stale side-channel says.
+void test_bpm_reflects_locked_timeline(void) {
+    KsTickInputs in = mk(0, 0, true, true);   // TL.micros_per_beat == MPB == 500000 (120 bpm)
+    KsTickPlan p = ks_tick_step(&st, &in);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 120.0f, p.bpm);
+}
+
+void test_bpm_zero_without_session(void) {
+    KsTickInputs in; memset(&in, 0, sizeof in);
+    in.have_session = false; in.xform = no_xform(); in.tl = TL;
+    in.cfg = &cfg; in.usb_ready = true;
+    KsTickPlan p = ks_tick_step(&st, &in);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, p.bpm);
+}
+
+// P4-039: once the session has told us it's playing, losing the peer (which
+// resets in->start_stop_seen back to false, per link_protocol.c) must not snap
+// the reported transport state back to "not playing" — hold the last known value.
+void test_playing_held_across_peer_loss(void) {
+    KsTickInputs in = mk(0, 0, true, true);
+    in.start_stop_seen = true; in.playing = true;
+    ks_tick_step(&st, &in);   // session says playing
+
+    in = mk(MPB, 0, true, true);
+    in.start_stop_seen = false; in.playing = false;   // peer gone: link_proto zeroed both
+    KsTickPlan p = ks_tick_step(&st, &in);
+    TEST_ASSERT_TRUE(p.playing);
+}
+
+// A device that has never seen a StartStopState (no session has ever reported
+// transport) must not fabricate "playing" — nothing to hold yet.
+void test_playing_false_when_never_seen(void) {
+    KsTickInputs in = mk(0, 0, true, true);
+    in.start_stop_seen = false; in.playing = false;
+    KsTickPlan p = ks_tick_step(&st, &in);
+    TEST_ASSERT_FALSE(p.playing);
+}
+
 // ESP-015: pulses are a musical decision, NOT gated on a USB host -- the DIN MIDI
 // output must clock with no USB device attached. (The USB *send* is gated in the
 // glue, not here.) This replaces the old "no USB -> no pulses" behavior.
@@ -377,6 +418,10 @@ int main(void) {
     RUN_TEST(test_no_downbeat_without_session);
     RUN_TEST(test_cfg_gen_change_reprimes);
     RUN_TEST(test_enabled_output_emits_pulses);
+    RUN_TEST(test_bpm_reflects_locked_timeline);
+    RUN_TEST(test_bpm_zero_without_session);
+    RUN_TEST(test_playing_held_across_peer_loss);
+    RUN_TEST(test_playing_false_when_never_seen);
     RUN_TEST(test_clock_not_gated_by_usb_ready);
     RUN_TEST(test_clock_gated_by_master_switch);
     RUN_TEST(test_disabled_output_never_pulses);

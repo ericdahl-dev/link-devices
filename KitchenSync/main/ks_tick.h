@@ -38,6 +38,12 @@ typedef struct {
     TransportLaunch tl[KS_CLOCK_OUTPUTS];
     BarReset    bar;                     // ESP-015: fires plan.downbeat once per bar
     uint32_t    seen_gen;                // last config-generation acted on (P4-015)
+    // P4-039: hold the last known transport-playing state once the session has
+    // ever reported it, so a peer-loss reset of in->start_stop_seen (which zeros
+    // in->playing too, per link_protocol.c) doesn't snap /status to "not playing"
+    // while the clock is still running.
+    bool        had_stst;
+    bool        held_playing;
 } KsTickState;
 
 // Reset all grids + beat basis; adopt cfg_gen as the current generation.
@@ -62,6 +68,10 @@ typedef struct {
     bool   active;   // bs.active — the loop's LED gate + skip
     bool   locked;   // bs.locked — status log
     double beats;    // bs.beats — LED render + status log
+    float  bpm;      // P4-039: derived from the settled timeline (in->tl), which
+                      // survives peer loss — /status reports this, not a
+                      // separately-zeroed peer-count-gated value
+    bool   playing;  // P4-039: held transport-playing state (see KsTickState)
 
     bool   reprime;  // grids repriming happened this tick (basis/session/config edit)
 
