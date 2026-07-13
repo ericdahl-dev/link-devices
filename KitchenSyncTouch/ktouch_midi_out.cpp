@@ -102,13 +102,22 @@ static void writer_task(void*) {
         // (ESP-017 parity; the derivation already supports both).
         int n = clock_output_step(&s_out, beats, 24, g_config.nudge_mbeats, 0);
         if (n > 1) s_bursts++;   // more than one pulse in a 1ms tick = catching up
-        for (int i = 0; i < n; i++) din_midi_out_byte(0xF8);
 
-        uint32_t t_clock = micros();
-
-        // Transport: a touch press arms via transport_launch, which fires START on
-        // the next bar line (STOP is immediate). Single writer, so no interleave
-        // with the clock bytes above. DIN only.
+        /* TRANSPORT FIRST, THEN CLOCK -- and the order is the whole point (ESP-023).
+         *
+         * The MIDI spec is explicit: a slave begins playing on the FIRST CLOCK IT
+         * RECEIVES AFTER a Start. So the Start must arrive BEFORE the clock byte that
+         * marks the downbeat. Emit the clock first and the slave discards it (it has not
+         * started yet) and begins on the NEXT one -- exactly one 24-PPQN tick late, on
+         * every single start, forever: 20.8 ms at 120 BPM, 17.2 ms at 145. That is what
+         * "the drum machine falls behind when I start it from stopped" IS.
+         *
+         * ESP-023 measured this on the analyzer and fixed it on the P4 (ks_main.c): the
+         * downbeat 0xF8 went out at +0.018 ms from the bar strobe and the 0xFA followed
+         * it at +0.338 ms -- correct to the microsecond, and in the wrong ORDER. The Touch
+         * had the identical bug and never got the fix. Both bytes go out the same UART in
+         * the order written, so swapping these two blocks is the entire fix. Stop (0xFC)
+         * is order-insensitive; it rides along because it shares the branch. */
         double q = (double)g_config.quantum_beats;
         TransportLaunchOut o = transport_launch_step(&s_tl, ktouch_transport_take(),
                                                      beats, q, beats >= 0.0);
@@ -116,14 +125,20 @@ static void writer_task(void*) {
         else if (o.action == TL_STOP) din_midi_out_byte(0xFC);
         ktouch_transport_publish_state(o.state);   // stopped/armed/running -> display
 
+        uint32_t t_tport = micros();
+
+        for (int i = 0; i < n; i++) din_midi_out_byte(0xF8);
+
         uint32_t tk1  = micros();
         uint32_t work = tk1 - tk0;
         if (gap  > s_max_gap_us)  s_max_gap_us  = gap;
         if (work > s_max_work_us) {
             s_max_work_us = work;
-            w_beats = t_beats - tk0;        // tempo_source_beats_now()
-            w_clock = t_clock - t_beats;    // scheduler + DIN clock bytes
-            w_tport = tk1     - t_clock;    // transport step + publish
+            // Stage split re-labelled to match the new order -- the probe must keep
+            // measuring the stage it names, or ESP-018's next diagnosis reads a lie.
+            w_beats = t_beats  - tk0;       // tempo_source_beats_now()
+            w_tport = t_tport  - t_beats;   // clock_output_step + transport byte + publish
+            w_clock = tk1      - t_tport;   // DIN clock bytes
         }
         if (gap > 5000 || work > 5000) s_overruns++;
         prev_end = tk1;
