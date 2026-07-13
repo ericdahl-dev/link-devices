@@ -60,6 +60,13 @@ static void start_ap(void) {
 
 static Button s_btn_transport;
 static Button s_btn_realign;
+// ESP-025 bring-up: latch what the pin is doing, so a press can be checked from /status
+// without having to catch it inside a serial window.
+static volatile uint32_t s_btn_presses = 0;   // debounced press edges, ever
+static volatile uint32_t s_btn_lows    = 0;   // loop() iterations that saw the pin LOW
+uint32_t ktouch_btn_presses(void) { return s_btn_presses; }
+uint32_t ktouch_btn_lows(void)    { return s_btn_lows; }
+int      ktouch_btn_level(void)   { return digitalRead(BTN_TRANSPORT_PIN); }
 
 static void buttons_begin() {
     pinMode(BTN_TRANSPORT_PIN, INPUT_PULLUP);
@@ -83,7 +90,9 @@ static void buttons_tick() {
     // Post intents; never touch the wire from loop(). A transport byte emitted here
     // would land wherever loop() happened to be, not on the bar line -- the writer
     // owns transport_launch and fires it on the grid.
+    if (digitalRead(BTN_TRANSPORT_PIN) == LOW) s_btn_lows++;
     if (button_update(&s_btn_transport, digitalRead(BTN_TRANSPORT_PIN) == LOW, now)) {
+        s_btn_presses++;
         bool running = ktouch_transport_state() != TL_STOPPED;
         ktouch_transport_post(running ? TL_INTENT_STOP : TL_INTENT_PLAY);
         Serial.printf("[btn] TRANSPORT (gpio%d) -> %s\n", BTN_TRANSPORT_PIN,
