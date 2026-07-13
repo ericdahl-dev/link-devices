@@ -352,6 +352,57 @@ jobs:
             -e CCACHE_BASEDIR=/app/${{ github.repository }}
             -e CCACHE_NOHASHDIR=1
 
+      # ESP-026: the SAME project, on the other two chips. This is the whole premise of the
+      # migration -- one ESP-IDF app, three board targets -- and without CI it rots in a week.
+      #
+      # The P4-only hardware (ES8311 speaker, USB-MIDI host) is gated out by target in
+      # main/CMakeLists.txt, and its headers hand back no-op stubs, so the app core compiles
+      # unchanged on all three. A build that fails here means somebody reached for P4 hardware
+      # from shared code.
+      # idf.py writes `sdkconfig` pinned to the target it built, and KitchenSync/sdkconfig is
+      # TRACKED (the P4's). Reusing the same directory for the next target makes CMake read a
+      # config for the wrong chip and die with exit 2. Wipe it between targets; each one
+      # regenerates from sdkconfig.defaults.
+      #
+      # sudo, because esp-idf-ci-action runs in a container AS ROOT -- the build tree it leaves
+      # behind is root-owned and the runner user cannot delete it. (Not matrixing this job on
+      # purpose: it would rename the "Firmware compile (KitchenSync, ESP-IDF)" status context,
+      # which branch protection REQUIRES, and orphan it -- auto-merge would then block forever
+      # with every check green.)
+      - name: Reset sdkconfig between targets
+        if: needs.changes.outputs.code == 'true'
+        run: sudo rm -rf KitchenSync/build KitchenSync/sdkconfig
+
+      - name: Compile KitchenSync for esp32s3 (ESP-026 multi-target)
+        if: needs.changes.outputs.code == 'true'
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: release-v5.5
+          target: esp32s3
+          path: 'KitchenSync'
+
+      # idf.py writes `sdkconfig` pinned to the target it built, and KitchenSync/sdkconfig is
+      # TRACKED (the P4's). Reusing the same directory for the next target makes CMake read a
+      # config for the wrong chip and die with exit 2. Wipe it between targets; each one
+      # regenerates from sdkconfig.defaults.
+      #
+      # sudo, because esp-idf-ci-action runs in a container AS ROOT -- the build tree it leaves
+      # behind is root-owned and the runner user cannot delete it. (Not matrixing this job on
+      # purpose: it would rename the "Firmware compile (KitchenSync, ESP-IDF)" status context,
+      # which branch protection REQUIRES, and orphan it -- auto-merge would then block forever
+      # with every check green.)
+      - name: Reset sdkconfig between targets
+        if: needs.changes.outputs.code == 'true'
+        run: sudo rm -rf KitchenSync/build KitchenSync/sdkconfig
+
+      - name: Compile KitchenSync for esp32 (ESP-026, the bench-rig chip)
+        if: needs.changes.outputs.code == 'true'
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: release-v5.5
+          target: esp32
+          path: 'KitchenSync'
+
   # ---------------------------------------------------------------------------
   # GATE. This job compiles nothing.
   #
