@@ -56,32 +56,59 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: make -C tests run     # native gcc — x32_port IP/defaults/path seam
 
+  # ---------------------------------------------------------------------------
+  # Six sketch/board variants used to compile SEQUENTIALLY in one job -- 3m45, and
+  # the critical path for the whole workflow (everything else finished in ~2 min).
+  # They are independent, so they fan out. Wall time drops to one compile + setup.
+  #
+  # The caches are shared by key, so the matrix legs all restore the same warm
+  # ~/.arduino15 + core.a instead of rebuilding the ESP32 core seven times.
+  # ---------------------------------------------------------------------------
   firmware-compile:
-    name: Firmware compile (X32Link + KitchenSyncTouch + X32 emulator)
+    name: Compile ${{ matrix.name }}
     runs-on: ubuntu-latest
     needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false        # one broken board flag must not hide the others
+      matrix:
+        include:
+          - name: X32Link (headless)
+            sketch: X32Link
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+            flags: ""
+          - name: X32Link (Waveshare touch)
+            sketch: X32Link
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+            flags: "-DBOARD_WAVESHARE_S3_TOUCH_LCD_147"
+          # LED_RGB path (LNK-039) only compiles under this flag.
+          - name: X32Link (QT Py NeoPixel)
+            sketch: X32Link
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+            flags: "-DBOARD_QTPY_ESP32S3"
+          # battery_gauge_io.cpp's Wire calls only compile under this flag -- opt-in
+          # per unit, so without its own leg it never gets compiled at all.
+          - name: X32Link (QT Py + LiPo BFF)
+            sketch: X32Link
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+            flags: "-DBOARD_QTPY_ESP32S3 -DHAS_BATTERY_GAUGE"
+          - name: X32 emulator (ESP-002)
+            sketch: X32_emulator
+            fqbn: esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc
+            flags: ""
+          # PartitionScheme=custom is what makes the core USE the sketch-local
+          # partitions.csv (16MB dual-OTA). Without it the core silently falls back
+          # to the 4MB default table -- which is how the sketch quietly hit 87% full.
+          - name: KitchenSyncTouch (S3 touch board)
+            sketch: KitchenSyncTouch
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom
+            flags: ""
     env:
-      FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
-      # KitchenSync Touch ships a sketch-local partitions.csv (16MB, dual-OTA, 4MB app
-      # slots). PartitionScheme=custom is what makes the ESP32 core USE that file --
-      # without it the core silently falls back to its 4MB `default` table and the app
-      # slot is 1.25MB, which is how the sketch quietly reached 87% full. Touch-only:
-      # X32Link has no partitions.csv, so `custom` would break its build.
-      TOUCH_FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom
-      # Persisted core.a build cache (see the cache step below). Every compile
-      # passes --build-cache-path here so the ESP32 core isn't recompiled each run.
       CORE_CACHE: ${{ github.workspace }}/.arduino-core-cache
     steps:
       - uses: actions/checkout@v4
-        if: needs.changes.outputs.code == 'true'
 
-      # Static key so a hit is permanent: adding a lib/bumping the core version
-      # below won't get cached under a stale key. Bump the -vN suffix when you
-      # change what "Install ESP32 core + LovyanGFX" installs. restore-keys lets
-      # this fall back to loralink-compile's cache (same esp32:esp32 core) on a
-      # cold cache instead of re-downloading it from scratch.
       - name: Cache arduino-cli data (ESP32 core + libraries)
-        if: needs.changes.outputs.code == 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -92,19 +119,13 @@ jobs:
             arduino-esp32-${{ runner.os }}-
 
       - name: Cache arduino-cli binary
-        if: needs.changes.outputs.code == 'true'
         id: cache-arduino-cli-bin
         uses: actions/cache@v4
         with:
           path: bin
           key: arduino-cli-bin-${{ runner.os }}-v1
 
-      # Compiled core.a. ~/.arduino15 caches the *downloaded* core; this caches the
-      # *built* one, which arduino-cli otherwise re-compiles into a fresh temp dir
-      # every run. restore-keys cross-seeds from any prior core cache (same FQBN).
-      # Static key like the others — bump -vN when the core version changes.
       - name: Cache arduino compiled core
-        if: needs.changes.outputs.code == 'true'
         uses: actions/cache@v4
         with:
           path: ${{ env.CORE_CACHE }}
@@ -113,65 +134,83 @@ jobs:
             arduino-core-${{ runner.os }}-
 
       - name: Install arduino-cli
-        if: needs.changes.outputs.code == 'true' && steps.cache-arduino-cli-bin.outputs.cache-hit != 'true'
+        if: steps.cache-arduino-cli-bin.outputs.cache-hit != 'true'
         run: curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
 
       - name: Add arduino-cli to PATH
-        if: needs.changes.outputs.code == 'true'
         run: echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
 
       - name: Install ESP32 core + LovyanGFX
-        if: needs.changes.outputs.code == 'true'
         run: |
-          # --overwrite: idempotent when a cached ~/.arduino15 already has a config
           arduino-cli config init --overwrite --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
           arduino-cli lib install LovyanGFX
 
-      - name: Compile X32Link (headless)
-        if: needs.changes.outputs.code == 'true'
-        run: arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" X32Link
-
-      - name: Compile X32Link (Waveshare touch board)
-        if: needs.changes.outputs.code == 'true'
+      - name: Compile
         run: |
-          echo '-DBOARD_WAVESHARE_S3_TOUCH_LCD_147' > X32Link/build_opt.h
-          arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" X32Link
-          git checkout -- X32Link/build_opt.h
+          # build_opt.h is one -D per line. Space-separated in the matrix so there is no
+          # YAML escape semantics to get subtly wrong.
+          : > "${{ matrix.sketch }}/build_opt.h"
+          for f in ${{ matrix.flags }}; do echo "$f" >> "${{ matrix.sketch }}/build_opt.h"; done
+          echo "build_opt.h:"; cat "${{ matrix.sketch }}/build_opt.h"
+          arduino-cli compile --fqbn "${{ matrix.fqbn }}" \
+                              --build-cache-path "$CORE_CACHE" "${{ matrix.sketch }}"
 
-      # LED_RGB path (LNK-039) only compiles under this flag — without it the
-      # NeoPixel colour glue is preprocessed away in both variants above.
-      - name: Compile X32Link (QT Py NeoPixel board)
-        if: needs.changes.outputs.code == 'true'
+  # The ESP-025 bench rig: KitchenSyncTouch on a CLASSIC ESP32 (no USB peripheral, no
+  # display, 4MB flash). It was not compiled by CI at all -- the board profile could
+  # break and only the bench would find out. build-bench.sh is the ONLY supported way
+  # to build it: it swaps the board flag AND the partition table together, because the
+  # product's 16MB S3 table on a 4MB chip boot-loops with no app and no serial banner.
+  bench-rig-compile:
+    name: Compile KitchenSyncTouch (ESP-025 bench rig, classic ESP32)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    env:
+      CORE_CACHE: ${{ github.workspace }}/.arduino-core-cache
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache arduino-cli data (ESP32 core + libraries)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino
+          key: arduino-esp32-${{ runner.os }}-x32link-v1
+          restore-keys: |
+            arduino-esp32-${{ runner.os }}-
+      - name: Cache arduino-cli binary
+        id: cache-arduino-cli-bin
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: arduino-cli-bin-${{ runner.os }}-v1
+      - name: Cache arduino compiled core
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CORE_CACHE }}
+          key: arduino-core-${{ runner.os }}-x32link-v1
+          restore-keys: |
+            arduino-core-${{ runner.os }}-
+      - name: Install arduino-cli
+        if: steps.cache-arduino-cli-bin.outputs.cache-hit != 'true'
+        run: curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s
+      - name: Add arduino-cli to PATH
+        run: echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+      - name: Install ESP32 core
         run: |
-          echo '-DBOARD_QTPY_ESP32S3' > X32Link/build_opt.h
-          arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" X32Link
-          git checkout -- X32Link/build_opt.h
-
-      # battery_gauge_io.cpp's Wire calls only compile under this flag — opt-in
-      # per unit (not every QT Py has the LiPo BFF attached), so it needs its
-      # own job or it never gets compiled at all.
-      - name: Compile X32Link (QT Py + LiPo BFF battery gauge)
-        if: needs.changes.outputs.code == 'true'
+          arduino-cli config init --overwrite --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+      - name: Compile via tools/build-bench.sh
+        run: tools/build-bench.sh
+      - name: HEAD must still be the product board
         run: |
-          printf -- '-DBOARD_QTPY_ESP32S3\n-DHAS_BATTERY_GAUGE\n' > X32Link/build_opt.h
-          arduino-cli compile --fqbn "$FQBN" --build-cache-path "$CORE_CACHE" X32Link
-          git checkout -- X32Link/build_opt.h
-
-      - name: Compile X32 emulator (ESP-002)
-        if: needs.changes.outputs.code == 'true'
-        env:
-          EMU_FQBN: esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc
-        run: arduino-cli compile --fqbn "$EMU_FQBN" --build-cache-path "$CORE_CACHE" X32_emulator
-
-      # KitchenSync Touch (ESP-016) — dedicated sketch, Waveshare touch board. The
-      # board flag lives in KitchenSyncTouch/config.h (not build_opt.h), so no
-      # flag-juggling here; secrets.h is gitignored and the sketch builds without
-      # it via __has_include.
-      - name: Compile KitchenSyncTouch (ESP-016, Waveshare touch board)
-        if: needs.changes.outputs.code == 'true'
-        run: arduino-cli compile --fqbn "$TOUCH_FQBN" --build-cache-path "$CORE_CACHE" KitchenSyncTouch
+          grep -q '^#define BOARD_WAVESHARE_S3_TOUCH_LCD_147' KitchenSyncTouch/config.h \
+            || { echo "build-bench.sh left the board flag swapped"; exit 1; }
+          head -1 KitchenSyncTouch/partitions.csv | grep -q '16 MB' \
+            || { echo "build-bench.sh left the DevKit partition table in place"; exit 1; }
 
   loralink-compile:
     name: Firmware compile (LoraLink)
