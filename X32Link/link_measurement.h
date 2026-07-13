@@ -54,10 +54,66 @@ extern "C" {
 // definition not part of a live exchange — 250ms is the principled cutoff.
 #define LINK_MEASUREMENT_MAX_RTT_US 250000
 
+/* P4-038. The offset estimate is `ghost - (h_recv + h_sent)/2` -- the MIDPOINT, which
+ * assumes the delay is symmetric. It is not, once HTTP traffic shares the radio: each
+ * sample then carries roughly rtt/2 of error, and the 250 ms gate above (chosen in LNK-026
+ * to reject STALE pongs, not to bound ACCURACY) happily admits ~115 ms of it.
+ *
+ * Measured on the bench with the analyzer + the xf gauge: under web load a commit threw the
+ * beat origin by 500 ms, the bar strobe wobbled 185 ms (idle: 4.9 ms), and the device
+ * emitted 20% MORE clock pulses than real time allows -- because the GhostXForm is nothing
+ * but an origin, and committing one STEPS it.
+ *
+ * Two rules, and they are complementary:
+ *
+ *   SLACK -- only the low-RTT samples of an attempt may vote. A sample delayed far beyond
+ *   the best one is queued, therefore asymmetric, therefore biased. Median over the
+ *   survivors keeps the robustness against a single liar while removing the systematic
+ *   skew. (When every sample has the same RTT this changes nothing, which is why the
+ *   pre-existing median tests still pass untouched.)
+ *
+ *   SLEW -- bound how far ONE commit may move an ESTABLISHED origin. Arriving a little late
+ *   is survivable; the downbeat teleporting mid-bar is not. */
+#define LINK_MEASUREMENT_RTT_SLACK_US 15000   /* a sample may exceed the attempt's best RTT
+                                               * by this much and still vote */
+#define LINK_MEASUREMENT_MAX_SLEW_US  20000   /* max origin move per commit (20 ms) */
+
+/* ...but a genuine session re-origin is not noise: link_phase.c documents real ones jumping
+ * by many SECONDS (~510 s seen on hardware). Slewing to that 20 ms at a time would take
+ * hours, so a move this big is adopted whole. The clamp exists to reject measurement noise,
+ * never to fight the session. */
+#define LINK_MEASUREMENT_REORIGIN_US  1000000 /* >= 1 s: a real re-origin, adopt immediately */
+
 typedef struct {
     int64_t intercept_us;  // signed microsecond offset, host -> ghost
     bool    valid;
 } LinkGhostXForm;
+
+/* P4-038 phase health. The GhostXForm is nothing but an ORIGIN, and attempt_end() STEPS
+ * it -- no slew, no clamp. So a commit that lands badly moves the beat origin, and the bar
+ * line moves with it. On the bench the bar strobe wobbled 185 ms under web load while the
+ * clock task was provably healthy (gap 1.5 ms, 0 overruns, 0 drops, 0 re-primes) and the
+ * device emitted 137 pulses MORE than real time allows. A stall cannot manufacture pulses;
+ * a moving origin can.
+ *
+ * Why the RTT matters: add_pong_samples() estimates the offset as
+ * `ghost - (h_recv + h_sent)/2` -- the midpoint, which ASSUMES a symmetric delay. Queue the
+ * network in one direction (HTTP traffic sharing the radio) and the estimate is biased by
+ * roughly half the asymmetry. The LNK-026 gate admits any RTT up to 250 ms, so it will
+ * happily accept a sample carrying ~125 ms of error.
+ *
+ *   max_step_us >> a few ms  -> commits are THROWING the origin. That is the bar wobble.
+ *   rtt_max_us  near the gate -> the samples feeding those commits are load-inflated. */
+typedef struct {
+    uint32_t commits;      // GhostXForm commits (lifetime)
+    uint32_t last_step_us; // |origin move| at the most recent commit
+    uint32_t max_step_us;  // worst |origin move| ever committed
+    uint32_t rtt_min_us;   // best / worst RTT among ACCEPTED samples
+    uint32_t rtt_max_us;
+} LinkPhaseHealth;
+
+// Fills `out` with the lifetime phase-health counters. Never resets.
+void link_measurement_phase_health(LinkPhaseHealth* out);
 
 // slope is hardcoded 1.0 in the real protocol too — Link does not model
 // clock drift in this path.

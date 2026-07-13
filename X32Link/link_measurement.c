@@ -154,6 +154,25 @@ static void push_sample(double v) {
     if (s_sample_count < LINK_MEASUREMENT_MAX_SAMPLES) s_sample_count++;
 }
 
+/* P4-038 phase-health counters. Lifetime; reset only by link_measurement_reset(). */
+static uint32_t s_ph_commits;
+static uint32_t s_ph_last_step_us;
+static uint32_t s_ph_max_step_us;
+static uint32_t s_ph_rtt_min_us = UINT32_MAX;
+static uint32_t s_ph_rtt_max_us;
+
+void link_measurement_phase_health(LinkPhaseHealth* out) {
+    if (!out) return;
+    out->commits      = s_ph_commits;
+    out->last_step_us = s_ph_last_step_us;
+    out->max_step_us  = s_ph_max_step_us;
+    out->rtt_min_us   = (s_ph_rtt_min_us == UINT32_MAX) ? 0 : s_ph_rtt_min_us;
+    out->rtt_max_us   = s_ph_rtt_max_us;
+}
+
+/* P4-038: the RTT that produced each sample, so the commit can throw out the queued ones. */
+static uint32_t s_sample_rtt[LINK_MEASUREMENT_MAX_SAMPLES];
+
 int link_measurement_add_pong_samples(int64_t h_recv, const LinkPongFields* pong) {
     if (!pong || !pong->has_ghost_time || !pong->has_host_time) return 0;
 
@@ -164,18 +183,26 @@ int link_measurement_add_pong_samples(int64_t h_recv, const LinkPongFields* pong
     int64_t rtt = h_recv - pong->host_time_us;
     if (rtt < 0 || rtt > LINK_MEASUREMENT_MAX_RTT_US) return 0;
 
+    /* P4-038: the RTT of an ACCEPTED sample is the direct predictor of how far this
+     * commit can throw the origin -- the midpoint estimate below assumes a symmetric
+     * delay, so it carries ~rtt/2 of error when the delay is not. */
+    if ((uint32_t)rtt < s_ph_rtt_min_us) s_ph_rtt_min_us = (uint32_t)rtt;
+    if ((uint32_t)rtt > s_ph_rtt_max_us) s_ph_rtt_max_us = (uint32_t)rtt;
+
     int added = 0;
     double g      = (double)pong->ghost_time_us;
     double h_sent = (double)pong->host_time_us;
     double h_r    = (double)h_recv;
 
     double sample_a = g - (h_r + h_sent) / 2.0;
+    if (s_sample_count < LINK_MEASUREMENT_MAX_SAMPLES) s_sample_rtt[s_sample_count] = (uint32_t)rtt;
     push_sample(sample_a);
     added++;
 
     if (pong->has_prev_ghost_time) {
         double prev_g    = (double)pong->prev_ghost_time_us;
         double sample_b  = (g + prev_g) / 2.0 - h_sent;
+        if (s_sample_count < LINK_MEASUREMENT_MAX_SAMPLES) s_sample_rtt[s_sample_count] = (uint32_t)rtt;
         push_sample(sample_b);
         added++;
     }
@@ -191,11 +218,21 @@ static int cmp_double(const void* a, const void* b) {
 bool link_measurement_median(double* out_median) {
     if (s_sample_count == 0) return false;
 
-    double tmp[LINK_MEASUREMENT_MAX_SAMPLES];
-    memcpy(tmp, s_samples, sizeof(double) * (size_t)s_sample_count);
-    qsort(tmp, (size_t)s_sample_count, sizeof(double), cmp_double);
+    /* P4-038: only the low-RTT samples vote. A sample delayed well past the best one in
+     * this attempt was queued, so its midpoint estimate is asymmetric, so it is biased by
+     * ~rtt/2 -- and that bias is what threw the origin 500 ms on the bench. Every sample
+     * at the same RTT (the host tests, and an idle radio) survives the filter unchanged. */
+    uint32_t best = UINT32_MAX;
+    for (int i = 0; i < s_sample_count; i++)
+        if (s_sample_rtt[i] < best) best = s_sample_rtt[i];
 
-    int n = s_sample_count;
+    double tmp[LINK_MEASUREMENT_MAX_SAMPLES];
+    int n = 0;
+    for (int i = 0; i < s_sample_count; i++)
+        if (s_sample_rtt[i] <= best + LINK_MEASUREMENT_RTT_SLACK_US) tmp[n++] = s_samples[i];
+    if (n == 0) return false;   /* cannot happen: the best sample always survives */
+
+    qsort(tmp, (size_t)n, sizeof(double), cmp_double);
     double m = (n % 2 == 1) ? tmp[n / 2]
                             : (tmp[n / 2 - 1] + tmp[n / 2]) / 2.0;
     if (out_median) *out_median = m;
@@ -214,6 +251,14 @@ void link_measurement_reset(void) {
     s_active = false;
     s_xform.intercept_us = 0;
     s_xform.valid = false;
+    /* P4-038: the gauge is module state too. A reset that leaves it behind reports a step
+     * count from a previous life -- ks_tick_reset forgot exactly this and the host test
+     * caught it as a phantom +1. */
+    s_ph_commits      = 0;
+    s_ph_last_step_us = 0;
+    s_ph_max_step_us  = 0;
+    s_ph_rtt_min_us   = UINT32_MAX;
+    s_ph_rtt_max_us   = 0;
 }
 
 void link_measurement_attempt_begin(void) {
@@ -225,7 +270,30 @@ void link_measurement_attempt_end(bool success) {
     if (success) {
         double m;
         if (link_measurement_median(&m)) {
-            s_xform.intercept_us = (int64_t)llround(m);
+            int64_t next = (int64_t)llround(m);
+
+            if (s_xform.valid) {
+                int64_t d   = next - s_xform.intercept_us;
+                int64_t mag = d < 0 ? -d : d;
+
+                /* P4-038: gauge the step the MEASUREMENT ASKED FOR, before the clamp trims
+                 * it. That is the diagnostic: it says how badly the estimate is behaving
+                 * even when the slew is successfully protecting the bar line. Gauging the
+                 * APPLIED move instead would just report the clamp back to us, and the
+                 * moment the fix worked we would go blind to the thing it is fixing. */
+                s_ph_last_step_us = (uint32_t)mag;
+                if ((uint32_t)mag > s_ph_max_step_us) s_ph_max_step_us = (uint32_t)mag;
+
+                /* SLEW: bound how far one commit may move an ESTABLISHED origin. A genuine
+                 * re-origin (>= 1 s; link_phase.c has seen ~510 s) is adopted whole -- the
+                 * clamp rejects measurement noise, it does not fight the session. */
+                if (mag < LINK_MEASUREMENT_REORIGIN_US && mag > LINK_MEASUREMENT_MAX_SLEW_US) {
+                    next = s_xform.intercept_us +
+                           (d > 0 ? LINK_MEASUREMENT_MAX_SLEW_US : -LINK_MEASUREMENT_MAX_SLEW_US);
+                }
+            }
+            s_ph_commits++;
+            s_xform.intercept_us = next;
             s_xform.valid = true;
         }
         // empty sample buffer despite a "success" call: leave existing
