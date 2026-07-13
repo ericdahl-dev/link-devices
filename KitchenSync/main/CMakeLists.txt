@@ -3,12 +3,24 @@
 # suites in ../test keep covering them.
 set(X32LINK_DIR "${CMAKE_CURRENT_LIST_DIR}/../../X32Link")
 
+# ESP-026: sources that exist ONLY because of the P4-NANO's hardware --
+# the ES8311 speaker (P4-006) and the USB-MIDI host (P4-003/005). The S3 and the
+# classic ESP32 have neither, so they must not be compiled there.
+set(KS_P4_ONLY_SRCS "")
+if(CONFIG_IDF_TARGET_ESP32P4)
+  set(KS_P4_ONLY_SRCS
+      "usb_midi_host.c"
+      "metronome_audio.c"
+      "i2s_audio_bus.c"
+      "follow_beat_io.c")
+endif()
+
 idf_component_register(
-    SRCS "ks_main.c"
+    SRCS ${KS_P4_ONLY_SRCS}
+         "ks_main.c"
          "wifi_link.c"
          "${X32LINK_DIR}/wifi_conn_policy.c"
          "link_measure_io.c"
-         "usb_midi_host.c"
          "midi_clock_in.c"
          "${X32LINK_DIR}/midi_bpm_calc.c"
          "ks_web.cpp"
@@ -20,10 +32,7 @@ idf_component_register(
          "transport_intent.c"
          "ks_form.c"
          "ks_config_nvs.c"
-         "metronome_audio.c"
-         "i2s_audio_bus.c"
          "follow_beat.c"
-         "follow_beat_io.c"
          "ks_led.c"
          "midi_uart_out.c"
          "${X32LINK_DIR}/ui_chrome.c"
