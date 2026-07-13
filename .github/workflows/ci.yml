@@ -363,9 +363,15 @@ jobs:
       # TRACKED (the P4's). Reusing the same directory for the next target makes CMake read a
       # config for the wrong chip and die with exit 2. Wipe it between targets; each one
       # regenerates from sdkconfig.defaults.
+      #
+      # sudo, because esp-idf-ci-action runs in a container AS ROOT -- the build tree it leaves
+      # behind is root-owned and the runner user cannot delete it. (Not matrixing this job on
+      # purpose: it would rename the "Firmware compile (KitchenSync, ESP-IDF)" status context,
+      # which branch protection REQUIRES, and orphan it -- auto-merge would then block forever
+      # with every check green.)
       - name: Reset sdkconfig between targets
         if: needs.changes.outputs.code == 'true'
-        run: rm -rf KitchenSync/build KitchenSync/sdkconfig
+        run: sudo rm -rf KitchenSync/build KitchenSync/sdkconfig
 
       - name: Compile KitchenSync for esp32s3 (ESP-026 multi-target)
         if: needs.changes.outputs.code == 'true'
@@ -379,9 +385,15 @@ jobs:
       # TRACKED (the P4's). Reusing the same directory for the next target makes CMake read a
       # config for the wrong chip and die with exit 2. Wipe it between targets; each one
       # regenerates from sdkconfig.defaults.
+      #
+      # sudo, because esp-idf-ci-action runs in a container AS ROOT -- the build tree it leaves
+      # behind is root-owned and the runner user cannot delete it. (Not matrixing this job on
+      # purpose: it would rename the "Firmware compile (KitchenSync, ESP-IDF)" status context,
+      # which branch protection REQUIRES, and orphan it -- auto-merge would then block forever
+      # with every check green.)
       - name: Reset sdkconfig between targets
         if: needs.changes.outputs.code == 'true'
-        run: rm -rf KitchenSync/build KitchenSync/sdkconfig
+        run: sudo rm -rf KitchenSync/build KitchenSync/sdkconfig
 
       - name: Compile KitchenSync for esp32 (ESP-026, the bench-rig chip)
         if: needs.changes.outputs.code == 'true'
