@@ -56,7 +56,7 @@ LORAPKT    = ../LoraLink/lora_bpm_packet.c
 LORAFRESH  = ../LoraLink/lora_freshness.c
 BATTGAUGE = ../X32Link/battery_gauge.c
 BEATSTAMP = ../LinkAudioPoC/main/beat_stamper.c
-MASTERCLOCK = ../KitchenSync/main/master_clock.c
+MASTERCLOCK = ../X32Link/master_clock.c
 
 # Every test depends on every header. Coarse on purpose: the rules below list
 # only .c prerequisites, so editing a header used to leave a stale binary that
