@@ -548,12 +548,24 @@ static esp_err_t status_handler(httpd_req_t *req)
     for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) ls[i] = s_launch[i];
     WebTickHealth tick;                                  // P4-038: the 1 ms clock task's health
     bool have_tick = ks_tick_health(&tick);
+    /* ESP-029: ks_status_json is now the SHARED builder (X32Link/ks_status.c), emitted by
+     * this firmware AND by KitchenSyncTouch, so the two can no longer drift apart.
+     *
+     * KS_CLOCK_OUTPUTS is passed as the launch COUNT — the array length IS the device's
+     * output count. A Touch passes 1. Never padded.
+     *
+     * clk/pulses are nullptr: this firmware does not yet publish ESP-028's writer's-truth
+     * fields (the Touch does). NULL OMITS them rather than faking a `clk:"locked"` over a
+     * writer we have not measured — which is exactly the lie ESP-028 exists to prevent.
+     * Wiring the P4's writer state in is follow-up; this device's wire shape is unchanged. */
     ks_status_json(buf, sizeof(buf),
                       (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
                       wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx(),
-                      FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid, ls,
+                      FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid,
+                      ls, KS_CLOCK_OUTPUTS,
                       link_proto_playing(), link_proto_start_stop_seen(),
-                      have_tick ? &tick : nullptr, &phase);
+                      have_tick ? &tick : nullptr, &phase,
+                      nullptr, nullptr, nullptr);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }

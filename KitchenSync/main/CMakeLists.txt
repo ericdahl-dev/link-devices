@@ -24,7 +24,10 @@ idf_component_register(
          "midi_clock_in.c"
          "${X32LINK_DIR}/midi_bpm_calc.c"
          "ks_web.cpp"
-         "ks_status.c"
+         # ESP-029: /status is now a SHARED module. It moved to X32Link/ and is symlinked
+         # into KitchenSyncTouch/, so both firmwares emit /status from ONE implementation
+         # and cannot drift apart again (ARC-024).
+         "${X32LINK_DIR}/ks_status.c"
          "ks_config.c"
          "ks_config_json.c"
          "ks_hostname.c"
