@@ -131,9 +131,9 @@ void setup() {
     config_load(&g_config);   // NVS
     // First boot with no saved SSID: seed from the compile-time secrets so a bench
     // unit connects; a shipped unit is configured through the SoftAP + web form.
-    if (g_config.wifi_ssid[0] == '\0' && sizeof(KSTOUCH_WIFI_SSID) > 1) {
-        strlcpy(g_config.wifi_ssid, KSTOUCH_WIFI_SSID, sizeof(g_config.wifi_ssid));
-        strlcpy(g_config.wifi_pass, KSTOUCH_WIFI_PASS, sizeof(g_config.wifi_pass));
+    if (g_config.wifi[0].ssid[0] == '\0' && sizeof(KSTOUCH_WIFI_SSID) > 1) {
+        strlcpy(g_config.wifi[0].ssid, KSTOUCH_WIFI_SSID, sizeof(g_config.wifi[0].ssid));
+        strlcpy(g_config.wifi[0].pass, KSTOUCH_WIFI_PASS, sizeof(g_config.wifi[0].pass));
     }
 
 #ifdef HAS_TOUCH_DISPLAY
@@ -145,13 +145,13 @@ void setup() {
     tempo_source_select(TEMPO_SRC_LINK);
     tempo_source_pre_net();
 
-    if (g_config.wifi_ssid[0] == '\0') {
+    if (g_config.wifi[0].ssid[0] == '\0') {
         start_ap();
     } else {
         WiFi.mode(WIFI_STA);
         WiFi.setSleep(false);   // modem sleep drops buffered multicast -> Link never rx
-        WiFi.begin(g_config.wifi_ssid, g_config.wifi_pass);
-        Serial.printf("[KSTouch] joining %s", g_config.wifi_ssid);
+        WiFi.begin(g_config.wifi[0].ssid, g_config.wifi[0].pass);
+        Serial.printf("[KSTouch] joining %s", g_config.wifi[0].ssid);
         uint32_t t0 = millis();
         while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) { delay(250); Serial.print("."); }
         Serial.println();

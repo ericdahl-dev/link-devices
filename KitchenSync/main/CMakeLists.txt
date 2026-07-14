@@ -28,7 +28,7 @@ idf_component_register(
          # into KitchenSyncTouch/, so both firmwares emit /status from ONE implementation
          # and cannot drift apart again (ARC-024).
          "${X32LINK_DIR}/ks_status.c"
-         "ks_config.c"
+         "${X32LINK_DIR}/ks_config.c"
          "ks_config_json.c"
          "ks_hostname.c"
          "ks_tick.c"

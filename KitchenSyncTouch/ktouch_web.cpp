@@ -186,7 +186,7 @@ static void handle_root() {
     String h(FORM);
     h.replace("%CSS%", ui_chrome_css());
     h.replace("%JS%",  ui_chrome_js());
-    h.replace("%SSID%", g_config.wifi_ssid);
+    h.replace("%SSID%", g_config.wifi[0].ssid);
     int bars = g_config.quantum_beats / BEATS_PER_BAR; if (bars < 1) bars = 1;
     h.replace("%Q%",    String(bars));
     h.replace("%NUDGE%", String(g_config.nudge_mbeats));
@@ -200,10 +200,10 @@ static void handle_root() {
 
 static void handle_save() {
     AppConfig c = g_config;
-    if (server.hasArg("wifi_ssid")) strlcpy(c.wifi_ssid, server.arg("wifi_ssid").c_str(), sizeof(c.wifi_ssid));
+    if (server.hasArg("wifi_ssid")) strlcpy(c.wifi[0].ssid, server.arg("wifi_ssid").c_str(), sizeof(c.wifi[0].ssid));
     // blank password = keep current
     if (server.hasArg("wifi_pass") && server.arg("wifi_pass").length())
-        strlcpy(c.wifi_pass, server.arg("wifi_pass").c_str(), sizeof(c.wifi_pass));
+        strlcpy(c.wifi[0].pass, server.arg("wifi_pass").c_str(), sizeof(c.wifi[0].pass));
     // Checkboxes: absent = off. Numbers via the validating setter. The BARS field
     // is bars; store as Link beats (x4). NUDGE persists whatever /nudge set live.
     app_config_set(&c, ACF_QUANTUM_BEATS,    server.arg("quantum").toInt() * BEATS_PER_BAR);
