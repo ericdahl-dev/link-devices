@@ -10,6 +10,10 @@ void config_defaults(AppConfig* cfg) {
     cfg->play_on_release  = DEFAULT_PLAY_ON_RELEASE;
     cfg->nudge_mbeats     = DEFAULT_NUDGE_MBEATS;
     cfg->brightness       = DEFAULT_BRIGHTNESS;
+    /* ESP-030 pt3: exactly what the writer was hardcoding, so an existing device's
+     * clock does not change when it migrates. 24 PPQN = MIDI clock; swing 0 = straight. */
+    cfg->ppqn             = 24;
+    cfg->swing_mbeats     = 0;
 }
 
 static bool is_bool(int v) { return v == 0 || v == 1; }
@@ -21,6 +25,10 @@ bool config_validate(const AppConfig* cfg) {
     if (!is_bool(cfg->play_on_release))  return false;
     if (cfg->nudge_mbeats < -250 || cfg->nudge_mbeats > 250) return false;  // +-1/4 beat
     if (cfg->brightness < 10 || cfg->brightness > 100) return false;        // never full-dark
+    /* ESP-030 pt3: garbage in the form must never reach the clock writer. Same ranges
+     * as the P4's ClockOutputCfg, so one client rule covers the fleet. */
+    if (cfg->ppqn < 1 || cfg->ppqn > 48) return false;
+    if (cfg->swing_mbeats < 0 || cfg->swing_mbeats > 250) return false;
     return true;   // empty ssid is valid (AP setup mode); caller checks it separately
 }
 
@@ -69,6 +77,35 @@ static cfg_decode_result migrate_v1(AppConfig* out, const void* blob, size_t blo
 // app_config.h. Every gate is fail-closed: anything we cannot positively vouch
 // for becomes defaults, because loading a stale layout puts garbage into fields
 // the user never sees until the clock misfires or the screen goes black.
+/* ESP-030 pt3: a v2 blob, upgraded. The bench unit holds one of these RIGHT NOW.
+ *
+ * Read through the FROZEN AppConfigV2 layout. v2 already had the WiFi slots, so this
+ * is a straight field copy plus DEFAULTS for the two new ones -- and those defaults
+ * are exactly what the writer was hardcoding (24 PPQN, no swing), so a migrated device
+ * emits the same clock it did before. Nothing changes until the user asks for it. */
+static cfg_decode_result migrate_v2(AppConfig* out, const void* blob, size_t blob_len) {
+    if (blob_len != sizeof(AppConfigV2)) return CFG_DECODE_DEFAULTED;
+
+    AppConfigV2 v2;
+    memcpy(&v2, blob, sizeof(v2));
+
+    AppConfig up;
+    config_defaults(&up);            /* ppqn/swing start at the writer's old constants */
+
+    for (int i = 0; i < KS_WIFI_SLOTS; i++) up.wifi[i] = v2.wifi[i];
+    up.quantum_beats    = v2.quantum_beats;
+    up.clock_enable     = v2.clock_enable;
+    up.transport_enable = v2.transport_enable;
+    up.play_on_release  = v2.play_on_release;
+    up.nudge_mbeats     = v2.nudge_mbeats;
+    up.brightness       = v2.brightness;
+
+    if (!config_validate(&up)) return CFG_DECODE_DEFAULTED;
+
+    *out = up;
+    return CFG_DECODE_MIGRATED;
+}
+
 cfg_decode_result config_decode(AppConfig* out, const void* blob, size_t blob_len,
                                 bool version_present, uint32_t version) {
     config_defaults(out);
@@ -82,6 +119,7 @@ cfg_decode_result config_decode(AppConfig* out, const void* blob, size_t blob_le
     // next boot, fall back to SoftAP, and drop off the network. The P4 learned
     // this the hard way in ESP-013.
     if (version == 1u) return migrate_v1(out, blob, blob_len);
+    if (version == 2u) return migrate_v2(out, blob, blob_len);
 
     if (version != APP_CONFIG_VERSION || blob_len != sizeof(AppConfig))
         return CFG_DECODE_DEFAULTED;
@@ -105,6 +143,8 @@ bool app_config_set(AppConfig* cfg, AppConfigField field, int value) {
         case ACF_PLAY_ON_RELEASE:  t.play_on_release  = value; break;
         case ACF_NUDGE_MBEATS:     t.nudge_mbeats     = value; break;
         case ACF_BRIGHTNESS:       t.brightness       = value; break;
+        case ACF_PPQN:             t.ppqn             = value; break;   /* ESP-030 pt3 */
+        case ACF_SWING_MBEATS:     t.swing_mbeats     = value; break;   /* ESP-030 pt3 */
         default: return false;
     }
     if (!config_validate(&t)) return false;   // keep the change only if it validates
