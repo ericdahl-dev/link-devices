@@ -14,8 +14,10 @@
 #include <chrono>
 #include <cmath>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -222,6 +224,45 @@ std::vector<std::string> renderFrame(State& state)
   return lines;
 }
 
+// ---------------------------------------------------------------------------
+// headless publish
+// ---------------------------------------------------------------------------
+
+// The same state renderFrame() shows, as one JSON object. Consumers so far: soak
+// logs (stdout, one line per tick) and the Q's LED-matrix display (--state-file).
+std::string stateJson(State& state)
+{
+  const auto now = state.link.clock().micros();
+  const auto session = state.link.captureAppSessionState();
+  const auto quantum = state.quantum.load();
+
+  std::ostringstream out;
+  out << "{\"t_us\":" << now.count() << ",\"peers\":" << state.link.numPeers()
+      << ",\"tempo\":" << fixed(session.tempo(), 3) << ",\"quantum\":" << fixed(quantum, 0)
+      << ",\"beat\":" << fixed(session.beatAtTime(now, quantum), 4)
+      << ",\"phase\":" << fixed(session.phaseAtTime(now, quantum), 4)
+      << ",\"playing\":" << (session.isPlaying() ? "true" : "false")
+      << ",\"enabled\":" << (state.link.isEnabled() ? "true" : "false")
+      << ",\"start_stop_sync\":" << (state.link.isStartStopSyncEnabled() ? "true" : "false")
+      << "}";
+  return out.str();
+}
+
+// Rename-into-place so a reader never sees a half-written object.
+void writeStateFile(const std::string& path, const std::string& json)
+{
+  const std::string tmp = path + ".tmp";
+  {
+    std::ofstream file(tmp, std::ios::trunc);
+    if (!file)
+    {
+      return;
+    }
+    file << json << "\n";
+  }
+  std::rename(tmp.c_str(), path.c_str());
+}
+
 void draw(State& state, std::size_t& lastLineCount)
 {
   const auto lines = renderFrame(state);
@@ -305,7 +346,11 @@ void printUsage()
        "  --quantum <beats>  bar length in beats (default 4)\n"
        "  --play             start the session playing\n"
        "  --no-sync          disable start/stop sync (on by default)\n"
-       "  -h, --help         this message\n";
+       "  -h, --help         this message\n\n"
+       "headless (no TUI, no keys — for systemd and soak runs):\n\n"
+       "  --publish          write session state to stdout, one JSON object per tick\n"
+       "  --state-file <p>   keep the latest state in <p>, rename-into-place\n"
+       "  --rate <hz>        headless tick rate (default 20)\n";
 }
 
 } // namespace
@@ -316,6 +361,9 @@ int main(int argc, char** argv)
   double quantum = 4.0;
   bool play = false;
   bool startStopSync = true;
+  bool publish = false;
+  std::string stateFile;
+  double rateHz = 20.0;
 
   for (int i = 1; i < argc; ++i)
   {
@@ -336,6 +384,18 @@ int main(int argc, char** argv)
     else if (arg == "--no-sync")
     {
       startStopSync = false;
+    }
+    else if (arg == "--publish")
+    {
+      publish = true;
+    }
+    else if ((arg == "--state-file") && hasNext)
+    {
+      stateFile = argv[++i];
+    }
+    else if ((arg == "--rate") && hasNext)
+    {
+      rateHz = std::atof(argv[++i]);
     }
     else if (arg == "-h" || arg == "--help")
     {
@@ -361,6 +421,29 @@ int main(int argc, char** argv)
 
   std::signal(SIGINT, onSignal);
   std::signal(SIGTERM, onSignal);
+
+  // Headless: never touch the terminal and never read stdin, so this survives
+  // systemd (no TTY) and a detached shell instead of dying on the first read.
+  if (publish || !stateFile.empty())
+  {
+    const auto tick = std::chrono::milliseconds(
+      static_cast<long>(1000.0 / std::max(1.0, std::min(200.0, rateHz))));
+    while (state.running)
+    {
+      const auto json = stateJson(state);
+      if (publish)
+      {
+        std::cout << json << std::endl; // flush per line: this is a live feed
+      }
+      if (!stateFile.empty())
+      {
+        writeStateFile(stateFile, json);
+      }
+      std::this_thread::sleep_for(tick);
+    }
+    return 0;
+  }
+
   std::atexit(restoreTerminal);
   setupTerminal();
 

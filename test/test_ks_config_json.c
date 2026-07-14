@@ -24,12 +24,57 @@ void tearDown(void) {}
 // A full-featured board: everything fitted, four outputs. What the P4 declares.
 static const KsCaps kAllFitted = {
     .metronome = true, .led = true, .follow_beat = true, .outputs = 4,
+    .wifi_slots = KS_WIFI_SLOTS,
 };
 
 // A board with the strip and speaker NOT wired, and one clock output.
 static const KsCaps kBareBoard = {
     .metronome = false, .led = false, .follow_beat = false, .outputs = 1,
+    .wifi_slots = KS_WIFI_SLOTS,
 };
+
+/* ESP-035: the X32Link. A DIFFERENT product on the same fleet protocol -- it syncs an
+ * X32/XR18's FX tap-delay to Link. It has ONE wifi credential, not three, and its
+ * USB-MIDI clock is a fixed on/off, not a configurable output with cable/ppqn/phase/
+ * swing. So: no configurable outputs, one wifi slot. */
+static const KsCaps kX32Link = {
+    .metronome = false, .led = true, .follow_beat = false, .outputs = 0,
+    .wifi_slots = 1,
+};
+
+/* ESP-035: THE WIFI SLOT COUNT IS A CAPABILITY TOO, and this is not a nicety.
+ *
+ * The `wifi` array used to be hardcoded to KS_WIFI_SLOTS. Point the app at an X32Link
+ * -- which has exactly ONE credential -- and it would render THREE slots. The user
+ * saves a second network, /save silently discards it (the handler only reads
+ * `wifi_ssid`), and the app reports success. That is the EXACT bug that cost the user
+ * their second network on the Touch (ESP-030 pt3), reintroduced from the read side.
+ *
+ * The array's LENGTH is the truth, the same rule `clock` already follows. */
+void test_a_one_slot_board_does_not_advertise_three_wifi_slots(void) {
+    char b[768];
+    ks_config_set(&c, "wifi_ssid", "Backline");
+    ks_config_json(b, sizeof(b), &c, &kX32Link);
+
+    // Exactly one entry: one "ssid" key, and no comma-separated second object.
+    const char* first = strstr(b, "\"ssid\"");
+    TEST_ASSERT_NOT_NULL(first);
+    TEST_ASSERT_NULL(strstr(first + 1, "\"ssid\""));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"wifi\":[{\"ssid\":\"Backline\",\"pass_set\":false}]"));
+}
+
+/* A board whose clock output is a fixed on/off -- not a configurable output with a
+ * cable, division, phase and swing -- has ZERO configurable outputs. Emitting one
+ * would make a client draw NUDGE and SWING steppers that can never work, which is
+ * precisely the bug the Touch shipped (a SWING control for a field that did not
+ * exist). `clock_out` still carries the on/off. */
+void test_a_board_with_no_configurable_outputs_emits_an_empty_clock_array(void) {
+    char b[768];
+    ks_config_json(b, sizeof(b), &c, &kX32Link);
+
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"clock\":[]"));
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"clock_out\""));   // the on/off is still real
+}
 
 // THE RULE. Absent hardware is ABSENT from the document -- not reported false.
 void test_hardware_that_is_not_fitted_is_not_emitted_at_all(void) {
@@ -205,5 +250,7 @@ int main(void) {
     RUN_TEST(test_wifi_pass_set_false_when_slot_empty);
     RUN_TEST(test_return_value_is_snprintf_style_length);
     RUN_TEST(test_fits_in_a_generously_sized_stack_buffer);
+    RUN_TEST(test_a_one_slot_board_does_not_advertise_three_wifi_slots);
+    RUN_TEST(test_a_board_with_no_configurable_outputs_emits_an_empty_clock_array);
     return UNITY_END();
 }

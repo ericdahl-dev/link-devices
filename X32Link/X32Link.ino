@@ -15,6 +15,7 @@
 //  See the firmware map at the top of AGENTS.md.
 // ============================================================================
 #include <WiFi.h>
+#include <ESPmDNS.h>   // ESP-035: this box was invisible to the fleet until now
 #include <esp_wifi.h>
 #include "config.h"
 #include "fw_version.h"      // LNK-038: FW_VERSION / FW_BUILD identity
@@ -277,6 +278,9 @@ static void on_wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
 
 // STA connect. Hidden SSIDs need WIFI_ALL_CHANNEL_SCAN on the wifi_config before
 // connect; visible SSIDs work with WiFi.begin() after patching scan_method.
+// ESP-035: mDNS name, same shape as the Touch's (<product>-<last two MAC bytes>).
+char g_ks_host[32] = "x32link";
+
 static void wifi_sta_connect(const char* ssid, const char* pass) {
     WiFi.persistent(false);   // creds live in our NVS (x32link), not SDK wlan
     WiFi.mode(WIFI_STA);
@@ -320,6 +324,27 @@ static bool wifi_try_connect() {
     WiFi.setSleep(false);  // modem power-save drops buffered multicast — keep radio awake
     Serial.println();
     Serial.printf("[X32Link] IP: %s\n", WiFi.localIP().toString().c_str());
+
+    /* ESP-035: ANNOUNCE YOURSELF.
+     *
+     * This device had NO mDNS at all -- no .local name, no service record. It was the
+     * one member of the fleet that could not be FOUND: the companion app browses
+     * _http._tcp and this box was simply not there, so a unit that was powered, on the
+     * network and following the session looked exactly like no device at all.
+     *
+     * The Touch has done this since ESP-016 in one line. Same hostname shape
+     * (<product>-<last two MAC bytes>), so one client rule covers the fleet (ARC-024).
+     * Passing no instance name makes the Bonjour instance default to the hostname,
+     * which is what the app's hostname fallback matches on. */
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    snprintf(g_ks_host, sizeof(g_ks_host), "x32link-%02x%02x", mac[4], mac[5]);
+    if (MDNS.begin(g_ks_host)) {
+        MDNS.addService("http", "tcp", 80);
+        Serial.printf("[X32Link] http://%s.local\n", g_ks_host);
+    } else {
+        Serial.println("[X32Link] WARN: mDNS failed — the app will not discover this unit");
+    }
     return true;
 }
 

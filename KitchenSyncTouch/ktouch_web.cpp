@@ -498,6 +498,7 @@ static void handle_config_json() {
         .led         = (bool)KSTOUCH_HAS_LED,
         .follow_beat = (bool)KSTOUCH_HAS_FOLLOWBEAT,
         .outputs     = KSTOUCH_CLOCK_OUTPUTS,
+        .wifi_slots  = KS_WIFI_SLOTS,   /* ESP-035: the Touch really does hold three */
     };
 
     /* This device's own AppConfig, expressed in the shared KsConfig shape. Only the
