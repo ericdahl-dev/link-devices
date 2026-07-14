@@ -25,6 +25,7 @@
 #include "usb_midi_host.h"
 #include "fw_version.h"      /* LNK-038: shared FW_VERSION / FW_BUILD (X32Link/ include path) */
 #include "ks_status.h"
+#include "ks_config_json.h"   /* P4-041: GET /config.json, the read-side counterpart to /save+/live */
 #include "link_measurement.h"   // P4-038: LinkPhaseHealth
 #include "follow_beat_io.h"   /* P4-020: mic tempo-follow estimate for /status (Task 9 creates this header) */
 #include "ks_config.h"
@@ -557,6 +558,34 @@ static esp_err_t status_handler(httpd_req_t *req)
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }
 
+// P4-041: GET /config.json — the read-side counterpart to POST /save and POST
+// /live, for a client (the iOS companion app) that needs the device's ACTUAL
+// current settings instead of scraping the rendered HTML form. Snapshot-under-
+// mutex-then-format-outside-it, the same principle
+// ks_web_config_persist_tick() uses: the clock task takes s_cfg_mutex every
+// tick, so holding it across the JSON formatting (slower, and followed by a
+// network write) would stall the clock for no reason. Unlike that function,
+// `snap` is a plain stack local, not a file static — this handler runs on the
+// httpd task (~4 KB stack, same context status_handler's 576-byte local buffer
+// already lives on above), not the tighter 3 KB status task, and a static here
+// would race two concurrently-handled requests.
+static esp_err_t config_json_handler(httpd_req_t *req)
+{
+    if (!s_cfg) return ESP_FAIL;
+    KsConfig snap;
+    if (s_cfg_mutex) xSemaphoreTake(s_cfg_mutex, portMAX_DELAY);
+    snap = *s_cfg;
+    if (s_cfg_mutex) xSemaphoreGive(s_cfg_mutex);
+
+    // Worst case (every wifi SSID + every clock field maxed) measures 692 bytes
+    // (test_fits_in_a_generously_sized_stack_buffer); 768 keeps the same kind of
+    // headroom test_ks_status.c's buffer asserts against (P4-038's precedent).
+    char buf[768];
+    ks_config_json(buf, sizeof(buf), &snap);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
 // ARC-017: the page itself is ui_result_page() — pure, shared with X32Link, tested.
 // reboot=true makes it poll until the device answers again and then return to '/',
 // so Write & Reboot doesn't strand the browser on /save.
@@ -808,6 +837,7 @@ void ks_web_start(KsConfig* cfg, volatile uint32_t* gen, SemaphoreHandle_t cfg_m
     if (httpd_start(&server, &hcfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
     httpd_uri_t root       = { .uri = "/",       .method = HTTP_GET,  .handler = root_handler,        .user_ctx = NULL };
     httpd_uri_t status     = { .uri = "/status", .method = HTTP_GET,  .handler = status_handler,      .user_ctx = NULL };
+    httpd_uri_t config_json= { .uri = "/config.json", .method = HTTP_GET, .handler = config_json_handler, .user_ctx = NULL };
     httpd_uri_t save       = { .uri = "/save",   .method = HTTP_POST, .handler = save_handler,        .user_ctx = NULL };
     httpd_uri_t live       = { .uri = "/live",   .method = HTTP_POST, .handler = live_handler,         .user_ctx = NULL };
     httpd_uri_t transport  = { .uri = "/transport", .method = HTTP_POST, .handler = transport_handler, .user_ctx = NULL };
@@ -816,6 +846,7 @@ void ks_web_start(KsConfig* cfg, volatile uint32_t* gen, SemaphoreHandle_t cfg_m
     httpd_register_uri_handler(server, &transport);
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &status);
+    httpd_register_uri_handler(server, &config_json);
     httpd_register_uri_handler(server, &save);
     httpd_register_uri_handler(server, &live);
     httpd_register_uri_handler(server, &update_get);
