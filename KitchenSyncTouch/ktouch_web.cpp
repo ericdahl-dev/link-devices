@@ -113,6 +113,10 @@ static const char FORM[] = R"HTML(<!doctype html><html lang="en"><head>
 <div class="row"><label>Transport</label><span class="pill" id="tp">Stopped</span></div>
 </div>
 <form method="POST" action="/save">
+<!-- This page posts EVERY field, so an unchecked box here really does mean "off".
+     handle_save() needs to know that, because a partial POST from a client that has
+     never heard of `transport` must not silently switch it off. -->
+<input type="hidden" name="full_form" value="1">
 <div class="formcols">
 <div class="grp"><div class="frow head"><span class="cap">WiFi Network</span></div>
 <div class="fld"><span class="pre">SSID</span><input name="wifi_ssid" value="%SSID%" autocomplete="off"></div>
@@ -249,13 +253,38 @@ static void handle_save() {
             strlcpy(c.wifi[i].pass, server.arg(key).c_str(), sizeof(c.wifi[i].pass));
     }
 
-    // Checkboxes: absent = off. Numbers via the validating setter. The BARS field
-    // is bars; store as Link beats (x4). NUDGE persists whatever /live set.
+    /* CHECKBOXES, and the trap they set.
+     *
+     * An unchecked HTML checkbox sends NOTHING. So "absent = off" is the only way the
+     * device's own page can ever turn one OFF -- but it also means any client that
+     * POSTs a PARTIAL form silently switches off every box it didn't know to send.
+     *
+     * That is not hypothetical. It cost the user their transport twice over:
+     *   - a bench POST that set only wifi/clk0_* turned clock_enable AND
+     *     transport_enable to 0, killing play/stop on the touchscreen;
+     *   - and the iOS app's saveFormFields does not emit `transport` or `play_rel` AT
+     *     ALL -- they are Touch-only fields its KsConfig has never had. Saving a WiFi
+     *     network from the app would have disabled the transport every time.
+     *
+     * So absent = off applies ONLY when the sender says "this is the whole form". The
+     * device's page posts the `full_form` sentinel (see FORM); a partial patch does
+     * not, and its silence about a checkbox means "leave it alone", not "turn it off".
+     *
+     * /live is the endpoint for partial edits. /save being partial-tolerant is a
+     * SAFETY net, not an invitation. */
+    const bool full_form = server.hasArg("full_form");
+    auto checkbox = [&](const char* key, AppConfigField field) {
+        if (full_form || server.hasArg(key))
+            app_config_set(&c, field, server.hasArg(key) ? 1 : 0);
+    };
+    checkbox("clock",     ACF_CLOCK_ENABLE);
+    checkbox("transport", ACF_TRANSPORT_ENABLE);
+    checkbox("play_rel",  ACF_PLAY_ON_RELEASE);
+
+    // Numbers via the validating setter. The BARS field is bars; store as Link beats
+    // (x4). NUDGE persists whatever /live set.
     if (server.hasArg("quantum"))
         app_config_set(&c, ACF_QUANTUM_BEATS, server.arg("quantum").toInt() * BEATS_PER_BAR);
-    app_config_set(&c, ACF_CLOCK_ENABLE,     server.hasArg("clock")     ? 1 : 0);
-    app_config_set(&c, ACF_TRANSPORT_ENABLE, server.hasArg("transport") ? 1 : 0);
-    app_config_set(&c, ACF_PLAY_ON_RELEASE,  server.hasArg("play_rel")  ? 1 : 0);
     if (server.hasArg("nudge"))  app_config_set(&c, ACF_NUDGE_MBEATS, server.arg("nudge").toInt());
     if (server.hasArg("bright")) app_config_set(&c, ACF_BRIGHTNESS,   server.arg("bright").toInt());
 
@@ -370,7 +399,32 @@ static void handle_status() {
                    false, 0.0f, 0.0f, false,  // follow_*: no mic follow-beat on this hardware
                    launch, 1,
                    ktouch_transport_state() == TL_RUNNING,
-                   link_proto_start_stop_seen(),
+                   /* link_owns: FALSE, and it must stay false until this device actually
+                    * defers to Link.
+                    *
+                    * ks_status.h defines link_owns as a LIVE claim: "when link_owns is
+                    * true the manual PLAY/STOP buttons are ignored, so the UI greys
+                    * them". A client is entitled to take that literally, and the iOS app
+                    * does -- it stops SENDING the tap.
+                    *
+                    * This used to pass link_proto_start_stop_seen(), which is a different
+                    * fact entirely: "has any peer EVER published a StartStopState",
+                    * latched true until the last peer leaves. Run Ableton once and it is
+                    * true for the rest of the session.
+                    *
+                    * Meanwhile ktouch_transport.c never consults Link start/stop at ALL.
+                    * It obeys every intent it is given -- measured on the bench: stopped
+                    * -> armed -> running with link_owns true throughout. So the device was
+                    * announcing "I ignore your play button" while obeying it, and the app
+                    * believed it and greyed the button out. Play and stop were dead in the
+                    * app for exactly as long as a Link peer had ever pressed play.
+                    *
+                    * A HISTORICAL flag published as a LIVE state. T-018 was a lifetime
+                    * dropped-tick counter rendered as a live fault; ESP-028 was sync:1 on
+                    * a wire dead for 138 seconds. Same bug, third time. If the Touch ever
+                    * grows real Link StartStop arbitration, this becomes the arbiter's
+                    * answer -- never "we once saw one". */
+                   false,
                    &tick,
                    nullptr,                   // phase: no GhostXForm gauge published here yet
                    clk, &pulses,              // ESP-028 writer's truth -- this device HAS it
