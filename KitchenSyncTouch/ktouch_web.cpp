@@ -8,6 +8,7 @@
 #include "ktouch_transport.h" // transport state for /status
 #include "ktouch_display.h"   // live backlight brightness
 #include "ktouch_midi_out.h"  // ESP-018 tick health
+#include "ks_status.h"        // ESP-029: the SHARED /status builder — one shape across the fleet
 // ESP-025 bench-rig button telemetry. Only the DevKit has buttons, and these live in the
 // .ino behind HAS_BUTTONS -- referencing them unconditionally breaks the S3 product link.
 #ifdef HAS_BUTTONS
@@ -248,27 +249,78 @@ static void handle_status() {
     int         sync = (strcmp(clk, "locked") == 0) ?  1
                      : (strcmp(clk, "free")   == 0) ?  0
                      :                                -1;
-    char buf[460];
-    snprintf(buf, sizeof(buf),
-             "{\"bpm\":%.1f,\"sync\":%d,\"peers\":%d,\"clock\":%d,\"transport\":%d,"
-             "\"cue\":%d,\"tfail\":%lu,\"tzero\":%lu,\"ccancel\":%lu,"
-             "\"drop\":%lu,\"burst\":%lu,\"gap\":%lu,\"work\":%lu,\"over\":%lu,\"core\":%d,"
-             "\"wbeats\":%lu,\"wclock\":%lu,\"wtport\":%lu,"
+
+    /* ESP-029: /status is now built by the SHARED ks_status_json (X32Link/ks_status.c),
+     * the same function KitchenSync uses. This device used to hand-roll its own snprintf
+     * here, and the two drifted -- the same nine tick-health fields, spelled `wbeats` here
+     * and `w_beats` there. Nobody chose that; it is just what a second implementation does.
+     *
+     * The clock ENGINE was already shared (46 symlinked modules from X32Link/). Only the
+     * web layer was not, which is exactly where the drift lived. Now it is shared too, so
+     * the fleet emits one shape by construction rather than by discipline (ARC-024).
+     *
+     * A client (the iOS app) could not decode this device AT ALL before this change:
+     * KsStatus threw on the first required key it was missing. */
+
+    /* The launch state IS the shared TL_STOPPED/TL_ARMED/TL_RUNNING enum
+     * (transport_launch.h) -- the same one the P4 puts in launch[]. Nothing to invent:
+     * this device already tracked it, it simply never published it.
+     *
+     * ONE output. The array length IS the output count -- never padded to four, or a
+     * client would render one real output card and three dead ones. */
+    const int launch[1] = { ktouch_transport_state() };
+
+    WebTickHealth tick = {
+        .dropped    = ktouch_midi_dropped(),
+        .bursts     = ktouch_midi_bursts(),
+        .max_gap_us = ktouch_midi_max_gap(),
+        .max_work_us= ktouch_midi_max_work(),
+        .overruns   = ktouch_midi_overruns(),
+        .w_beats    = ktouch_midi_w_beats(),
+        .w_clock    = ktouch_midi_w_clock(),
+        .core       = ktouch_midi_core(),
+        .reprimes   = 0,
+    };
+
+    const uint32_t pulses = ktouch_midi_pulses();
+
+    /* This device's OWN diagnostics, which its page reads. They ride in `extra` so the
+     * SHARED keys stay byte-identical with KitchenSync's while this device can still say
+     * more. `sync` is kept as a legacy alias of `clk` for the existing page JS. */
+    char extra[220];
+    snprintf(extra, sizeof(extra),
+             "\"sync\":%d,\"clock\":%d,\"transport\":%d,\"cue\":%d,"
+             "\"tfail\":%lu,\"tzero\":%lu,\"ccancel\":%lu,\"wtport\":%lu,"
              "\"beats\":%.2f,\"locked\":%d,\"bsactive\":%d,"
-             "\"btn\":%d,\"btnlows\":%lu,\"btnpress\":%lu,"
-             "\"clk\":\"%s\",\"pulses\":%lu}",
-             (double)bpm, sync, link_proto_peers(),
-             g_config.clock_enable ? 1 : 0, ktouch_transport_state(),
-             ktouch_cueing(), (unsigned long)ktouch_touch_fails(),
-             (unsigned long)ktouch_touch_zeros(), (unsigned long)ktouch_cue_cancels(),
-             (unsigned long)ktouch_midi_dropped(), (unsigned long)ktouch_midi_bursts(),
-             (unsigned long)ktouch_midi_max_gap(), (unsigned long)ktouch_midi_max_work(),
-             (unsigned long)ktouch_midi_overruns(), ktouch_midi_core(),
-             (unsigned long)ktouch_midi_w_beats(), (unsigned long)ktouch_midi_w_clock(),
-             (unsigned long)ktouch_midi_w_tport(),
+             "\"btn\":%d,\"btnlows\":%lu,\"btnpress\":%lu",
+             sync, g_config.clock_enable ? 1 : 0, ktouch_transport_state(), ktouch_cueing(),
+             (unsigned long)ktouch_touch_fails(), (unsigned long)ktouch_touch_zeros(),
+             (unsigned long)ktouch_cue_cancels(), (unsigned long)ktouch_midi_w_tport(),
              (double)ktouch_midi_beats(), ktouch_midi_locked(), ktouch_midi_bs_active(),
-             ktouch_btn_level(), (unsigned long)ktouch_btn_lows(), (unsigned long)ktouch_btn_presses(),
-             clk, (unsigned long)ktouch_midi_pulses());
+             ktouch_btn_level(), (unsigned long)ktouch_btn_lows(),
+             (unsigned long)ktouch_btn_presses());
+
+    /* Honest zeroes, not flattering ones. This device has no MIDI-clock IN, no USB-MIDI
+     * host, and no mic follow-beat -- so those fields report the truth about hardware that
+     * is not fitted, rather than a plausible-looking default. Reporting `usb:true` on a
+     * device with no USB-MIDI is the same class of lie as ESP-028's `sync:1` over a dead
+     * wire, and this file of all files should not repeat it. */
+    char buf[720];
+    ks_status_json(buf, sizeof(buf),
+                   bpm,
+                   0.0f,                      // min: no MIDI-clock IN on this hardware
+                   link_proto_peers(),
+                   false,                     // usb: DIN out only, no USB-MIDI host
+                   pulses,                    // tx: the clock-pulse count == pulses here
+                   FW_VERSION,
+                   false, 0.0f, 0.0f, false,  // follow_*: no mic follow-beat on this hardware
+                   launch, 1,
+                   ktouch_transport_state() == TL_RUNNING,
+                   link_proto_start_stop_seen(),
+                   &tick,
+                   nullptr,                   // phase: no GhostXForm gauge published here yet
+                   clk, &pulses,              // ESP-028 writer's truth -- this device HAS it
+                   extra);
     server.send(200, "application/json", buf);
 }
 
