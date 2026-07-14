@@ -29,7 +29,7 @@ idf_component_register(
          # and cannot drift apart again (ARC-024).
          "${X32LINK_DIR}/ks_status.c"
          "${X32LINK_DIR}/ks_config.c"
-         "ks_config_json.c"
+         "${X32LINK_DIR}/ks_config_json.c"
          "ks_hostname.c"
          "ks_tick.c"
          "${X32LINK_DIR}/master_clock.c"

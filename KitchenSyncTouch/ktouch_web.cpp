@@ -9,6 +9,8 @@
 #include "ktouch_display.h"   // live backlight brightness
 #include "ktouch_midi_out.h"  // ESP-018 tick health
 #include "ks_status.h"        // ESP-029: the SHARED /status builder — one shape across the fleet
+#include "ks_config_json.h"   // ESP-030: the SHARED /config.json builder + KsCaps
+#include "config.h"           // ESP-030: KSTOUCH_HAS_* — what is actually wired to this board
 // ESP-025 bench-rig button telemetry. Only the DevKit has buttons, and these live in the
 // .ino behind HAS_BUTTONS -- referencing them unconditionally breaks the S3 product link.
 #ifdef HAS_BUTTONS
@@ -324,6 +326,54 @@ static void handle_status() {
     server.send(200, "application/json", buf);
 }
 
+/* ESP-030: GET /config.json — the device's ACTUAL settings, from the SHARED builder.
+ *
+ * Without this a client is read-only for configuration FOREVER: POST /save is a full
+ * form, so with no read there is no read-modify-write, and a client would have to POST
+ * fabricated defaults and clobber every setting it could not see. The iOS app correctly
+ * refuses to do that and disables its settings screen. This is what turns it back on.
+ *
+ * This device reports ONLY what is actually wired to it (config.h's KSTOUCH_HAS_*).
+ * Absent hardware is ABSENT from the document, never reported false: `led:false` with no
+ * strip attached is the same class of lie as ESP-028's `sync:1` over a dead wire, and a
+ * client would draw an LED section for a board that cannot light anything.
+ *
+ * Solder a strip on, flip KSTOUCH_HAS_LED, and the section appears here AND in the app,
+ * with no app change. Capability, not product identity.
+ */
+static void handle_config_json() {
+    static const KsCaps caps = {
+        .metronome   = (bool)KSTOUCH_HAS_METRONOME,
+        .led         = (bool)KSTOUCH_HAS_LED,
+        .follow_beat = (bool)KSTOUCH_HAS_FOLLOWBEAT,
+        .outputs     = KSTOUCH_CLOCK_OUTPUTS,
+    };
+
+    /* This device's own AppConfig, expressed in the shared KsConfig shape. Only the
+     * fields it really has are populated; the rest are defaults that `caps` then stops
+     * from ever being emitted. */
+    KsConfig c;
+    ks_config_defaults(&c);
+
+    for (int i = 0; i < KS_WIFI_SLOTS; i++) c.wifi[i] = g_config.wifi[i];
+
+    c.clock_out_enable = g_config.clock_enable;
+
+    /* The single DIN output. `nudge_mbeats` IS the phase trim -- the same concept the P4
+     * calls clk0_phase, so it maps 1:1 and a client edits one field, not two. DIN MIDI is
+     * fixed at 24 PPQN and has no USB cable, so those carry their honest constants. */
+    c.clock[0].enable       = g_config.clock_enable;
+    c.clock[0].cable        = 0;          /* DIN, not a USB-MIDI virtual cable */
+    c.clock[0].ppqn         = 24;         /* MIDI clock; not configurable on this jack */
+    c.clock[0].phase_mbeats = g_config.nudge_mbeats;
+    c.clock[0].swing_mbeats = 0;
+    c.clock[0].follow_link  = g_config.transport_enable ? 0 : 1;
+
+    char buf[768];
+    ks_config_json(buf, sizeof(buf), &c, &caps);
+    server.send(200, "application/json", buf);
+}
+
 // Live clock nudge — the writer task reads g_config.nudge_mbeats every tick, so
 // this takes effect immediately with no reboot. ARC-022: and it is now also KEPT.
 // The old comment here said "persisted only on Save (no flash wear while the DJ
@@ -424,6 +474,7 @@ void ktouch_web_begin(void) {
     config_persist_reset(&s_persist);   // ARC-022: clean at boot — never write on the way up
     server.on("/",       handle_root);
     server.on("/status", handle_status);
+    server.on("/config.json", handle_config_json);   // ESP-030
     server.on("/save",   HTTP_POST, handle_save);
     server.on("/nudge",  HTTP_POST, handle_nudge);
     server.on("/transport", HTTP_POST, handle_transport);   // ESP-025: headless transport
