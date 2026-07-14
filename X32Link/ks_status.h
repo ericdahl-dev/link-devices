@@ -43,10 +43,40 @@ extern "C" {
 // had this probe and threw it away into a once-a-second log, so a 766 ms clock stall
 // (P4-038) left no trace anywhere unless someone happened to have serial attached at
 // that moment. A worst-case that scrolled past is not a measurement.
+//
+// ESP-029: this builder is SHARED. It lives in X32Link/ (the shared-module home) and is
+// symlinked into KitchenSyncTouch/, exactly like the 46 other modules the two products
+// already share. Both firmwares emit /status from THIS function, so the wire shape is
+// identical BY CONSTRUCTION rather than by discipline.
+//
+// That is the whole point. Before this, ktouch_web.cpp hand-rolled its own snprintf and
+// ks_status.c had another, and they drifted: the same nine tick-health fields, spelled
+// `wbeats`/`wclock` on one device and `w_beats`/`w_clock` on the other. Nobody chooses
+// that. Worse, the same "/status lies about the clock" bug had to be fixed TWICE --
+// P4-039 did it for the P4 and, per ESP-028, "the Touch never got it", which is what
+// cost 138 seconds of silent DIN clock. One implementation, one host-test suite, no
+// drift.
+//
+// `launch` / `launch_count`: the array LENGTH is the device's REAL output count -- 4 on
+// KitchenSync, 1 on the Touch. NEVER pad. A client renders a card per element, so
+// padding a one-output device out to four would draw three dead outputs.
+//
+// `clk` / `pulses` (ESP-028; optional -- pass NULL to omit): what the WRITER is doing
+// ("locked" / "free" / "silent") and the lifetime 0xF8 count. Together they make "is the
+// wire actually alive?" answerable by polling instead of with a logic analyzer. NULL
+// means ABSENT, never a default -- a device that does not measure its writer must not
+// claim `clk:"locked"`, which is precisely the lie ESP-028 exists to prevent.
+//
+// `extra` (optional -- NULL to omit): device-specific diagnostics, appended INSIDE the
+// object. A bare fragment, no braces and no leading comma. The Touch's own page reads
+// `cue`, `btn`, `beats` and friends; they ride here so the SHARED keys stay byte-identical
+// across the fleet while each device can still say more. A client ignores keys it does not
+// know, which costs nothing.
 int ks_status_json(char* buf, size_t len, float bpm, float midi_bpm, int peers, bool usb, uint32_t tx,
                    const char* fw, bool follow_enabled, float follow_bpm, float follow_confidence,
-                   bool follow_valid, const int launch[4], bool playing, bool link_owns,
-                   const WebTickHealth* tick, const LinkPhaseHealth* phase);
+                   bool follow_valid, const int* launch, int launch_count, bool playing, bool link_owns,
+                   const WebTickHealth* tick, const LinkPhaseHealth* phase,
+                   const char* clk, const uint32_t* pulses, const char* extra);
 
 #ifdef __cplusplus
 }
