@@ -9,6 +9,8 @@
 #include "ktouch_display.h"   // live backlight brightness
 #include "ktouch_midi_out.h"  // ESP-018 tick health
 #include "ks_status.h"        // ESP-029: the SHARED /status builder — one shape across the fleet
+#include "ks_config_json.h"   // ESP-030: the SHARED /config.json builder + KsCaps
+#include "config.h"           // ESP-030: KSTOUCH_HAS_* — what is actually wired to this board
 // ESP-025 bench-rig button telemetry. Only the DevKit has buttons, and these live in the
 // .ino behind HAS_BUTTONS -- referencing them unconditionally breaks the S3 product link.
 #ifdef HAS_BUTTONS
@@ -111,6 +113,10 @@ static const char FORM[] = R"HTML(<!doctype html><html lang="en"><head>
 <div class="row"><label>Transport</label><span class="pill" id="tp">Stopped</span></div>
 </div>
 <form method="POST" action="/save">
+<!-- This page posts EVERY field, so an unchecked box here really does mean "off".
+     handle_save() needs to know that, because a partial POST from a client that has
+     never heard of `transport` must not silently switch it off. -->
+<input type="hidden" name="full_form" value="1">
 <div class="formcols">
 <div class="grp"><div class="frow head"><span class="cap">WiFi Network</span></div>
 <div class="fld"><span class="pre">SSID</span><input name="wifi_ssid" value="%SSID%" autocomplete="off"></div>
@@ -186,7 +192,7 @@ static void handle_root() {
     String h(FORM);
     h.replace("%CSS%", ui_chrome_css());
     h.replace("%JS%",  ui_chrome_js());
-    h.replace("%SSID%", g_config.wifi_ssid);
+    h.replace("%SSID%", g_config.wifi[0].ssid);
     int bars = g_config.quantum_beats / BEATS_PER_BAR; if (bars < 1) bars = 1;
     h.replace("%Q%",    String(bars));
     h.replace("%NUDGE%", String(g_config.nudge_mbeats));
@@ -200,18 +206,95 @@ static void handle_root() {
 
 static void handle_save() {
     AppConfig c = g_config;
-    if (server.hasArg("wifi_ssid")) strlcpy(c.wifi_ssid, server.arg("wifi_ssid").c_str(), sizeof(c.wifi_ssid));
-    // blank password = keep current
-    if (server.hasArg("wifi_pass") && server.arg("wifi_pass").length())
-        strlcpy(c.wifi_pass, server.arg("wifi_pass").c_str(), sizeof(c.wifi_pass));
-    // Checkboxes: absent = off. Numbers via the validating setter. The BARS field
-    // is bars; store as Link beats (x4). NUDGE persists whatever /nudge set live.
-    app_config_set(&c, ACF_QUANTUM_BEATS,    server.arg("quantum").toInt() * BEATS_PER_BAR);
-    app_config_set(&c, ACF_CLOCK_ENABLE,     server.hasArg("clock")     ? 1 : 0);
-    app_config_set(&c, ACF_TRANSPORT_ENABLE, server.hasArg("transport") ? 1 : 0);
-    app_config_set(&c, ACF_PLAY_ON_RELEASE,  server.hasArg("play_rel")  ? 1 : 0);
+
+    /* ESP-030 pt3: EVERY WiFi slot, not just slot 0.
+     *
+     * This handler used to read `wifi_ssid`/`wifi_pass` and nothing else. So a client
+     * that POSTed `wifi_ssid1` got HTTP 200 and its network was SILENTLY DISCARDED —
+     * the user saved a second network, rebooted, and it was gone. A 200 that quietly
+     * drops the field is worse than a 404: the client believes it worked.
+     *
+     * Slot 0 is the unsuffixed key; slots 1..n take the index as a suffix — the same
+     * grammar ks_config_set() parses on the P4, so ONE client form fits the fleet.
+     *
+     * The two blank cases are NOT the same, and collapsing them loses data either way:
+     *
+     *   blank PASSWORD  = keep the current one. The form cannot show a password, so a
+     *                     user who edits only the SSID must not silently wipe it.
+     *   blank SSID      = FORGET this network — and that takes the password WITH it.
+     *                     Leaving the credential behind means a "deleted" network is
+     *                     still sitting in NVS, and /config.json goes on reporting
+     *                     pass_set:true for a slot that has no network.
+     *
+     * Both rules are ks_config_set()'s, host-tested in test_ks_config.c. */
+    for (int i = 0; i < KS_WIFI_SLOTS; i++) {
+        char key[16];
+        if (i == 0) snprintf(key, sizeof(key), "wifi_ssid");
+        else        snprintf(key, sizeof(key), "wifi_ssid%d", i);
+        bool forgotten = false;
+        if (server.hasArg(key)) {
+            /* HOLD THE String, never a char* into it. server.arg() returns a String BY
+             * VALUE; `const char* s = server.arg(k).c_str()` leaves s dangling into a
+             * temporary that died at the semicolon. That bug shipped for one flash and
+             * wrote FREED HEAP into the SSID -- the board came up trying to join a
+             * network nobody had ever configured, and fell back to SoftAP. */
+            String ssid = server.arg(key);
+            if (ssid.length() == 0) {
+                memset(&c.wifi[i], 0, sizeof(c.wifi[i]));   // network AND password
+                forgotten = true;
+            } else {
+                strlcpy(c.wifi[i].ssid, ssid.c_str(), sizeof(c.wifi[i].ssid));
+            }
+        }
+
+        if (i == 0) snprintf(key, sizeof(key), "wifi_pass");
+        else        snprintf(key, sizeof(key), "wifi_pass%d", i);
+        if (!forgotten && server.hasArg(key) && server.arg(key).length())
+            strlcpy(c.wifi[i].pass, server.arg(key).c_str(), sizeof(c.wifi[i].pass));
+    }
+
+    /* CHECKBOXES, and the trap they set.
+     *
+     * An unchecked HTML checkbox sends NOTHING. So "absent = off" is the only way the
+     * device's own page can ever turn one OFF -- but it also means any client that
+     * POSTs a PARTIAL form silently switches off every box it didn't know to send.
+     *
+     * That is not hypothetical. It cost the user their transport twice over:
+     *   - a bench POST that set only wifi/clk0_* turned clock_enable AND
+     *     transport_enable to 0, killing play/stop on the touchscreen;
+     *   - and the iOS app's saveFormFields does not emit `transport` or `play_rel` AT
+     *     ALL -- they are Touch-only fields its KsConfig has never had. Saving a WiFi
+     *     network from the app would have disabled the transport every time.
+     *
+     * So absent = off applies ONLY when the sender says "this is the whole form". The
+     * device's page posts the `full_form` sentinel (see FORM); a partial patch does
+     * not, and its silence about a checkbox means "leave it alone", not "turn it off".
+     *
+     * /live is the endpoint for partial edits. /save being partial-tolerant is a
+     * SAFETY net, not an invitation. */
+    const bool full_form = server.hasArg("full_form");
+    auto checkbox = [&](const char* key, AppConfigField field) {
+        if (full_form || server.hasArg(key))
+            app_config_set(&c, field, server.hasArg(key) ? 1 : 0);
+    };
+    checkbox("clock",     ACF_CLOCK_ENABLE);
+    checkbox("transport", ACF_TRANSPORT_ENABLE);
+    checkbox("play_rel",  ACF_PLAY_ON_RELEASE);
+
+    // Numbers via the validating setter. The BARS field is bars; store as Link beats
+    // (x4). NUDGE persists whatever /live set.
+    if (server.hasArg("quantum"))
+        app_config_set(&c, ACF_QUANTUM_BEATS, server.arg("quantum").toInt() * BEATS_PER_BAR);
     if (server.hasArg("nudge"))  app_config_set(&c, ACF_NUDGE_MBEATS, server.arg("nudge").toInt());
     if (server.hasArg("bright")) app_config_set(&c, ACF_BRIGHTNESS,   server.arg("bright").toInt());
+
+    /* ESP-030 pt3: the SHARED form grammar, so the iOS app's /save and the P4's /save
+     * are the same request. clk0_* are this device's single DIN output. */
+    if (server.hasArg("clock_out")) app_config_set(&c, ACF_CLOCK_ENABLE, server.arg("clock_out").toInt());
+    if (server.hasArg("clk0_en"))    app_config_set(&c, ACF_CLOCK_ENABLE, server.arg("clk0_en").toInt());
+    if (server.hasArg("clk0_phase")) app_config_set(&c, ACF_NUDGE_MBEATS, server.arg("clk0_phase").toInt());
+    if (server.hasArg("clk0_swing")) app_config_set(&c, ACF_SWING_MBEATS, server.arg("clk0_swing").toInt());
+    if (server.hasArg("clk0_ppqn"))  app_config_set(&c, ACF_PPQN,         server.arg("clk0_ppqn").toInt());
 
     if (!config_validate(&c)) {
         char p[1024]; ui_result_page(p, sizeof(p), "Invalid Config", "Check the values and go back.", false);
@@ -316,11 +399,133 @@ static void handle_status() {
                    false, 0.0f, 0.0f, false,  // follow_*: no mic follow-beat on this hardware
                    launch, 1,
                    ktouch_transport_state() == TL_RUNNING,
-                   link_proto_start_stop_seen(),
+                   /* link_owns: FALSE, and it must stay false until this device actually
+                    * defers to Link.
+                    *
+                    * ks_status.h defines link_owns as a LIVE claim: "when link_owns is
+                    * true the manual PLAY/STOP buttons are ignored, so the UI greys
+                    * them". A client is entitled to take that literally, and the iOS app
+                    * does -- it stops SENDING the tap.
+                    *
+                    * This used to pass link_proto_start_stop_seen(), which is a different
+                    * fact entirely: "has any peer EVER published a StartStopState",
+                    * latched true until the last peer leaves. Run Ableton once and it is
+                    * true for the rest of the session.
+                    *
+                    * Meanwhile ktouch_transport.c never consults Link start/stop at ALL.
+                    * It obeys every intent it is given -- measured on the bench: stopped
+                    * -> armed -> running with link_owns true throughout. So the device was
+                    * announcing "I ignore your play button" while obeying it, and the app
+                    * believed it and greyed the button out. Play and stop were dead in the
+                    * app for exactly as long as a Link peer had ever pressed play.
+                    *
+                    * A HISTORICAL flag published as a LIVE state. T-018 was a lifetime
+                    * dropped-tick counter rendered as a live fault; ESP-028 was sync:1 on
+                    * a wire dead for 138 seconds. Same bug, third time. If the Touch ever
+                    * grows real Link StartStop arbitration, this becomes the arbiter's
+                    * answer -- never "we once saw one". */
+                   false,
                    &tick,
                    nullptr,                   // phase: no GhostXForm gauge published here yet
                    clk, &pulses,              // ESP-028 writer's truth -- this device HAS it
                    extra);
+    server.send(200, "application/json", buf);
+}
+
+/* ESP-030 pt3: POST /live — apply a partial patch IMMEDIATELY, no reboot.
+ *
+ * This device had no /live at all. It grew bespoke one-off endpoints (/nudge, /bright)
+ * while the P4 generalised to /live plus a form grammar. Same drift as /status: the
+ * clock ENGINE is shared (46 symlinked modules), the WEB layer never was. So every
+ * live edit the iOS app made — nudge, swing, rate, cable — POSTed to /live, got a 404,
+ * and was swallowed. The controls looked dead because the request landed nowhere.
+ *
+ * Speaks the SHARED form grammar (`clk0_phase`, `clk0_swing`, `clk0_ppqn`, ...), the
+ * same keys ks_config_set() parses on the P4, so a client sends ONE request shape to
+ * the whole fleet.
+ *
+ * ARC-022: A LIVE EDIT IS A REAL EDIT. config_persist_mark() marks the blob dirty and
+ * ktouch_web_tick() debounce-writes it once the edits settle — so a nudge STICKS across
+ * a reboot with no manual save, which is what a user expects and what /nudge already
+ * did. Marked, not written: a slider drag is dozens of POSTs, and config is one blob.
+ */
+static void handle_live() {
+    AppConfig c = g_config;
+    bool changed = false;
+
+    /* Only what this hardware HAS. A key it cannot honour is not silently accepted —
+     * pretending to apply a setting is how /save quietly ate a WiFi slot. */
+    if (server.hasArg("clk0_phase"))
+        changed |= app_config_set(&c, ACF_NUDGE_MBEATS, server.arg("clk0_phase").toInt());
+    if (server.hasArg("clk0_swing"))
+        changed |= app_config_set(&c, ACF_SWING_MBEATS, server.arg("clk0_swing").toInt());
+    if (server.hasArg("clk0_ppqn"))
+        changed |= app_config_set(&c, ACF_PPQN, server.arg("clk0_ppqn").toInt());
+    if (server.hasArg("clk0_en"))
+        changed |= app_config_set(&c, ACF_CLOCK_ENABLE, server.arg("clk0_en").toInt());
+    if (server.hasArg("clock_out"))
+        changed |= app_config_set(&c, ACF_CLOCK_ENABLE, server.arg("clock_out").toInt());
+    if (server.hasArg("quantum"))
+        changed |= app_config_set(&c, ACF_QUANTUM_BEATS, server.arg("quantum").toInt());
+    if (server.hasArg("bright"))
+        changed |= app_config_set(&c, ACF_BRIGHTNESS, server.arg("bright").toInt());
+
+    if (changed) {
+        g_config = c;
+        config_persist_mark(&s_persist, millis());   /* ARC-022: it will survive a reboot */
+    }
+    server.send(200, "text/plain", "ok");
+}
+
+/* ESP-030: GET /config.json — the device's ACTUAL settings, from the SHARED builder.
+ *
+ * Without this a client is read-only for configuration FOREVER: POST /save is a full
+ * form, so with no read there is no read-modify-write, and a client would have to POST
+ * fabricated defaults and clobber every setting it could not see. The iOS app correctly
+ * refuses to do that and disables its settings screen. This is what turns it back on.
+ *
+ * This device reports ONLY what is actually wired to it (config.h's KSTOUCH_HAS_*).
+ * Absent hardware is ABSENT from the document, never reported false: `led:false` with no
+ * strip attached is the same class of lie as ESP-028's `sync:1` over a dead wire, and a
+ * client would draw an LED section for a board that cannot light anything.
+ *
+ * Solder a strip on, flip KSTOUCH_HAS_LED, and the section appears here AND in the app,
+ * with no app change. Capability, not product identity.
+ */
+static void handle_config_json() {
+    static const KsCaps caps = {
+        .metronome   = (bool)KSTOUCH_HAS_METRONOME,
+        .led         = (bool)KSTOUCH_HAS_LED,
+        .follow_beat = (bool)KSTOUCH_HAS_FOLLOWBEAT,
+        .outputs     = KSTOUCH_CLOCK_OUTPUTS,
+    };
+
+    /* This device's own AppConfig, expressed in the shared KsConfig shape. Only the
+     * fields it really has are populated; the rest are defaults that `caps` then stops
+     * from ever being emitted. */
+    KsConfig c;
+    ks_config_defaults(&c);
+
+    for (int i = 0; i < KS_WIFI_SLOTS; i++) c.wifi[i] = g_config.wifi[i];
+
+    c.clock_out_enable = g_config.clock_enable;
+
+    /* The single DIN output. `nudge_mbeats` IS the phase trim -- the same concept the P4
+     * calls clk0_phase, so it maps 1:1 and a client edits one field, not two. DIN MIDI is
+     * fixed at 24 PPQN and has no USB cable, so those carry their honest constants. */
+    c.clock[0].enable       = g_config.clock_enable;
+    c.clock[0].cable        = 0;          /* DIN, not a USB-MIDI virtual cable */
+    /* ESP-030 pt3: the REAL fields now. These used to be hardcoded 24 / 0 — so a client
+     * rendered a SWING stepper and a RATE picker for settings the device did not have,
+     * and they could never work no matter what the endpoint did. Emitting a value you
+     * cannot honour is the same lie as reporting hardware you do not have. */
+    c.clock[0].ppqn         = g_config.ppqn;
+    c.clock[0].phase_mbeats = g_config.nudge_mbeats;
+    c.clock[0].swing_mbeats = g_config.swing_mbeats;
+    c.clock[0].follow_link  = g_config.transport_enable ? 0 : 1;
+
+    char buf[768];
+    ks_config_json(buf, sizeof(buf), &c, &caps);
     server.send(200, "application/json", buf);
 }
 
@@ -424,6 +629,8 @@ void ktouch_web_begin(void) {
     config_persist_reset(&s_persist);   // ARC-022: clean at boot — never write on the way up
     server.on("/",       handle_root);
     server.on("/status", handle_status);
+    server.on("/config.json", handle_config_json);   // ESP-030
+    server.on("/live",   HTTP_POST, handle_live);    // ESP-030 pt3
     server.on("/save",   HTTP_POST, handle_save);
     server.on("/nudge",  HTTP_POST, handle_nudge);
     server.on("/transport", HTTP_POST, handle_transport);   // ESP-025: headless transport

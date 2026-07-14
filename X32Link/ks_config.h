@@ -83,7 +83,17 @@ typedef struct {
 // not the safety mechanism — KS_CONFIG_VERSION is. This assert exists to make
 // editing the struct impossible without noticing the version constant above.
 // When it fires: bump KS_CONFIG_VERSION, then update the size here.
-_Static_assert(sizeof(KsConfig) == 436,
+//
+// ESP-030: this header is now SHARED, so it compiles as C (ESP-IDF, the pure modules,
+// the host tests) AND as C++ (the Arduino sketch and its web glue). The assert has to
+// spell itself both ways: C11 says _Static_assert, C++ says static_assert, and g++
+// rejects the C spelling outright. Same dodge app_config.h already uses.
+#ifdef __cplusplus
+#  define KS_CONFIG_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#else
+#  define KS_CONFIG_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#endif
+KS_CONFIG_STATIC_ASSERT(sizeof(KsConfig) == 436,
                "KsConfig layout changed: bump KS_CONFIG_VERSION, then fix this size (P4-014)");
 
 void ks_config_defaults(KsConfig* c);

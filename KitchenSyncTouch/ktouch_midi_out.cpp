@@ -197,9 +197,12 @@ static void writer_task(void*) {
         // dropped banking + burst cap inside clock_output_step; nudge trims
         // only the CLOCK phase (+ve = ahead), tempo-relative so it holds
         // across tempo changes — transport START stays on the true bar.
-        // ppqn 24 / swing 0 until the Touch grows RATE + SWING config fields
-        // (ESP-017 parity; the derivation already supports both).
-        int n = clock_output_step(&s_out, beats, 24, g_config.nudge_mbeats, 0);
+        // ESP-030 pt3: rate + swing come from config now. The derivation always
+        // supported both (clock_output.c is the P4's, symlinked); the Touch simply
+        // had no fields to drive it, so it hardcoded 24/0. Defaults are 24/0, so a
+        // migrated device emits the exact clock it emitted yesterday.
+        int n = clock_output_step(&s_out, beats, g_config.ppqn,
+                                  g_config.nudge_mbeats, g_config.swing_mbeats);
         if (n > 1) s_bursts++;   // more than one pulse in a 1ms tick = catching up
 
         /* TRANSPORT FIRST, THEN CLOCK -- and the order is the whole point (ESP-023).

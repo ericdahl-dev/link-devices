@@ -24,6 +24,23 @@
 #error "config.h: pick exactly ONE board — neither is defined"
 #endif
 
+// ---- ESP-030: what is ACTUALLY WIRED to this board -------------------------
+//
+// These drive the KsCaps this device reports, and a device must not report hardware it
+// does not have: emitting `led:false` with no strip attached is the same class of lie
+// as ESP-028's `sync:1` over a wire that had been dead for 138 seconds. A client would
+// dutifully draw an LED section for a board that cannot light anything.
+//
+// Capabilities belong to THIS BUILD, not to the product name. "The Touch has no LED" is
+// wrong — the truth is "no strip is wired to this one YET". Solder one on, flip
+// KSTOUCH_HAS_LED to 1, and /config.json starts emitting led_*, and the iOS app's
+// settings screen grows an LED section — with NO app change at all. That is the whole
+// point of declaring capability instead of hardcoding a product identity.
+#define KSTOUCH_HAS_METRONOME   0   // no speaker fitted (the P4 has an ES8311; this doesn't)
+#define KSTOUCH_HAS_LED         0   // no WS2812 strip wired — set to 1 when one is
+#define KSTOUCH_HAS_FOLLOWBEAT  0   // no mic fitted
+#define KSTOUCH_CLOCK_OUTPUTS   1   // one DIN jack. The clock array's LENGTH is this.
+
 // Link timing — the receive-only Link stack we reuse from X32Link expects these.
 #define LINK_DEFAULT_BPM      120.0f
 #define LINK_BPM_THRESHOLD    0.5f
