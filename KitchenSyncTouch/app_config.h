@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "ks_config.h"   // ESP-030: the SHARED WifiCred / KS_WIFI_SLOTS
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,11 +15,31 @@ extern "C" {
 // ARC-020: schema version for the persisted blob. Bump it whenever AppConfig's
 // layout changes, or a stale blob gets read at the wrong offsets. The
 // _Static_assert below turns "forgot to bump it" into a compile error.
-#define APP_CONFIG_VERSION 1u
+//
+// v2 (ESP-030): the single wifi_ssid/wifi_pass became wifi[KS_WIFI_SLOTS], the
+// same move the P4 made in ESP-013. A v1 blob is MIGRATED, never discarded --
+// see config_decode. One WiFi slot was a deficiency, not a design choice.
+#define APP_CONFIG_VERSION 2u
 
+// ESP-030: the v1 layout, FROZEN. This is a copy of what SHIPPED, not an alias of
+// the current struct: if the live struct changes, this must NOT follow, or the
+// migration would read v1 bytes at v2 offsets and hand a device someone else's
+// password. Nothing here may ever change.
 typedef struct {
     char wifi_ssid[64];
     char wifi_pass[64];
+    int  quantum_beats;
+    int  clock_enable;
+    int  transport_enable;
+    int  play_on_release;
+    int  nudge_mbeats;
+    int  brightness;
+} AppConfigV1;
+
+typedef struct {
+    // ESP-030: multiple saved networks, like the P4 (ESP-013). wifi[0].ssid empty
+    // => SoftAP config mode, same rule as KsConfig.
+    WifiCred wifi[KS_WIFI_SLOTS];
     int  quantum_beats;      // launch/phase quantize in Link beats (1..64). The web
                              // UI edits this in BARS (x4, 4/4); 4 beats = 1 bar.
     int  clock_enable;       // 0/1 — emit 24-PPQN MIDI clock on DIN
@@ -42,8 +63,14 @@ typedef struct {
 #else
 #  define APP_CONFIG_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 #endif
-APP_CONFIG_STATIC_ASSERT(sizeof(AppConfig) == 152,
+APP_CONFIG_STATIC_ASSERT(sizeof(AppConfig) == 316,
     "AppConfig layout changed: bump APP_CONFIG_VERSION, then fix this size (ARC-020)");
+
+// ESP-030: the FROZEN v1 size. This one must never change — it is the length gate
+// the migration reads old blobs through. If this assert ever fires, someone has
+// edited a layout that already shipped, and every field device's config is at risk.
+APP_CONFIG_STATIC_ASSERT(sizeof(AppConfigV1) == 152,
+    "the v1 layout is FROZEN — it describes bytes already in the field (ESP-030)");
 
 void config_defaults(AppConfig* cfg);
 
@@ -69,6 +96,15 @@ bool app_config_set(AppConfig* cfg, AppConfigField field, int value);
 typedef enum {
     CFG_DECODE_OK,          // blob accepted verbatim
     CFG_DECODE_DEFAULTED,   // blob absent/unversioned/wrong-version/wrong-size/invalid
+    // ESP-030: an OLD but READABLE blob, upgraded rather than thrown away.
+    //
+    // This case exists because the alternative is unacceptable: defaulting on a
+    // version bump makes every Touch in the field lose its WiFi credentials on the
+    // next boot, fall back to the KitchenSync-Setup SoftAP, and drop off the
+    // network. The P4 learned this in ESP-013 ("a version bump that silently
+    // forgot [wifi creds]"). The caller should WRITE THE UPGRADED BLOB BACK, or
+    // every future boot re-migrates.
+    CFG_DECODE_MIGRATED,
 } cfg_decode_result;
 
 // The one owner of "is this persisted blob safe to load?". *out always ends up a

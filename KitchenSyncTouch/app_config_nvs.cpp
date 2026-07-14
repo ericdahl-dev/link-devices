@@ -39,8 +39,9 @@ static bool migrate_legacy(AppConfig* cfg) {
     legacy.play_on_release  = prefs.getInt("play_rel",  legacy.play_on_release);
     legacy.nudge_mbeats     = prefs.getInt("nudge_mb",  legacy.nudge_mbeats);
     legacy.brightness       = prefs.getInt("bright",    legacy.brightness);
-    prefs.getString("wifi_ssid", legacy.wifi_ssid, sizeof(legacy.wifi_ssid));
-    prefs.getString("wifi_pass", legacy.wifi_pass, sizeof(legacy.wifi_pass));
+    // ESP-030: the legacy keys held ONE credential; it becomes slot 0.
+    prefs.getString("wifi_ssid", legacy.wifi[0].ssid, sizeof(legacy.wifi[0].ssid));
+    prefs.getString("wifi_pass", legacy.wifi[0].pass, sizeof(legacy.wifi[0].pass));
 
     // A migration is not a licence to skip the guard: garbage in the old keys is
     // still garbage. Same gate the blob path runs through.
@@ -66,18 +67,36 @@ extern "C" void config_load(AppConfig* cfg) {
     // Read the stored length FIRST. getBytes into a smaller buffer would silently
     // truncate; handing config_decode() the real length instead lets it reject a
     // wrong-size blob rather than load a half-copy.
+    //
+    // ESP-030: this used to read the bytes ONLY when `stored == sizeof(buf)` — an
+    // exact match against the CURRENT struct. That was safe while there was one
+    // layout, and became a config-eating bug the moment an OLD one existed: a v1
+    // blob is 152 bytes and the buffer is now 316, so the bytes would never be
+    // read, `buf` would stay zeroed, and the migration would faithfully migrate
+    // 152 bytes of ZEROES — silently wiping the WiFi credentials of every device
+    // in the field, including the customer unit (ESP-021). Read anything that
+    // FITS; let config_decode judge it.
     size_t stored = prefs.getBytesLength(KEY_CFG);
     if (stored > 0) {
         have_blob = true;
         sz = stored;
-        if (stored == sizeof(buf)) prefs.getBytes(KEY_CFG, buf, sizeof(buf));
-        // else: leave buf zeroed — decode rejects on size before reading it.
+        if (stored <= sizeof(buf)) prefs.getBytes(KEY_CFG, buf, stored);
+        // else: bigger than any layout we know — leave buf zeroed; decode rejects
+        // on size before it reads a byte.
     }
     prefs.end();
 
-    if (config_decode(cfg, have_blob ? (const void*)buf : NULL, sz, have_ver, ver)
-            == CFG_DECODE_OK) {
-        return;                                  // the common path: blob accepted
+    cfg_decode_result r = config_decode(cfg, have_blob ? (const void*)buf : NULL,
+                                        sz, have_ver, ver);
+
+    if (r == CFG_DECODE_OK) return;              // the common path: blob accepted
+
+    // ESP-030: an OLD blob was upgraded. WRITE IT BACK NOW — otherwise NVS keeps the
+    // v1 bytes and every future boot re-migrates, and a downgrade to an older build
+    // would then find a blob it cannot read. Exactly what ks_config_nvs.c does.
+    if (r == CFG_DECODE_MIGRATED) {
+        config_save(cfg);
+        return;
     }
 
     // Defaults are already in *cfg (config_decode guarantees it). If there is no
