@@ -593,7 +593,12 @@ static esp_err_t config_json_handler(httpd_req_t *req)
     // (test_fits_in_a_generously_sized_stack_buffer); 768 keeps the same kind of
     // headroom test_ks_status.c's buffer asserts against (P4-038's precedent).
     char buf[768];
-    ks_config_json(buf, sizeof(buf), &snap);
+    /* ESP-030: the P4 is fully fitted — speaker (P4-006), LED strip (P4-018), mic
+     * (P4-020), four clock outputs. A board without them simply does not emit those
+     * keys; nothing here fakes hardware. */
+    static const KsCaps caps = { .metronome = true, .led = true, .follow_beat = true,
+                                 .outputs = KS_CLOCK_OUTPUTS };
+    ks_config_json(buf, sizeof(buf), &snap, &caps);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }
