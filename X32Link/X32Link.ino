@@ -341,6 +341,23 @@ static bool wifi_try_connect() {
     snprintf(g_ks_host, sizeof(g_ks_host), "x32link-%02x%02x", mac[4], mac[5]);
     if (MDNS.begin(g_ks_host)) {
         MDNS.addService("http", "tcp", 80);
+
+        /* ESP-031: advertise identity instead of letting a client guess it.
+         *
+         * The hostname is not an identity. The app matches `kitchensync-*`, so this box
+         * -- named x32link-XXXX -- is invisible to it even now that it answers mDNS, the
+         * same way a real Touch (kstouch-dfd0) is. And the mirror failure is worse: a
+         * stranger's box named kitchensync-anything gets adopted into the fleet at a venue.
+         * Match on `dev`, not the name.
+         *
+         * `target` comes from the build (CONFIG_IDF_TARGET), never a typed-in string, so a
+         * client can REFUSE a cross-target OTA rather than ask the user to promise the .bin
+         * is right -- which is all POST /update can do today. */
+        MDNS.addServiceTxt("http", "tcp", "dev",    "kitchensync");
+        MDNS.addServiceTxt("http", "tcp", "model",  "x32link");
+        MDNS.addServiceTxt("http", "tcp", "target", CONFIG_IDF_TARGET);
+        MDNS.addServiceTxt("http", "tcp", "fw",     FW_VERSION);
+
         Serial.printf("[X32Link] http://%s.local\n", g_ks_host);
     } else {
         Serial.println("[X32Link] WARN: mDNS failed — the app will not discover this unit");

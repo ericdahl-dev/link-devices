@@ -158,7 +158,17 @@ void setup() {
         if (WiFi.status() == WL_CONNECTED) {
             uint8_t mac[6]; WiFi.macAddress(mac);
             snprintf(g_ks_host, sizeof(g_ks_host), "kstouch-%02x%02x", mac[4], mac[5]);
-            if (MDNS.begin(g_ks_host)) MDNS.addService("http", "tcp", 80);
+            if (MDNS.begin(g_ks_host)) {
+                MDNS.addService("http", "tcp", 80);
+                /* ESP-031: this unit advertises as kstouch-XXXX, which does not match the
+                 * app's `kitchensync-*` hostname filter -- so a real Touch is invisible to
+                 * it. Publish identity in TXT and let the client match on `dev`. `target`
+                 * is the build's, so a client can refuse a cross-target OTA. */
+                MDNS.addServiceTxt("http", "tcp", "dev",    "kitchensync");
+                MDNS.addServiceTxt("http", "tcp", "model",  "touch");
+                MDNS.addServiceTxt("http", "tcp", "target", CONFIG_IDF_TARGET);
+                MDNS.addServiceTxt("http", "tcp", "fw",     FW_VERSION);
+            }
             Serial.printf("[KSTouch] ip %s  http://%s.local\n",
                           WiFi.localIP().toString().c_str(), g_ks_host);
             tempo_source_begin();   // Link + the DIN clock task
