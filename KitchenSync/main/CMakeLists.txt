@@ -26,6 +26,7 @@ idf_component_register(
          "ks_web.cpp"
          "ks_status.c"
          "ks_config.c"
+         "ks_config_json.c"
          "ks_hostname.c"
          "ks_tick.c"
          "${X32LINK_DIR}/master_clock.c"
