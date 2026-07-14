@@ -84,6 +84,39 @@ void test_wifi_slots_compacts_and_skips_empties(void) {
     TEST_ASSERT_EQUAL_STRING("diamond", out[1].pass);
 }
 
+// ESP-030 pt3: FORGETTING a network must take the PASSWORD with it.
+//
+// Untested until now, and the Touch's /save (which hand-rolled its own loop instead
+// of calling ks_config_set) got it wrong: clearing the SSID left the password sitting
+// in NVS, and /config.json went on reporting pass_set:true for a slot with no network.
+// The user "deleted" a network and the credential stayed on the device.
+//
+// Both products now depend on this rule, so it gets a test that locks it.
+void test_clearing_an_ssid_also_forgets_its_password(void) {
+    ks_config_set(&c, "wifi_ssid1", "Backline");
+    ks_config_set(&c, "wifi_pass1", "greenroom99");
+    TEST_ASSERT_EQUAL_STRING("greenroom99", c.wifi[1].pass);
+
+    ks_config_set(&c, "wifi_ssid1", "");        // forget it
+
+    TEST_ASSERT_EQUAL_STRING("", c.wifi[1].ssid);
+    TEST_ASSERT_EQUAL_STRING("", c.wifi[1].pass);   // the credential is GONE, not orphaned
+}
+
+// The other half of the rule, and the reason the two cannot be collapsed: a blank
+// PASSWORD alone means "keep current" -- the form can't show the password, so a user
+// editing only the SSID must not silently wipe it.
+void test_a_blank_password_alone_keeps_the_current_one(void) {
+    ks_config_set(&c, "wifi_ssid", "Studio");
+    ks_config_set(&c, "wifi_pass", "vanal");
+
+    ks_config_set(&c, "wifi_ssid", "Studio-5G");   // rename the network
+    ks_config_set(&c, "wifi_pass", "");            // field left blank in the form
+
+    TEST_ASSERT_EQUAL_STRING("Studio-5G", c.wifi[0].ssid);
+    TEST_ASSERT_EQUAL_STRING("vanal",     c.wifi[0].pass);   // kept, not erased
+}
+
 // The slot list must never outgrow the budget the policy can split.
 void test_slot_count_fits_the_connection_budget(void) {
     TEST_ASSERT_TRUE(KS_WIFI_SLOTS <= WIFI_CONN_MAX_SLOTS);
@@ -315,7 +348,7 @@ typedef struct {
 
 static void make_v1_blob(KsConfigV1_ForTest* b) {
     memset(b, 0, sizeof(*b));
-    strcpy(b->wifi_ssid, "test123");
+    strcpy(b->wifi_ssid, "Bench-2G");
     strcpy(b->wifi_pass, "hunter2");
     b->clock_out_enable = 1;
     b->metronome_accent = 1;
@@ -335,7 +368,7 @@ void test_decode_migrates_v1_creds_into_slot_zero(void) {
     ks_decode_result r = ks_config_decode(&out, &blob, sizeof(blob), true, 1u);
 
     TEST_ASSERT_EQUAL_INT(KS_DECODE_MIGRATED, r);
-    TEST_ASSERT_EQUAL_STRING("test123", out.wifi[0].ssid);   // creds preserved
+    TEST_ASSERT_EQUAL_STRING("Bench-2G", out.wifi[0].ssid);   // creds preserved
     TEST_ASSERT_EQUAL_STRING("hunter2", out.wifi[0].pass);
     TEST_ASSERT_EQUAL_STRING("", out.wifi[1].ssid);          // new slots start empty
     TEST_ASSERT_EQUAL_STRING("", out.wifi[2].ssid);
@@ -404,6 +437,8 @@ int main(void) {
     RUN_TEST(test_indexed_slot_keys);
     RUN_TEST(test_empty_ssid_forgets_the_whole_slot);
     RUN_TEST(test_wifi_slots_compacts_and_skips_empties);
+    RUN_TEST(test_clearing_an_ssid_also_forgets_its_password);
+    RUN_TEST(test_a_blank_password_alone_keeps_the_current_one);
     RUN_TEST(test_slot_count_fits_the_connection_budget);
     RUN_TEST(test_decode_migrates_v1_creds_into_slot_zero);
     RUN_TEST(test_decode_v1_wrong_size_or_invalid_still_defaults);

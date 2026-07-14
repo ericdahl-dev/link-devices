@@ -19,7 +19,12 @@ extern "C" {
 // v2 (ESP-030): the single wifi_ssid/wifi_pass became wifi[KS_WIFI_SLOTS], the
 // same move the P4 made in ESP-013. A v1 blob is MIGRATED, never discarded --
 // see config_decode. One WiFi slot was a deficiency, not a design choice.
-#define APP_CONFIG_VERSION 2u
+// v3 (ESP-030 pt3): the Touch grows RATE + SWING. ktouch_midi_out.cpp said it out
+// loud -- "ppqn 24 / swing 0 until the Touch grows RATE + SWING config fields". The
+// clock ENGINE already does both (clock_output.c, symlinked in); there were simply
+// no config fields to drive it, so a client saw a SWING stepper that could never
+// work. A v2 blob is MIGRATED, never discarded.
+#define APP_CONFIG_VERSION 3u
 
 // ESP-030: the v1 layout, FROZEN. This is a copy of what SHIPPED, not an alias of
 // the current struct: if the live struct changes, this must NOT follow, or the
@@ -36,6 +41,19 @@ typedef struct {
     int  brightness;
 } AppConfigV1;
 
+// ESP-030 pt3: the v2 layout, FROZEN. Bytes already in the field — the bench unit
+// holds one of these RIGHT NOW. Never edit it; the migration reads v2 bytes at v2
+// offsets, and getting that wrong hands a device someone else's password.
+typedef struct {
+    WifiCred wifi[KS_WIFI_SLOTS];
+    int  quantum_beats;
+    int  clock_enable;
+    int  transport_enable;
+    int  play_on_release;
+    int  nudge_mbeats;
+    int  brightness;
+} AppConfigV2;
+
 typedef struct {
     // ESP-030: multiple saved networks, like the P4 (ESP-013). wifi[0].ssid empty
     // => SoftAP config mode, same rule as KsConfig.
@@ -47,8 +65,16 @@ typedef struct {
     int  play_on_release;    // 0 = toggle on touch (digital DJ), 1 = on release (turntable)
     int  nudge_mbeats;       // DIN clock phase trim, millibeats (-250..250, tempo-
                              // relative). +ve = clock ahead; slides the RC-505 into
-                             // the pocket. Live via /nudge, no reboot.
+                             // the pocket. Live, no reboot.
     int  brightness;         // LCD backlight, percent (10..100). Live via /bright.
+
+    // ESP-030 pt3. The writer already knew how to do these -- clock_output.c does
+    // swing + nudge + ppqn, and it is symlinked in. It was hardcoding `ppqn 24 /
+    // swing 0 until the Touch grows RATE + SWING config fields`. Here they are.
+    // Same names, same units, same ranges as the P4's ClockOutputCfg, so a client
+    // edits ONE field per concept across the whole fleet.
+    int  ppqn;               // 1..48 pulses per beat: 24 = MIDI clock, 48 = x2, 12 = /2
+    int  swing_mbeats;       // 0..250 millibeats of off-eighth delay (0 = straight)
 } AppConfig;
 
 // ARC-020: the size is not the safety mechanism — APP_CONFIG_VERSION is. This
@@ -63,7 +89,7 @@ typedef struct {
 #else
 #  define APP_CONFIG_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 #endif
-APP_CONFIG_STATIC_ASSERT(sizeof(AppConfig) == 316,
+APP_CONFIG_STATIC_ASSERT(sizeof(AppConfig) == 324,
     "AppConfig layout changed: bump APP_CONFIG_VERSION, then fix this size (ARC-020)");
 
 // ESP-030: the FROZEN v1 size. This one must never change — it is the length gate
@@ -71,6 +97,8 @@ APP_CONFIG_STATIC_ASSERT(sizeof(AppConfig) == 316,
 // edited a layout that already shipped, and every field device's config is at risk.
 APP_CONFIG_STATIC_ASSERT(sizeof(AppConfigV1) == 152,
     "the v1 layout is FROZEN — it describes bytes already in the field (ESP-030)");
+APP_CONFIG_STATIC_ASSERT(sizeof(AppConfigV2) == 316,
+    "the v2 layout is FROZEN — the bench unit holds one of these (ESP-030 pt3)");
 
 void config_defaults(AppConfig* cfg);
 
@@ -88,6 +116,8 @@ typedef enum {
     ACF_PLAY_ON_RELEASE,
     ACF_NUDGE_MBEATS,
     ACF_BRIGHTNESS,
+    ACF_PPQN,           // ESP-030 pt3
+    ACF_SWING_MBEATS,   // ESP-030 pt3
 } AppConfigField;
 
 bool app_config_set(AppConfig* cfg, AppConfigField field, int value);
