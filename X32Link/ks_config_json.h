@@ -43,6 +43,18 @@ typedef struct {
     bool led;          // a WS2812 strip is wired
     bool follow_beat;  // a mic is fitted
     int  outputs;      // clock outputs FITTED -- the `clock` array's length. Never padded.
+
+    /* ESP-035: how many wifi credentials this build can actually STORE.
+     *
+     * `wifi` used to be hardcoded to KS_WIFI_SLOTS, which is a lie on any board that
+     * holds fewer. The X32Link holds ONE. Advertise three and a client renders three:
+     * the user saves a second network, the device's /save reads only `wifi_ssid` and
+     * throws it away, and the client cheerfully reports success.
+     *
+     * Not hypothetical -- that is the bug that cost the user their second network on the
+     * Touch (ESP-030 pt3), here reachable from the READ side. The array's LENGTH is the
+     * truth, exactly as it already is for `clock`. */
+    int  wifi_slots;
 } KsCaps;
 
 // Formats KsConfig as JSON, emitting ONLY what `caps` says the board has:
@@ -54,10 +66,10 @@ typedef struct {
 //    "wifi":[{"ssid":"S","pass_set":bool}, ...],
 //    "clock":[{"en":bool,"cable":N,"ppqn":N,"phase":N,"swing":N,"follow":bool}, ...]}
 //
-// `wifi` has KS_WIFI_SLOTS entries; `clock` has caps.outputs entries -- the FITTED
-// count, never padded, because a client renders a card per element and would
-// otherwise draw dead outputs. Same order as the form's slot/output numbering (slot
-// 0 is the unsuffixed "wifi_ssid"/"clk0_*" keys).
+// `wifi` has caps.wifi_slots entries and `clock` has caps.outputs entries -- the FITTED
+// counts, never padded, because a client renders a row/card per element and would
+// otherwise draw slots and outputs the device cannot honour. Same order as the form's
+// slot/output numbering (slot 0 is the unsuffixed "wifi_ssid"/"clk0_*" keys).
 //
 // Returns snprintf()'s return value (same truncation-detection convention as
 // ks_status_json()) -- a caller comparing it against `len` can tell a truncated

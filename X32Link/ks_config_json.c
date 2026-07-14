@@ -43,8 +43,17 @@ int ks_config_json(char* buf, size_t len, const KsConfig* c, const KsCaps* caps)
         APPEND(",\"follow_beat\":%s", c->follow_beat_enable ? "true" : "false");
     }
 
+    /* The array LENGTH is the number of credentials this build can actually STORE --
+     * never padded (ESP-035). Advertising three slots on a board that holds one makes a
+     * client offer a second network the device will silently discard, which is exactly
+     * how the Touch lost the user's second SSID (ESP-030 pt3). Clamped to what the
+     * struct actually holds. */
+    int slots = caps->wifi_slots;
+    if (slots > KS_WIFI_SLOTS) slots = KS_WIFI_SLOTS;
+    if (slots < 0)             slots = 0;
+
     APPEND(",\"wifi\":[");
-    for (int i = 0; i < KS_WIFI_SLOTS && !truncated; i++) {
+    for (int i = 0; i < slots && !truncated; i++) {
         APPEND("%s{\"ssid\":\"%s\",\"pass_set\":%s}", i ? "," : "", c->wifi[i].ssid,
                c->wifi[i].pass[0] ? "true" : "false");
     }

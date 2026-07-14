@@ -3,6 +3,10 @@
 #include "app_config.h"
 #include "fw_version.h"
 #include "web_status_json.h"
+#include "ks_status.h"       // ESP-035: the SHARED /status builder — one shape across the fleet
+#include "ks_config_json.h"  // ESP-035: the SHARED /config.json builder + KsCaps
+#include "ks_config.h"
+#include "link_protocol.h"   // link_proto_peers()
 #include "tempo_snapshot.h"
 #include "config_persist.h"    // ARC-022: debounced write-through for /live edits
 #include "midi_clock_out_io.h" // ARC-024: MIDI writer tick health for /status
@@ -287,23 +291,122 @@ static void handle_update_upload() {
 // alone. quantum is g_config.quantum_beats (bar-quantized, matching the
 // touch UI's phase wheel, not the LED's per-beat 1.0f quantum). One atomic
 // tempo_snapshot_read() (ARC-001 seam) — never tempo_source_* directly.
+/* ESP-035: /status is now built by the SHARED ks_status_json -- the same function the
+ * P4 and the Touch use (ESP-029, ARC-024: "one shape across the fleet, so one script
+ * audits every device").
+ *
+ * This box was the last hold-out. It hand-rolled its own /status, and the companion app
+ * could not decode it AT ALL -- KsStatus threw on the first required key it was missing.
+ * A device that was powered, on the network and following the session was invisible.
+ *
+ * Its OWN page still needs `phase`/`valid`/`quantum`/battery, so those ride in `extra`
+ * rather than being dropped -- exactly what the Touch did with its legacy `sync` alias.
+ * The tick-health block was ALREADY spelled identically (ARC-024 got there first), so
+ * it needs no translation at all. */
 static void handle_status() {
     TempoSnapshot ts; tempo_snapshot_read(&ts);
-    char buf[256];   // ARC-024: the tick-health block roughly doubles the payload
+    char buf[768];   // the shared document is a good deal larger than the old one
 
     // ARC-024: NULL unless the MIDI writer task is actually running, so the block is
     // omitted rather than reported as a row of zeroes.
     WebTickHealth th;
     const WebTickHealth* tick = midi_clock_out_io_health(&th) ? &th : NULL;
 
+    char extra[160];
+    int n = snprintf(extra, sizeof(extra), "\"phase\":%.4f,\"valid\":%s,\"quantum\":%d",
+                     (double)ts.phase, ts.valid ? "true" : "false", ts.quantum);
 #ifdef HAS_BATTERY_GAUGE
     BatterySnapshot bs; battery_snapshot_read(&bs);
-    web_status_json(buf, sizeof(buf), ts.bpm, ts.phase, ts.valid, ts.quantum, FW_VERSION,
-                     bs.present, bs.volts, bs.percent, tick);
-#else
-    web_status_json(buf, sizeof(buf), ts.bpm, ts.phase, ts.valid, ts.quantum, FW_VERSION,
-                     false, 0.0f, 0.0f, tick);
+    if (bs.present && n > 0 && n < (int)sizeof(extra))
+        snprintf(extra + n, sizeof(extra) - (size_t)n, ",\"batt_v\":%.2f,\"batt_pct\":%.1f",
+                 (double)bs.volts, (double)bs.percent);
 #endif
+
+    /* HONEST ZEROES, not flattering ones. This box has no MIDI-clock IN, no USB-MIDI
+     * host, no mic follow-beat, and NO QUANTIZED TRANSPORT -- it follows Link and drives
+     * a mixer's FX delay. So `launch` is EMPTY (launch_count 0), not a fabricated
+     * [0]: the array's length is the output count, and inventing one would make a client
+     * draw a transport button for a device that has no transport to run.
+     *
+     * `clk`/`pulses` are NULL for the same reason -- this device does not publish
+     * ESP-028's writer's truth yet, and a plausible-looking "locked" would be precisely
+     * the lie ESP-028 exists to prevent. */
+    ks_status_json(buf, sizeof(buf),
+                   ts.bpm,
+                   0.0f,                      // min: no MIDI-clock IN on this hardware
+                   link_proto_peers(),
+                   false,                     // usb: no USB-MIDI host
+                   0,                         // tx: this box keeps NO lifetime pulse counter.
+                                              // 0 = not measured, and the honest way to say
+                                              // "is the wire alive" is ESP-028's clk/pulses,
+                                              // which is passed NULL below rather than faked.
+                   FW_VERSION,
+                   false, 0.0f, 0.0f, false,  // follow_*: no mic on this hardware
+                   NULL, 0,                   // launch: NO transport on this product
+                   false,                     // playing
+                   false,                     // link_owns: it never defers, so never claim it
+                   tick,
+                   NULL,                      // phase health: not published here
+                   NULL, NULL,                // clk/pulses: ESP-028 not implemented here
+                   extra);
+    server.send(200, "application/json", buf);
+}
+
+/* ESP-035: GET /config.json, via the SHARED builder + KsCaps.
+ *
+ * X32Link is a DIFFERENT PRODUCT on the same fleet protocol -- it syncs an X32/XR18's
+ * FX tap-delay to Link. So its capabilities are genuinely different, and it must say so
+ * rather than pretend to be a clock box:
+ *
+ *   outputs = 0     Its USB-MIDI clock is a fixed on/off (midi_clock_out_enable), NOT a
+ *                   configurable output with a cable, division, phase and swing. Claim
+ *                   one and a client draws NUDGE and SWING steppers that can never work
+ *                   -- the exact bug the Touch shipped. `clock_out` still carries the
+ *                   on/off, because that part is real.
+ *   wifi_slots = 1  It stores ONE credential. Claim three and the user saves a second
+ *                   network, /save silently discards it, and the client reports success
+ *                   -- the exact bug that cost the user their second SSID on the Touch.
+ *   led             It really does have one (a NeoPixel beat LED). */
+static void handle_config_json() {
+    /* KsCaps.led means an ADDRESSABLE strip -- brightness, mode, fade, beat/accent
+     * colour. That is only true on the LED_RGB builds (the QT Py's NeoPixel). The
+     * headless board's LED is a plain on/off pin, and the Waveshare touch board has no
+     * MCU-controlled LED at all (LED_NONE).
+     *
+     * So this is #if'd, not hardcoded true. Claiming `led` on a board with a bare
+     * indicator would make a client draw colour pickers and a brightness slider for
+     * hardware that cannot honour any of them -- which is the ENTIRE point of caps, and
+     * the same lie as reporting a metronome on a board with no speaker.
+     *
+     * Capabilities are a property of the BUILD. Solder a WS2812 on and rebuild with
+     * LED_RGB, and the LED section appears with no client change at all. */
+    /* NB: LED_RGB itself is derived inside X32Link.ino and is NOT visible in this
+     * translation unit. BOARD_QTPY_ESP32S3 is a -D build flag, so it is. Keyed off the
+     * flag that actually reaches here, not the one that reads nicer. */
+    static const KsCaps caps = {
+        .metronome   = false,   // no speaker
+#if defined(BOARD_QTPY_ESP32S3)
+        .led         = true,    // addressable NeoPixel: colours really do apply
+#else
+        .led         = false,   // a bare on/off pin (headless), or none (Waveshare)
+#endif
+        .follow_beat = false,   // no mic
+        .outputs     = 0,       // no CONFIGURABLE clock outputs -- see above
+        .wifi_slots  = 1,       // this build stores exactly one credential
+    };
+
+    /* This device's AppConfig, expressed in the shared KsConfig shape. Only what it
+     * really has is populated; `caps` then stops the rest from being emitted at all. */
+    KsConfig c;
+    ks_config_defaults(&c);
+    c.clock_out_enable = g_config.midi_clock_out_enable;
+    strlcpy(c.wifi[0].ssid, g_config.wifi_ssid, sizeof(c.wifi[0].ssid));
+    strlcpy(c.wifi[0].pass, g_config.wifi_pass, sizeof(c.wifi[0].pass));
+    c.led_beat_color   = (int)g_config.dot_beat_color;
+    c.led_accent_color = (int)g_config.dot_accent_color;
+
+    char buf[768];
+    ks_config_json(buf, sizeof(buf), &c, &caps);
     server.send(200, "application/json", buf);
 }
 
@@ -419,6 +522,7 @@ void web_config_begin() {
     config_persist_reset(&s_persist);   // ARC-022: clean at boot — never write on the way up
     server.on("/",       HTTP_GET,  handle_root);
     server.on("/status", HTTP_GET,  handle_status);
+    server.on("/config.json", HTTP_GET, handle_config_json);   // ESP-035
     server.on("/save",   HTTP_POST, handle_save);
     server.on("/live",   HTTP_POST, handle_live);   // LNK-037: no-reboot preview
     server.on("/update", HTTP_GET,  handle_update_page);
