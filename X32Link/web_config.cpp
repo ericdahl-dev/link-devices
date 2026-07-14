@@ -305,14 +305,19 @@ static void handle_update_upload() {
  * it needs no translation at all. */
 static void handle_status() {
     TempoSnapshot ts; tempo_snapshot_read(&ts);
-    char buf[768];   // the shared document is a good deal larger than the old one
+    /* STATIC, not stack -- the rule this file already sets at the top: WebServer
+     * dispatches one request at a time from loopTask, and a multi-KB local is how the
+     * P4's httpd task earned a stack-protection panic (ESP-013). The shared document is
+     * three times the size of the one this used to build, so the old 256-byte local
+     * would have been a stack landmine. */
+    static char buf[768];
+    static char extra[160];
 
     // ARC-024: NULL unless the MIDI writer task is actually running, so the block is
     // omitted rather than reported as a row of zeroes.
     WebTickHealth th;
     const WebTickHealth* tick = midi_clock_out_io_health(&th) ? &th : NULL;
 
-    char extra[160];
     int n = snprintf(extra, sizeof(extra), "\"phase\":%.4f,\"valid\":%s,\"quantum\":%d",
                      (double)ts.phase, ts.valid ? "true" : "false", ts.quantum);
 #ifdef HAS_BATTERY_GAUGE
@@ -405,7 +410,7 @@ static void handle_config_json() {
     c.led_beat_color   = (int)g_config.dot_beat_color;
     c.led_accent_color = (int)g_config.dot_accent_color;
 
-    char buf[768];
+    static char buf[768];   // static for the same reason as handle_status (ESP-013)
     ks_config_json(buf, sizeof(buf), &c, &caps);
     server.send(200, "application/json", buf);
 }
