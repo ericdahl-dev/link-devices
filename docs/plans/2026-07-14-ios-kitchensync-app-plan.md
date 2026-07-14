@@ -10,11 +10,14 @@ Audio** channel.
 
 These three are not one uniform effort. Function 1 is plain HTTP/Bonjour against a
 protocol that already exists and is fully specified below. Functions 2 and 3 each
-require embedding Ableton's Link SDK in a phone app, which raises the same
-licensing question `LinkAudioPoC/README.md` already flagged for the P4 hardware —
-and Function 3 is the exact software-side twin of the already-proven **P4-032**
-mic→Link-Audio spike. Recommend building and shipping in that order, as three
-phases, each independently useful.
+require embedding an Ableton Link SDK in a phone app — but **not** the same one the
+GPLv2/commercial-license gate in `LinkAudioPoC/README.md` is about. Ableton ships a
+dedicated iOS SDK, **LinkKit** (`github.com/Ableton/LinkKit`), under its own
+royalty-free license that already covers Link Audio (confirmed 2026-07-14 — see
+Licensing in Phase 3). Function 3 is still the exact software-side twin of the
+already-proven **P4-032** mic→Link-Audio spike, just without the licensing gate
+that spike is blocked on for the *firmware*. Recommend building and shipping in
+order, as three phases, each independently useful.
 
 ---
 
@@ -104,16 +107,12 @@ device instead of driving one over the network.
 
 The ESP32 firmwares hand-roll a **receive-only, clean-room** Link implementation
 (`link_protocol.c`, `link_measurement*.c`) specifically so the closed firmware never
-links Ableton's GPLv2 SDK. An iOS app doesn't need that workaround for tempo/
-transport — Ableton ships the real SDK with an iOS platform layer and public
-examples (`examples/LinkHut`), and it gives session tempo/phase/start-stop and lets
-the app **become a full read/write peer** directly (`Link::captureAppSessionState()`),
-none of the custom gossip-parse/ping-pong-measurement/GhostXForm machinery this repo
-had to build from scratch to stay receive-only. The one thing to verify (see
-Licensing below) is whether Ableton requires a commercial license for a
-closed-source App Store binary that embeds Link for tempo/transport only — this is
-an extremely common case (most DAW-companion iOS apps ship Link support), which
-makes it likely low-friction, but "likely" isn't "confirmed."
+links Ableton's GPLv2 SDK. An iOS app doesn't need that workaround, and doesn't
+need the GPLv2 SDK at all — Ableton's **LinkKit** iOS SDK gives session tempo/
+phase/start-stop and lets the app **become a full read/write peer** directly, none
+of the custom gossip-parse/ping-pong-measurement/GhostXForm machinery this repo had
+to build from scratch to stay receive-only. Licensing is resolved, not just likely
+low-friction — see Phase 3.
 
 ### MIDI out
 
@@ -198,18 +197,34 @@ timestamping — see below).
 | Audio capture from an external interface | Standard `AVAudioEngine`/CoreAudio — no custom USB Audio Class driver needed (iOS handles UAC natively), which is strictly easier than what `P4-032` Tier 4 still has to build in firmware |
 | Sync accuracy verification | Same gap flagged in `LinkAudioPoC/README.md` — "verified by ear only." Do this properly for the phone build; it's a cheap, high-value measurement (compare a click track sent Link Audio vs. received in Live, ideally with the same kind of scope/analyzer rig this repo already uses for MIDI jitter) |
 
-### Licensing — the actual gate
+### Licensing — resolved, and it's not the P4-032 gate
 
 `LinkAudioPoC/README.md` and the feasibility doc (`docs/plans/2026-07-08-p4-link-audio-feasibility.md`)
-are explicit: Link is GPLv2, Link Audio is young/beta, and **shipping a closed
-product requires Ableton's commercial license** — "email link-devs@ableton.com
-BEFORE productizing," a business gate three P4 tickets are already blocked on. An
-App Store binary is exactly the closed-distribution case that license question is
-about, and it applies with *more* force here than to Phase 2 (tempo/MIDI-only Link
-use is common and low-friction industry-wide; Link **Audio** specifically is new
-enough that this repo's own research flagged it as unresolved). Don't build Phase 3
-past a personal/dev-only build until that email is answered — same rule already
-governing the firmware side, no reason for the app to be exempt.
+require a commercial license for that spike because it links the raw GPLv2
+`Ableton/link` C++ SDK into **closed embedded hardware**, with no iOS-specific
+grant in play. That gate does not carry over here: for iOS, Ableton publishes a
+dedicated SDK, **LinkKit** (`github.com/Ableton/LinkKit`), under its own **Link SDK
+License v2.0** — confirmed 2026-07-14 by reading the license and SDK docs directly
+(not inferred from the firmware precedent):
+
+- **Non-exclusive, worldwide, royalty-free** license to build and distribute iOS
+  apps using Link, App Store included, under your own brand — no fee, no
+  case-by-case negotiation, no "email before productizing" step.
+- **Covers Link Audio.** LinkKit documents Link Audio as a supported feature
+  (send/receive audio channels to Link peers), enabled via an `Info.plist` flag —
+  same SDK, same license, no separate audio-specific grant to chase.
+- Real restrictions, worth designing around rather than ignoring: can't
+  redistribute the SDK itself, can't reverse-engineer it, can't gate Link support
+  behind an in-app purchase, and must follow Ableton's Link UI/branding guidelines
+  (the familiar Link badge/UI convention every Link-enabled app carries).
+- Practical requirement: build against the official release `LinkKit.zip` from the
+  GitHub releases page (not a pre-release) for App Store submissions.
+
+Net effect: **Phase 3 is not blocked on an Ableton conversation.** Pull LinkKit,
+follow its license/UI terms, build. The P4-032 email is still the right call for
+the *hardware* products (`KitchenSync`, `LinkAudioPoC`) — that gate is real and
+unresolved — it's just a different codepath (raw GPLv2 SDK in closed firmware, no
+iOS grant) than this app is on.
 
 ---
 
@@ -229,18 +244,16 @@ governing the firmware side, no reason for the app to be exempt.
   C layer (`clock_ticker`, `clock_output`, `swing`, the clean-room Link stack) is
   needed by the phone app — it either doesn't apply (no hardware clock output to
   quantize) or is superseded by the official Link SDK doing the same job natively.
-- **Sequencing recommendation**: ship Phase 1 first — real value, zero legal gate,
-  and it's the one piece every KitchenSync owner wants regardless of what happens
-  with Phases 2–3. Send the Ableton licensing email in parallel with Phase 1
-  development (it's free and can only block Phases 2–3, not 1); by the time Phase 1
-  ships there should be an answer informing whether Phase 2 can proceed on the
-  official SDK and whether Phase 3 is viable at all for a distributed app.
+- **Sequencing recommendation**: ship Phase 1 first — real value, smallest surface
+  area, and it's the one piece every KitchenSync owner wants regardless of what
+  happens with Phases 2–3. Phases 2 and 3 are no longer licensing-blocked (LinkKit
+  covers both), so the sequencing rationale is now purely about build order and
+  risk, not a legal gate to wait on: Phase 1 has no SDK dependency and the fastest
+  path to something usable, Phase 2 validates the LinkKit integration and MIDI-out
+  jitter budget, Phase 3 reuses that integration plus `beat_stamper.c`.
 
 ## Open questions
 
-- Ableton Link (tempo/transport-only) commercial license terms for a closed iOS
-  app — separate question from the Link Audio license already being chased for
-  P4-032; confirm both, don't assume tempo-only inherits Link Audio's answer.
 - Does the app need to support X32Link units too (fleet includes both), or is scope
   intentionally KitchenSync-only? The `/status` shape differs
   (`web_status_json.c` vs `ks_status.c`) but overlaps enough (`bpm`, `fw`, tick
