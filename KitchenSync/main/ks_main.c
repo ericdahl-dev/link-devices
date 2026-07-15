@@ -30,6 +30,7 @@
 #include "wifi_link.h"
 #include "usb_midi_host.h"
 #include "ks_web.h"
+#include "ks_display.h"       /* ESP-026: 1.47" touch LCD glue (no-op unless CONFIG_KS_TOUCH_DISPLAY) */
 #include "ks_tick_health.h"   /* P4-038: publish the 1 ms clock task's probe in /status */
 #include "ks_config.h"
 #include "ks_config_nvs.h"
@@ -472,6 +473,7 @@ void app_main(void)
         follow_beat_io_start();   /* mic-based tempo detection, display-only v1 (P4-020) */
     ks_led_start(LED_GPIO, LED_PIXELS);   /* WS2812 visual metronome; harmless if nothing wired (P4-018) */
     midi_uart_out_start(MIDI_TX_GPIO, MIDI_STROBE_GPIO);   /* ESP-015: DIN MIDI out + analyzer strobe */
+    ks_display_start();   /* ESP-026: 1.47" touch LCD (no-op unless CONFIG_KS_TOUCH_DISPLAY, S3-only) */
     /* P4-038: priority 19, core 1 — the ESP-018 fix, ported to the LAST firmware that
      * never got it. This task ran at 6, which is BELOW lwIP's tcpip_task (18): the
      * network stack could legally preempt the clock generator, and it did. Measured on
