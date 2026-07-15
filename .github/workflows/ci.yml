@@ -75,23 +75,14 @@ jobs:
         include:
           - name: X32Link (headless)
             sketch: X32Link
-            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
             flags: ""
           - name: X32Link (Waveshare touch)
             sketch: X32Link
-            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
             flags: "-DBOARD_WAVESHARE_S3_TOUCH_LCD_147"
-          # LED_RGB path (LNK-039) only compiles under this flag.
-          - name: X32Link (QT Py NeoPixel)
-            sketch: X32Link
-            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom
-            flags: "-DBOARD_QTPY_ESP32S3"
-          # battery_gauge_io.cpp's Wire calls only compile under this flag -- opt-in
-          # per unit, so without its own leg it never gets compiled at all.
-          - name: X32Link (QT Py + LiPo BFF)
-            sketch: X32Link
-            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom
-            flags: "-DBOARD_QTPY_ESP32S3 -DHAS_BATTERY_GAUGE"
+          # QT Py variant dropped (ESP-037): its 4/8 MB flash never fit the fleet's 16 MB
+          # partition story, and it was the odd board out. Super Mini + Waveshare only.
           - name: X32 emulator (ESP-002)
             sketch: X32_emulator
             fqbn: esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc
