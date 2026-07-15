@@ -1,0 +1,29 @@
+# ESP-036 headless Super Mini partition table — ESP32-S3, 4 MB flash.
+#
+# NOT the product table. partitions.csv is a 16 MB layout for the Waveshare S3, and
+# Arduino gives a sketch exactly ONE partitions.csv that OVERRIDES the FQBN's
+# PartitionScheme menu -- so a Super Mini build silently inherits the 16 MB table unless
+# this one is swapped in. On a 4 MB chip that table is INVALID: app0 alone is 0x400000
+# at offset 0x10000, running past the end of the part. The bootloader rejects it and the
+# board boot-loops with "partition 2 invalid ... exceeds flash chip size" -- no app, no
+# banner. (Measured on the bench Super Mini, MAC 3c:0f:...:61:40, the first time this
+# file did not exist and the 16 MB table shipped by mistake.)
+#
+# Do not swap this in by hand -- use tools/build-supermini.sh, which swaps the board
+# flag AND this table together and restores both on exit.
+#
+# Dual-OTA so the headless box takes a web/OTA push like the product. 0x1A0000 (1.625 MB)
+# per slot vs a ~1.0 MB image = ~62% used, room to grow. nvs and otadata sit at the
+# Arduino default offsets (0x9000 / 0xe000) so an OTA preserves saved WiFi/config.
+#
+# 0x10000 + 2*0x1A0000 = 0x350000, then spiffs + coredump end exactly at 4 MB. Same
+# geometry as the DevKit's 4 MB table -- both chips are 4 MB -- but kept separate so the
+# board's intent is documented and a future 8/16 MB Super Mini can diverge here alone.
+#
+# Name,     Type, SubType,  Offset,    Size,      Flags
+nvs,        data, nvs,      0x9000,    0x5000,
+otadata,    data, ota,      0xe000,    0x2000,
+app0,       app,  ota_0,    0x10000,   0x1A0000,
+app1,       app,  ota_1,    0x1B0000,  0x1A0000,
+spiffs,     data, spiffs,   0x350000,  0xA0000,
+coredump,   data, coredump, 0x3F0000,  0x10000,

@@ -17,6 +17,7 @@
 #include "esp_netif.h"
 #include "esp_mac.h"
 #include "mdns.h"
+#include "fw_version.h"   /* ESP-031: FW_VERSION in the mDNS TXT record */
 #include "wifi_link.h"
 #include "wifi_conn_policy.h"   // ARC-013: shared connection lifecycle
 #include "ks_hostname.h"        // ESP-012: pure per-unit name derivation
@@ -122,7 +123,25 @@ static void mdns_advertise(esp_ip4_addr_t ip)
         if (e != ESP_OK) { ESP_LOGW(TAG, "mdns_init failed: %s", esp_err_to_name(e)); return; }
         mdns_hostname_set(s_host);
         mdns_instance_name_set("KitchenSync");
-        mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+
+        /* ESP-031: publish identity, don't make the client guess it from the name.
+         *
+         * A hostname is not an identity. The app matched `kitchensync-*`, so a real Touch
+         * (kstouch-dfd0) was invisible to it, and any stranger's box called
+         * kitchensync-anything got adopted into the fleet at a venue. Both directions fail.
+         * Clients match on `dev`.
+         *
+         * `target` is CONFIG_IDF_TARGET, so it is whatever this image was actually built for
+         * (this firmware builds for esp32/esp32p4/esp32s3) rather than a name someone typed.
+         * That is what lets a client REFUSE a cross-target OTA -- POST /update accepts any
+         * image today and can only ask the user to promise it matches. */
+        mdns_txt_item_t txt[] = {
+            { "dev",    "kitchensync"     },
+            { "model",  "p4"              },
+            { "target", CONFIG_IDF_TARGET },
+            { "fw",     FW_VERSION        },
+        };
+        mdns_service_add(NULL, "_http", "_tcp", 80, txt, sizeof(txt) / sizeof(txt[0]));
         s_mdns_up = true;
     }
 
