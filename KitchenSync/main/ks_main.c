@@ -179,6 +179,13 @@ bool ks_tick_health(WebTickHealth* out)
     return true;
 }
 
+// ESP-037: the tempo the clock is ACTUALLY running -- s_stat.bpm holds plan.bpm, the
+// settled/last-known value that keeps the clock going when the last Link peer leaves.
+// /status must report THIS, not link_proto_bpm(), which zeroes on peer loss even while
+// the wire keeps clocking (P4-039) -- otherwise a solo, free-running P4 reports bpm 0
+// and the app's tempo reads blank. The Touch already reports its writer's bpm here.
+float ks_clock_effective_bpm(void) { return s_stat.bpm; }
+
 static void clock_out_task(void *arg)
 {
     KsTickState ts;  ks_tick_reset(&ts, g_cfg_gen);
