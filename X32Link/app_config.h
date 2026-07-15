@@ -63,6 +63,38 @@ typedef enum {
 
 bool app_config_set(AppConfig* cfg, AppConfigField field, int value);
 
+// ESP-040: string-keyed setter in the SHARED web vocabulary — the same keys the P4's
+// ks_config_set parses and X32Link's own /config.json emits. This is what makes /save
+// round-trip with /config.json: a client reads `clock_out`/`led_beat` and can POST them
+// back under the same names. Accepts the shared keys AND X32Link's own form keys as
+// aliases (clock_out|midi_clock_out, led_beat|dot_beat, led_accent|dot_acc, quantum|
+// quantum_beats), plus the X32-only fields (model, mixer_ip, fx_slot, input_source,
+// phase_flash). Int fields route through app_config_set (so config_validate stays the one
+// range owner); strings are bounded-copied and a BLANK ssid/pass/ip is a no-op "keep
+// current" (a form can't show a password). Returns true iff the key was recognised and
+// the value applied.
+bool app_config_set_kv(AppConfig* cfg, const char* key, const char* val);
+
+// ESP-040: one posted form field, already URL-decoded (Arduino WebServer hands these out
+// via server.argName/arg). x32_form_merge consumes an array of them.
+typedef struct { const char* key; const char* val; } X32FormField;
+
+// ESP-040: merge posted fields onto `base` into `out`, mirroring the P4's ks_form so the
+// three firmwares share ONE partial-vs-full-form discipline instead of X32Link hand-rolling
+// its own (which silently zeroed input_source / midi_clock_out / phase on a partial POST).
+//
+//   full_form == false  → PATCH: only keys present in `fields` change; everything else keeps
+//                         its base value. This is what a partial client POST (or /live) needs.
+//   full_form == true   → the device's OWN page posted the whole form, so an ABSENT
+//                         checkbox-backed boolean (midi_clock_out_enable, phase_display_mode)
+//                         means "off" and is pre-cleared before the present keys reapply.
+//                         Value fields (input_source, colours, ...) are NEVER zeroed by
+//                         absence — only genuine checkboxes are.
+//
+// `out` is not validated here; the caller runs config_validate() exactly as before.
+void x32_form_merge(AppConfig* out, const AppConfig* base,
+                    const X32FormField* fields, int n, bool full_form);
+
 // LNK-032: the model→fx_slot dependency, shared by the web and touch config
 // editors so the "slot must be ≤ the model's max" rule lives in one host-tested
 // place. Sets model (ignored if not a known model) and clamps fx_slot into

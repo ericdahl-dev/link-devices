@@ -96,6 +96,10 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 <div class="scr-foot"><span id="srcFoot">SOURCE&middot;LINK</span><span id="battFoot" class="batt"></span><span>OUT&middot;/fx/&middot;/par/01</span></div>
 </div>
 <form method="POST" action="/save">
+<!-- ESP-040: this page posts EVERY field, so an unchecked checkbox here really does mean
+     "off". The sentinel tells handle_save that; a partial POST from a client that omits a
+     checkbox it never heard of (the iOS app saving WiFi) must NOT switch it off. -->
+<input type="hidden" name="full_form" value="1">
 <input type="hidden" name="input_source" id="h_src" value="%SRC%">
 <input type="hidden" name="model" id="h_model" value="%MODEL%">
 <input type="hidden" name="fx_slot" id="h_slot" value="%SLOT%">
@@ -437,40 +441,36 @@ static void handle_update_result() {
     }
 }
 
+// ESP-040: snapshot the POST's args (already URL-decoded by WebServer) and hand them to
+// the pure, host-tested x32_form_merge. Holding the Strings keeps their c_str() valid for
+// the duration of the merge. Runs in loop() context (ample stack), not a tiny httpd task.
+static void merge_post_into(AppConfig* out, const AppConfig* base, bool full_form) {
+    const int n = server.args();
+    static const int MAXF = 40;                  // the form has ~11 fields; 40 is headroom
+    String keys[MAXF], vals[MAXF];
+    X32FormField fields[MAXF];
+    int cnt = 0;
+    for (int i = 0; i < n && cnt < MAXF; i++) {
+        keys[cnt] = server.argName(i);
+        vals[cnt] = server.arg(i);
+        fields[cnt].key = keys[cnt].c_str();
+        fields[cnt].val = vals[cnt].c_str();
+        cnt++;
+    }
+    x32_form_merge(out, base, fields, cnt, full_form);
+}
+
 static void handle_save() {
-    AppConfig cfg = g_config;
-
-    // ARC-012: int fields go through app_config_set — one range owner
-    // (config_validate); out-of-range posts are ignored (old value kept) rather than
-    // 400-ing. Model first so fx_slot validates against the new model's slot max.
-    app_config_set(&cfg, ACF_MODEL,     server.arg("model").toInt());
-
-    String ip = server.arg("mixer_ip");
-    if (ip.length() > 0 && ip.length() < (int)sizeof(cfg.mixer_ip))
-        ip.toCharArray(cfg.mixer_ip, sizeof(cfg.mixer_ip));
-
-    app_config_set(&cfg, ACF_FX_SLOT,       server.arg("fx_slot").toInt());
-    app_config_set(&cfg, ACF_QUANTUM_BEATS, server.arg("quantum_beats").toInt());
-
-    String ssid = server.arg("wifi_ssid");
-    if (ssid.length() > 0 && ssid.length() < (int)sizeof(cfg.wifi_ssid))
-        ssid.toCharArray(cfg.wifi_ssid, sizeof(cfg.wifi_ssid));
-
-    String pass = server.arg("wifi_pass");
-    if (pass.length() > 0 && pass.length() < (int)sizeof(cfg.wifi_pass))
-        pass.toCharArray(cfg.wifi_pass, sizeof(cfg.wifi_pass));
-
-    app_config_set(&cfg, ACF_INPUT_SOURCE,   server.arg("input_source").toInt());
-    app_config_set(&cfg, ACF_MIDI_CLOCK_OUT, server.arg("midi_clock_out").toInt());  // LNK-027
-
-    // LNK-036: phase display mode + dot colours (unchecked box -> "" -> 0 -> sweep).
-    app_config_set(&cfg, ACF_PHASE_DISPLAY_MODE, server.arg("phase_flash").toInt() == 1 ? 1 : 0);
-    String cb = server.arg("dot_beat");              // "#RRGGBB" from <input type=color>
-    if (cb.length() == 7 && cb[0] == '#')
-        app_config_set(&cfg, ACF_DOT_BEAT_COLOR, (int)strtol(cb.c_str() + 1, NULL, 16));
-    String ca = server.arg("dot_acc");
-    if (ca.length() == 7 && ca[0] == '#')
-        app_config_set(&cfg, ACF_DOT_ACCENT_COLOR, (int)strtol(ca.c_str() + 1, NULL, 16));
+    /* ESP-040: the whole save now goes through the shared, host-tested merge instead of
+     * reading each field unconditionally. The old code read input_source / midi_clock_out /
+     * phase_flash straight off server.arg(), and an absent key decodes to 0 — a LEGAL value
+     * for all three — so a partial POST (the iOS app saving a WiFi network) silently reset
+     * the tempo source, disabled the MIDI clock, and flipped the phase display. The device's
+     * own page posts a `full_form` sentinel, so "absent checkbox = off" applies ONLY to it;
+     * a partial patch leaves what it doesn't mention alone. Same discipline as the P4's
+     * ks_form_resolve and the Touch's full_form guard — now all three share it. */
+    AppConfig cfg;
+    merge_post_into(&cfg, &g_config, server.hasArg("full_form"));
 
     if (config_validate(&cfg)) {
         g_config = cfg;
