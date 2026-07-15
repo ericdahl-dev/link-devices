@@ -15,6 +15,7 @@
 //  See the firmware map at the top of AGENTS.md.
 // ============================================================================
 #include <WiFi.h>
+#include <ESPmDNS.h>   // ESP-035: this box was invisible to the fleet until now
 #include <esp_wifi.h>
 #include "config.h"
 #include "fw_version.h"      // LNK-038: FW_VERSION / FW_BUILD identity
@@ -81,14 +82,13 @@ static WifiConnPolicy g_wifi_pol;
 // implies HAS_TOUCH_DISPLAY (see above), so the beat shows on-screen (LNK-015
 // phase wheel) and via the web /status dot (LNK-022); GPIO46 is the LCD backlight
 // owned by the display, not a strobe.
-#if defined(BOARD_QTPY_ESP32S3)
-    #define LED_RGB
-    #define LED_PIN_NUM 39
-    #define LED_PWR_PIN_NUM 38
-#elif defined(BOARD_WAVESHARE_S3_TOUCH_LCD_147)
+// ESP-037: the QT Py NeoPixel variant was dropped -- it was the only LED_RGB board, and
+// its 4/8 MB flash never fit the fleet's 16 MB partition story. The LED_RGB machinery
+// below stays (compiled out) in case an addressable-strip board returns.
+#if defined(BOARD_WAVESHARE_S3_TOUCH_LCD_147)
     #define LED_NONE                // no MCU-controlled LED; beat shown via web /status
 #else
-    #define LED_PIN_NUM 48
+    #define LED_PIN_NUM 48          // Super Mini: a plain LED on GPIO48
 #endif
 
 #define LED_BRIGHTNESS 40        // NeoPixel channel cap — matches the pre-LNK-039 hardcoded level
@@ -277,6 +277,9 @@ static void on_wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
 
 // STA connect. Hidden SSIDs need WIFI_ALL_CHANNEL_SCAN on the wifi_config before
 // connect; visible SSIDs work with WiFi.begin() after patching scan_method.
+// ESP-035: mDNS name, same shape as the Touch's (<product>-<last two MAC bytes>).
+char g_ks_host[32] = "x32link";
+
 static void wifi_sta_connect(const char* ssid, const char* pass) {
     WiFi.persistent(false);   // creds live in our NVS (x32link), not SDK wlan
     WiFi.mode(WIFI_STA);
@@ -320,6 +323,44 @@ static bool wifi_try_connect() {
     WiFi.setSleep(false);  // modem power-save drops buffered multicast — keep radio awake
     Serial.println();
     Serial.printf("[X32Link] IP: %s\n", WiFi.localIP().toString().c_str());
+
+    /* ESP-035: ANNOUNCE YOURSELF.
+     *
+     * This device had NO mDNS at all -- no .local name, no service record. It was the
+     * one member of the fleet that could not be FOUND: the companion app browses
+     * _http._tcp and this box was simply not there, so a unit that was powered, on the
+     * network and following the session looked exactly like no device at all.
+     *
+     * The Touch has done this since ESP-016 in one line. Same hostname shape
+     * (<product>-<last two MAC bytes>), so one client rule covers the fleet (ARC-024).
+     * Passing no instance name makes the Bonjour instance default to the hostname,
+     * which is what the app's hostname fallback matches on. */
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    snprintf(g_ks_host, sizeof(g_ks_host), "x32link-%02x%02x", mac[4], mac[5]);
+    if (MDNS.begin(g_ks_host)) {
+        MDNS.addService("http", "tcp", 80);
+
+        /* ESP-031: advertise identity instead of letting a client guess it.
+         *
+         * The hostname is not an identity. The app matches `kitchensync-*`, so this box
+         * -- named x32link-XXXX -- is invisible to it even now that it answers mDNS, the
+         * same way a real Touch (kstouch-dfd0) is. And the mirror failure is worse: a
+         * stranger's box named kitchensync-anything gets adopted into the fleet at a venue.
+         * Match on `dev`, not the name.
+         *
+         * `target` comes from the build (CONFIG_IDF_TARGET), never a typed-in string, so a
+         * client can REFUSE a cross-target OTA rather than ask the user to promise the .bin
+         * is right -- which is all POST /update can do today. */
+        MDNS.addServiceTxt("http", "tcp", "dev",    "kitchensync");
+        MDNS.addServiceTxt("http", "tcp", "model",  "x32link");
+        MDNS.addServiceTxt("http", "tcp", "target", CONFIG_IDF_TARGET);
+        MDNS.addServiceTxt("http", "tcp", "fw",     FW_VERSION);
+
+        Serial.printf("[X32Link] http://%s.local\n", g_ks_host);
+    } else {
+        Serial.println("[X32Link] WARN: mDNS failed — the app will not discover this unit");
+    }
     return true;
 }
 

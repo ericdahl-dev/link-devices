@@ -199,6 +199,7 @@ static void clock_out_task(void *arg)
      * separates the two possible causes: a large gap means the task was never scheduled
      * (starved / flash-cache stall), a large `work` means one of OUR calls blocked. */
     int64_t prev_end = 0;
+    int     applied_tempo_mbpm = -1;   /* ESP-037: last tempo pushed to mclock */
 
     /* P4-034: persists ACROSS ticks -- if the USB endpoint is busy the batch is held
      * and retried next tick rather than dropped. */
@@ -249,6 +250,15 @@ static void clock_out_task(void *arg)
         cfg     = g_cfg;
         cfg_gen = g_cfg_gen;
         xSemaphoreGive(g_cfg_mutex);
+
+        /* ESP-037: apply the user's set tempo to the master clock, on CHANGE. So a
+         * standalone P4 free-runs at the configured tempo with no Link at all (seeded the
+         * first tick), and a live /live edit applies within a tick. A Link session still
+         * wins -- the arbiter above ignores mclock whenever a peer is present. */
+        if (cfg.tempo_mbpm != applied_tempo_mbpm) {
+            master_clock_set_bpm(&mclock, (float)cfg.tempo_mbpm / 1000.0f);
+            applied_tempo_mbpm = cfg.tempo_mbpm;
+        }
 
         /* ARC-015: all the decisions (beat basis, the reprime fold, the per-output
          * clock fan-out, the transport action, the metronome-click gating) are the

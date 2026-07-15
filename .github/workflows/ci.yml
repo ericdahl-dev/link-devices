@@ -81,17 +81,8 @@ jobs:
             sketch: X32Link
             fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
             flags: "-DBOARD_WAVESHARE_S3_TOUCH_LCD_147"
-          # LED_RGB path (LNK-039) only compiles under this flag.
-          - name: X32Link (QT Py NeoPixel)
-            sketch: X32Link
-            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
-            flags: "-DBOARD_QTPY_ESP32S3"
-          # battery_gauge_io.cpp's Wire calls only compile under this flag -- opt-in
-          # per unit, so without its own leg it never gets compiled at all.
-          - name: X32Link (QT Py + LiPo BFF)
-            sketch: X32Link
-            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
-            flags: "-DBOARD_QTPY_ESP32S3 -DHAS_BATTERY_GAUGE"
+          # QT Py variant dropped (ESP-037): its 4/8 MB flash never fit the fleet's 16 MB
+          # partition story, and it was the odd board out. Super Mini + Waveshare only.
           - name: X32 emulator (ESP-002)
             sketch: X32_emulator
             fqbn: esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc
@@ -211,6 +202,15 @@ jobs:
             || { echo "build-bench.sh left the board flag swapped"; exit 1; }
           head -1 KitchenSyncTouch/partitions.csv | grep -q '16 MB' \
             || { echo "build-bench.sh left the DevKit partition table in place"; exit 1; }
+      # ESP-036: the headless Super Mini variant. Same job (the S3 core is already
+      # installed), so it costs one extra compile, not another runner. Keeps the third
+      # board from rotting -- a #ifdef nobody compiles is a #ifdef that silently breaks.
+      - name: Compile headless Super Mini via tools/build-supermini.sh
+        run: tools/build-supermini.sh
+      - name: HEAD must still be the product board (after Super Mini build)
+        run: |
+          grep -q '^#define BOARD_WAVESHARE_S3_TOUCH_LCD_147' KitchenSyncTouch/config.h \
+            || { echo "build-supermini.sh left the board flag swapped"; exit 1; }
 
   loralink-compile:
     name: Firmware compile (LoraLink)

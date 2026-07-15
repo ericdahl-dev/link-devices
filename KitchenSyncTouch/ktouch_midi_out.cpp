@@ -141,9 +141,22 @@ static void writer_task(void*) {
      * immediately rather than adding another whole tick on top. The clock grid stops
      * inheriting the scheduler's slop. */
     TickType_t next_wake = xTaskGetTickCount();
+    int s_applied_tempo_mbpm = -1;   // ESP-037
     for (;;) {
         uint32_t tk0 = micros();
         uint32_t gap = prev_end ? (tk0 - prev_end) : 0;
+
+        /* ESP-037: apply the user's set tempo to the master clock. The WRITER owns s_mc,
+         * so it reads g_config.tempo_mbpm (which the web task writes) and pushes it in on
+         * CHANGE -- no cross-thread write to s_mc, same live-read pattern as nudge/ppqn.
+         * This covers both cold boot (starts -1, so the configured tempo seeds the very
+         * first tick -> a standalone box free-runs at YOUR tempo with no Link ever) and a
+         * live /live edit. A Link session still wins: the arbiter ignores s_mc when a peer
+         * is present. */
+        if (g_config.tempo_mbpm != s_applied_tempo_mbpm) {
+            master_clock_set_bpm(&s_mc, (float)g_config.tempo_mbpm / 1000.0f);
+            s_applied_tempo_mbpm = g_config.tempo_mbpm;
+        }
 
         /* ESP-027: the beat basis comes from beat_source (ARC-007), NOT straight from the
          * Link phase estimate.
@@ -197,9 +210,12 @@ static void writer_task(void*) {
         // dropped banking + burst cap inside clock_output_step; nudge trims
         // only the CLOCK phase (+ve = ahead), tempo-relative so it holds
         // across tempo changes — transport START stays on the true bar.
-        // ppqn 24 / swing 0 until the Touch grows RATE + SWING config fields
-        // (ESP-017 parity; the derivation already supports both).
-        int n = clock_output_step(&s_out, beats, 24, g_config.nudge_mbeats, 0);
+        // ESP-030 pt3: rate + swing come from config now. The derivation always
+        // supported both (clock_output.c is the P4's, symlinked); the Touch simply
+        // had no fields to drive it, so it hardcoded 24/0. Defaults are 24/0, so a
+        // migrated device emits the exact clock it emitted yesterday.
+        int n = clock_output_step(&s_out, beats, g_config.ppqn,
+                                  g_config.nudge_mbeats, g_config.swing_mbeats);
         if (n > 1) s_bursts++;   // more than one pulse in a 1ms tick = catching up
 
         /* TRANSPORT FIRST, THEN CLOCK -- and the order is the whole point (ESP-023).

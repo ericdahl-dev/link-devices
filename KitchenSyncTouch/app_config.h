@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "ks_config.h"   // ESP-030: the SHARED WifiCred / KS_WIFI_SLOTS
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,11 +15,66 @@ extern "C" {
 // ARC-020: schema version for the persisted blob. Bump it whenever AppConfig's
 // layout changes, or a stale blob gets read at the wrong offsets. The
 // _Static_assert below turns "forgot to bump it" into a compile error.
-#define APP_CONFIG_VERSION 1u
+//
+// v2 (ESP-030): the single wifi_ssid/wifi_pass became wifi[KS_WIFI_SLOTS], the
+// same move the P4 made in ESP-013. A v1 blob is MIGRATED, never discarded --
+// see config_decode. One WiFi slot was a deficiency, not a design choice.
+// v3 (ESP-030 pt3): the Touch grows RATE + SWING. ktouch_midi_out.cpp said it out
+// loud -- "ppqn 24 / swing 0 until the Touch grows RATE + SWING config fields". The
+// clock ENGINE already does both (clock_output.c, symlinked in); there were simply
+// no config fields to drive it, so a client saw a SWING stepper that could never
+// work. A v2 blob is MIGRATED, never discarded.
+// v4 (ESP-037): a settable free-run tempo (tempo_mbpm). Standalone, with no Link
+// session, the box needs its own tempo -- and it powers on at the last one you set.
+// A v3 blob is MIGRATED, never discarded.
+#define APP_CONFIG_VERSION 4u
 
+// ESP-030: the v1 layout, FROZEN. This is a copy of what SHIPPED, not an alias of
+// the current struct: if the live struct changes, this must NOT follow, or the
+// migration would read v1 bytes at v2 offsets and hand a device someone else's
+// password. Nothing here may ever change.
 typedef struct {
     char wifi_ssid[64];
     char wifi_pass[64];
+    int  quantum_beats;
+    int  clock_enable;
+    int  transport_enable;
+    int  play_on_release;
+    int  nudge_mbeats;
+    int  brightness;
+} AppConfigV1;
+
+// ESP-030 pt3: the v2 layout, FROZEN. Bytes already in the field — the bench unit
+// holds one of these RIGHT NOW. Never edit it; the migration reads v2 bytes at v2
+// offsets, and getting that wrong hands a device someone else's password.
+typedef struct {
+    WifiCred wifi[KS_WIFI_SLOTS];
+    int  quantum_beats;
+    int  clock_enable;
+    int  transport_enable;
+    int  play_on_release;
+    int  nudge_mbeats;
+    int  brightness;
+} AppConfigV2;
+
+// ESP-037: the v3 layout, FROZEN. Bytes in the field the moment ESP-030 pt3 shipped
+// (ppqn + swing). Never edit -- the migration reads v3 bytes at v3 offsets.
+typedef struct {
+    WifiCred wifi[KS_WIFI_SLOTS];
+    int  quantum_beats;
+    int  clock_enable;
+    int  transport_enable;
+    int  play_on_release;
+    int  nudge_mbeats;
+    int  brightness;
+    int  ppqn;
+    int  swing_mbeats;
+} AppConfigV3;
+
+typedef struct {
+    // ESP-030: multiple saved networks, like the P4 (ESP-013). wifi[0].ssid empty
+    // => SoftAP config mode, same rule as KsConfig.
+    WifiCred wifi[KS_WIFI_SLOTS];
     int  quantum_beats;      // launch/phase quantize in Link beats (1..64). The web
                              // UI edits this in BARS (x4, 4/4); 4 beats = 1 bar.
     int  clock_enable;       // 0/1 — emit 24-PPQN MIDI clock on DIN
@@ -26,8 +82,22 @@ typedef struct {
     int  play_on_release;    // 0 = toggle on touch (digital DJ), 1 = on release (turntable)
     int  nudge_mbeats;       // DIN clock phase trim, millibeats (-250..250, tempo-
                              // relative). +ve = clock ahead; slides the RC-505 into
-                             // the pocket. Live via /nudge, no reboot.
+                             // the pocket. Live, no reboot.
     int  brightness;         // LCD backlight, percent (10..100). Live via /bright.
+
+    // ESP-030 pt3. The writer already knew how to do these -- clock_output.c does
+    // swing + nudge + ppqn, and it is symlinked in. It was hardcoding `ppqn 24 /
+    // swing 0 until the Touch grows RATE + SWING config fields`. Here they are.
+    // Same names, same units, same ranges as the P4's ClockOutputCfg, so a client
+    // edits ONE field per concept across the whole fleet.
+    int  ppqn;               // 1..48 pulses per beat: 24 = MIDI clock, 48 = x2, 12 = /2
+    int  swing_mbeats;       // 0..250 millibeats of off-eighth delay (0 = straight)
+
+    // ESP-037: settable free-run tempo, milli-BPM (128000 = 128.000 BPM). Drives the
+    // clock when SOLO -- a Link session still wins (master_clock_arbiter). Milli, like
+    // nudge/swing, so tap tempo's fractional BPM survives. Range MASTER_CLOCK_BPM_MIN..
+    // MAX * 1000.
+    int  tempo_mbpm;
 } AppConfig;
 
 // ARC-020: the size is not the safety mechanism — APP_CONFIG_VERSION is. This
@@ -42,8 +112,18 @@ typedef struct {
 #else
 #  define APP_CONFIG_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 #endif
-APP_CONFIG_STATIC_ASSERT(sizeof(AppConfig) == 152,
+APP_CONFIG_STATIC_ASSERT(sizeof(AppConfig) == 328,
     "AppConfig layout changed: bump APP_CONFIG_VERSION, then fix this size (ARC-020)");
+
+// ESP-030: the FROZEN v1 size. This one must never change — it is the length gate
+// the migration reads old blobs through. If this assert ever fires, someone has
+// edited a layout that already shipped, and every field device's config is at risk.
+APP_CONFIG_STATIC_ASSERT(sizeof(AppConfigV1) == 152,
+    "the v1 layout is FROZEN — it describes bytes already in the field (ESP-030)");
+APP_CONFIG_STATIC_ASSERT(sizeof(AppConfigV2) == 316,
+    "the v2 layout is FROZEN — the bench unit holds one of these (ESP-030 pt3)");
+APP_CONFIG_STATIC_ASSERT(sizeof(AppConfigV3) == 324,
+    "the v3 layout is FROZEN — field units shipped with ppqn+swing (ESP-037)");
 
 void config_defaults(AppConfig* cfg);
 
@@ -61,6 +141,9 @@ typedef enum {
     ACF_PLAY_ON_RELEASE,
     ACF_NUDGE_MBEATS,
     ACF_BRIGHTNESS,
+    ACF_PPQN,           // ESP-030 pt3
+    ACF_SWING_MBEATS,   // ESP-030 pt3
+    ACF_TEMPO_MBPM,     // ESP-037
 } AppConfigField;
 
 bool app_config_set(AppConfig* cfg, AppConfigField field, int value);
@@ -69,6 +152,15 @@ bool app_config_set(AppConfig* cfg, AppConfigField field, int value);
 typedef enum {
     CFG_DECODE_OK,          // blob accepted verbatim
     CFG_DECODE_DEFAULTED,   // blob absent/unversioned/wrong-version/wrong-size/invalid
+    // ESP-030: an OLD but READABLE blob, upgraded rather than thrown away.
+    //
+    // This case exists because the alternative is unacceptable: defaulting on a
+    // version bump makes every Touch in the field lose its WiFi credentials on the
+    // next boot, fall back to the KitchenSync-Setup SoftAP, and drop off the
+    // network. The P4 learned this in ESP-013 ("a version bump that silently
+    // forgot [wifi creds]"). The caller should WRITE THE UPGRADED BLOB BACK, or
+    // every future boot re-migrates.
+    CFG_DECODE_MIGRATED,
 } cfg_decode_result;
 
 // The one owner of "is this persisted blob safe to load?". *out always ends up a
