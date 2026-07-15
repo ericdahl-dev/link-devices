@@ -21,10 +21,10 @@
 #include "link_protocol.h"      // link_proto_timeline()
 #include "link_measurement.h"   // link_measurement_current_xform()
 #include "esp_timer.h"          // esp_timer_get_time()
-#include "app_config.h"         // quantum_beats
+#include "ks_config.h"          // ESP-042: the shared fleet config
 #include <Arduino.h>
 
-extern AppConfig g_config;
+extern KsConfig g_config;
 
 // Burst cap + reset-on-invalid live in clock_output (CLOCK_OUTPUT_MAX_BURST),
 // shared with X32Link's writer instead of copy-pasted into each task (ARC-019).
@@ -214,8 +214,8 @@ static void writer_task(void*) {
         // supported both (clock_output.c is the P4's, symlinked); the Touch simply
         // had no fields to drive it, so it hardcoded 24/0. Defaults are 24/0, so a
         // migrated device emits the exact clock it emitted yesterday.
-        int n = clock_output_step(&s_out, beats, g_config.ppqn,
-                                  g_config.nudge_mbeats, g_config.swing_mbeats);
+        int n = clock_output_step(&s_out, beats, g_config.clock[0].ppqn,
+                                  g_config.clock[0].phase_mbeats, g_config.clock[0].swing_mbeats);
         if (n > 1) s_bursts++;   // more than one pulse in a 1ms tick = catching up
 
         /* TRANSPORT FIRST, THEN CLOCK -- and the order is the whole point (ESP-023).

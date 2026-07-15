@@ -5,7 +5,7 @@
 // dropped. Do NOT symlink tempo_source.cpp too — this replaces it.
 #include "tempo_source.h"
 #include "config.h"
-#include "app_config.h"
+#include "ks_config.h"
 #include "link_listener.h"
 #include "link_measurement_io.h"
 #include "link_protocol.h"
@@ -16,7 +16,7 @@
 #include <Arduino.h>
 #include "esp_timer.h"
 
-extern AppConfig g_config;   // owned by the .ino
+extern KsConfig g_config;   // owned by the .ino
 
 extern "C" void tempo_source_select(int /*kind*/) { /* Link-only product */ }
 
@@ -28,7 +28,7 @@ extern "C" void tempo_source_pre_net(void) { /* no USB-MIDI (see ktouch_midi_out
 extern "C" void tempo_source_begin(void) {
     link_listener_begin();
     link_measurement_io_begin();
-    if (g_config.clock_enable) ktouch_midi_out_begin(MIDI_TX_GPIO);   // DIN 0xF8 task
+    if (g_config.clock_out_enable) ktouch_midi_out_begin(MIDI_TX_GPIO);   // DIN 0xF8 task
 }
 
 extern "C" void tempo_source_poll(void) {

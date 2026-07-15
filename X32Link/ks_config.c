@@ -26,6 +26,11 @@ void ks_config_defaults(KsConfig* c) {
         c->clock[i].follow_link  = 1;   // Link owns transport by default (ESP-011)
     }
     c->tempo_mbpm = 120000;   // ESP-037: 120.000 BPM (Link default) when solo
+    // ESP-042: the defaults the Touch's AppConfig used to carry.
+    c->quantum_beats    = 4;   // 1 bar (4/4)
+    c->transport_enable = 1;   // UI transport allowed
+    c->play_on_release  = 0;   // fire on touch, not release
+    c->lcd_brightness   = 80;  // LCD backlight %
 }
 
 bool ks_config_valid(const KsConfig* c) {
@@ -53,6 +58,11 @@ bool ks_config_valid(const KsConfig* c) {
     /* ESP-037: milli-BPM in the musical band (MASTER_CLOCK_BPM_MIN..MAX * 1000).
      * Literals, not the clock header -- this pure config must not pull in Link types. */
     if (c->tempo_mbpm < 20000 || c->tempo_mbpm > 300000) return false;
+    /* ESP-042: the Touch's fields. Same ranges AppConfig validated. */
+    if (c->quantum_beats < 1 || c->quantum_beats > 64) return false;
+    if (c->transport_enable != 0 && c->transport_enable != 1) return false;
+    if (c->play_on_release  != 0 && c->play_on_release  != 1) return false;
+    if (c->lcd_brightness < 10 || c->lcd_brightness > 100) return false;
     return true;
 }
 
@@ -110,6 +120,33 @@ bool ks_config_set(KsConfig* c, const char* key, const char* value) {
         int mbpm = (int)(atof(value) * 1000.0 + 0.5);
         if (mbpm < 20000 || mbpm > 300000) return false;
         c->tempo_mbpm = mbpm;
+        return true;
+    }
+    // ESP-042: the fleet fields. `quantum` is in BEATS (the Touch's web page converts its
+    // BARS control to beats before sending); `bright` is the LCD backlight, distinct from
+    // `led_bright` (the WS2812 strip).
+    if (strcmp(key, "quantum") == 0) {
+        int v = atoi(value);
+        if (v < 1 || v > 64) return false;
+        c->quantum_beats = v;
+        return true;
+    }
+    if (strcmp(key, "transport") == 0) {
+        int v = atoi(value);
+        if (v != 0 && v != 1) return false;
+        c->transport_enable = v;
+        return true;
+    }
+    if (strcmp(key, "play_rel") == 0) {
+        int v = atoi(value);
+        if (v != 0 && v != 1) return false;
+        c->play_on_release = v;
+        return true;
+    }
+    if (strcmp(key, "bright") == 0) {
+        int v = atoi(value);
+        if (v < 10 || v > 100) return false;
+        c->lcd_brightness = v;
         return true;
     }
     if (strcmp(key, "metronome") == 0) {
@@ -209,6 +246,12 @@ void ks_config_live_safe_copy(KsConfig* dst, const KsConfig* src) {
     dst->led_accent_color = src->led_accent_color;
     for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) dst->clock[o] = src->clock[o];
     dst->tempo_mbpm = src->tempo_mbpm;   /* ESP-037: a set tempo is a LIVE edit */
+    /* ESP-042: the fleet fields are all live -- no reboot to change quantize, the
+     * transport gate, the touch behaviour, or the backlight. */
+    dst->quantum_beats    = src->quantum_beats;
+    dst->transport_enable = src->transport_enable;
+    dst->play_on_release  = src->play_on_release;
+    dst->lcd_brightness   = src->lcd_brightness;
 }
 
 /* ESP-013: the v1 layout, FROZEN. This is a copy of what shipped, not an alias of
@@ -276,6 +319,27 @@ static void migrate_v3(KsConfig* out, const KsConfigV3* v3) {
     out->tempo_mbpm = 120000;           // the one field v3 never had
 }
 
+// ESP-042: the v4 layout, FROZEN -- KsConfig right before the fleet fields. It is
+// V3 + tempo_mbpm = the first (sizeof(KsConfig)-16) bytes of the live v5 struct, since
+// the four ESP-042 fields were appended at the end.
+typedef struct {
+    WifiCred wifi[KS_WIFI_SLOTS];
+    int  clock_out_enable, metronome_enable, metronome_accent, metronome_volume, metronome_voice;
+    ClockOutputCfg clock[KS_CLOCK_OUTPUTS];
+    int  led_enable, led_brightness, led_mode, led_fade, led_beat_color, led_accent_color;
+    int  follow_beat_enable;
+    int  tempo_mbpm;
+} KsConfigV4;
+_Static_assert(sizeof(KsConfigV4) == 440, "frozen v4 layout must not change (ESP-042 migration)");
+
+// v4 -> v5: every field carries; the four new fleet fields come up at their defaults
+// (quantum 4, transport on, fire-on-touch, LCD 80) -- what the Touch's AppConfig used,
+// and harmless on a P4 that ignores them.
+static void migrate_v4(KsConfig* out, const KsConfigV4* v4) {
+    ks_config_defaults(out);            // the four ESP-042 fields get their defaults first
+    memcpy(out, v4, sizeof(*v4));        // v4 layout == first 440 bytes of KsConfig
+}
+
 // P4-014: the single owner of "is this persisted blob safe to load?" — see ks_config.h.
 // Every gate is fail-closed: anything we can't positively vouch for becomes defaults,
 // because loading a stale layout puts garbage in fields the user never sees until a
@@ -304,6 +368,16 @@ ks_decode_result ks_config_decode(KsConfig* out, const void* blob, size_t blob_l
         memcpy(&v3, blob, sizeof(v3));
         KsConfig candidate;
         migrate_v3(&candidate, &v3);
+        if (!ks_config_valid(&candidate)) return KS_DECODE_DEFAULTED;
+        *out = candidate;
+        return KS_DECODE_MIGRATED;
+    }
+
+    if (version == 4u && blob_len == sizeof(KsConfigV4)) {   // ESP-042
+        KsConfigV4 v4;
+        memcpy(&v4, blob, sizeof(v4));
+        KsConfig candidate;
+        migrate_v4(&candidate, &v4);
         if (!ks_config_valid(&candidate)) return KS_DECODE_DEFAULTED;
         *out = candidate;
         return KS_DECODE_MIGRATED;
