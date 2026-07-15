@@ -310,11 +310,45 @@ void test_v3_blob_is_migrated_and_defaults_tempo(void) {
     KsConfig blob; make_good_blob(&blob);   // a valid v4 shape...
     blob.tempo_mbpm = 777000;               // ...but the v3 read stops before this byte
     KsConfig out;
-    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(KsConfig) - sizeof(int), true, 3u);
+    // v3 = 436 bytes = v5 (456) minus tempo_mbpm (ESP-037) minus the four fleet fields
+    // (ESP-042) = 5 ints appended after the v3 layout.
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(KsConfig) - 5 * sizeof(int), true, 3u);
     TEST_ASSERT_EQUAL_INT(KS_DECODE_MIGRATED, r);
     TEST_ASSERT_EQUAL_INT(42, out.metronome_volume);   // v3 fields preserved
     TEST_ASSERT_EQUAL_STRING("Studio", out.wifi[0].ssid);
     TEST_ASSERT_EQUAL_INT(120000, out.tempo_mbpm);     // DEFAULTED, not the 777 past the edge
+}
+
+// ESP-042: a v4 blob (the layout right before the fleet fields) is MIGRATED. The four
+// fleet fields are appended at the end, so a v4 blob is the first (sizeof(KsConfig)-16)
+// bytes of a v5 one; migrate reads those and defaults quantum/transport/play/lcd.
+void test_v4_blob_is_migrated_and_defaults_the_fleet_fields(void) {
+    KsConfig blob; make_good_blob(&blob);   // a valid v5 shape...
+    blob.quantum_beats = 999;               // ...but the v4 read stops before these bytes
+    blob.lcd_brightness = 999;
+    KsConfig out;
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(KsConfig) - 4 * sizeof(int), true, 4u);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_MIGRATED, r);
+    TEST_ASSERT_EQUAL_INT(42, out.metronome_volume);   // v4 fields preserved
+    TEST_ASSERT_EQUAL_STRING("Studio", out.wifi[0].ssid);
+    TEST_ASSERT_EQUAL_INT(4,  out.quantum_beats);      // DEFAULTED, not the 999 past the edge
+    TEST_ASSERT_EQUAL_INT(1,  out.transport_enable);
+    TEST_ASSERT_EQUAL_INT(80, out.lcd_brightness);
+}
+
+// ESP-042: the fleet form keys the Touch's config used to own, range-checked.
+void test_fleet_form_keys(void) {
+    KsConfig c2; ks_config_defaults(&c2);
+    TEST_ASSERT_TRUE(ks_config_set(&c2, "quantum", "16"));
+    TEST_ASSERT_EQUAL_INT(16, c2.quantum_beats);
+    TEST_ASSERT_FALSE(ks_config_set(&c2, "quantum", "0"));
+    TEST_ASSERT_TRUE(ks_config_set(&c2, "transport", "0"));
+    TEST_ASSERT_EQUAL_INT(0, c2.transport_enable);
+    TEST_ASSERT_TRUE(ks_config_set(&c2, "play_rel", "1"));
+    TEST_ASSERT_EQUAL_INT(1, c2.play_on_release);
+    TEST_ASSERT_TRUE(ks_config_set(&c2, "bright", "45"));
+    TEST_ASSERT_EQUAL_INT(45, c2.lcd_brightness);
+    TEST_ASSERT_FALSE(ks_config_set(&c2, "bright", "5"));   // < 10
 }
 
 // A blob from a DIFFERENT schema version: same size is not enough -- fields may
@@ -490,6 +524,8 @@ int main(void) {
     RUN_TEST(test_decode_accepts_current_version_blob);
     RUN_TEST(test_decode_legacy_unversioned_blob_falls_back_to_defaults);
     RUN_TEST(test_v3_blob_is_migrated_and_defaults_tempo);
+    RUN_TEST(test_v4_blob_is_migrated_and_defaults_the_fleet_fields);
+    RUN_TEST(test_fleet_form_keys);
     RUN_TEST(test_decode_version_mismatch_falls_back_to_defaults);
     RUN_TEST(test_decode_size_mismatch_falls_back_to_defaults);
     RUN_TEST(test_decode_absent_blob_yields_defaults);
