@@ -1,0 +1,16 @@
+# ESP-026 spike — S3-only sdkconfig defaults.
+#
+# ESP-IDF auto-loads this file ON TOP OF sdkconfig.defaults when, and only when, the
+# target is esp32s3 (i.e. after `idf.py set-target esp32s3`). It never affects the P4
+# build. The base sdkconfig.defaults is P4-tuned; its P4-only symbols (silicon rev,
+# the ESP-Hosted C6 slave, USB-host transfer size) are unknown on the S3 and are
+# ignored with harmless "unknown CONFIG_*" warnings. The 16MB flash + custom OTA
+# partition table it sets DO apply here and match the Waveshare S3-Touch-LCD-1.47
+# board (16MB N16R8) — the same layout KitchenSyncTouch ships (partitions_devkit.csv
+# is the separate 4MB DevKit table, not this board).
+
+# Bring the 1.47" touch LCD up by default on the S3 so a fresh `set-target esp32s3`
+# comes up display-enabled and only WiFi credentials need entering in menuconfig.
+# Spike convenience: productization will gate the display on a per-board Kconfig, not
+# on "every S3" — a headless S3 Super Mini has no panel. See ADR-0009 / ESP-026.
+CONFIG_KS_TOUCH_DISPLAY=y
