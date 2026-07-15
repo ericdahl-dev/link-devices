@@ -2,7 +2,7 @@ name: CI
 
 # Host-side Unity tests (pure logic, no hardware) + firmware compiles so a change
 # that passes host tests but breaks a real build is caught before merge:
-#   - X32Link  (ESP32-S3, arduino-cli): headless + Waveshare touch + QT Py NeoPixel variants
+#   - X32Link  (ESP32-S3, arduino-cli): headless (Super Mini) + Waveshare touch variants
 #   - X32_emulator (ESP32-S3 XIAO, arduino-cli): on-device X32 OSC test double
 #   - KitchenSync    (ESP32-P4, ESP-IDF): the hub-tier target (see ADR-0005)
 on:
@@ -75,11 +75,11 @@ jobs:
         include:
           - name: X32Link (headless)
             sketch: X32Link
-            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=min_spiffs
             flags: ""
           - name: X32Link (Waveshare touch)
             sketch: X32Link
-            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=min_spiffs
             flags: "-DBOARD_WAVESHARE_S3_TOUCH_LCD_147"
           # QT Py variant dropped (ESP-037): its 4/8 MB flash never fit the fleet's 16 MB
           # partition story, and it was the odd board out. Super Mini + Waveshare only.
