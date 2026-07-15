@@ -131,9 +131,9 @@ void setup() {
     config_load(&g_config);   // NVS
     // First boot with no saved SSID: seed from the compile-time secrets so a bench
     // unit connects; a shipped unit is configured through the SoftAP + web form.
-    if (g_config.wifi_ssid[0] == '\0' && sizeof(KSTOUCH_WIFI_SSID) > 1) {
-        strlcpy(g_config.wifi_ssid, KSTOUCH_WIFI_SSID, sizeof(g_config.wifi_ssid));
-        strlcpy(g_config.wifi_pass, KSTOUCH_WIFI_PASS, sizeof(g_config.wifi_pass));
+    if (g_config.wifi[0].ssid[0] == '\0' && sizeof(KSTOUCH_WIFI_SSID) > 1) {
+        strlcpy(g_config.wifi[0].ssid, KSTOUCH_WIFI_SSID, sizeof(g_config.wifi[0].ssid));
+        strlcpy(g_config.wifi[0].pass, KSTOUCH_WIFI_PASS, sizeof(g_config.wifi[0].pass));
     }
 
 #ifdef HAS_TOUCH_DISPLAY
@@ -145,20 +145,30 @@ void setup() {
     tempo_source_select(TEMPO_SRC_LINK);
     tempo_source_pre_net();
 
-    if (g_config.wifi_ssid[0] == '\0') {
+    if (g_config.wifi[0].ssid[0] == '\0') {
         start_ap();
     } else {
         WiFi.mode(WIFI_STA);
         WiFi.setSleep(false);   // modem sleep drops buffered multicast -> Link never rx
-        WiFi.begin(g_config.wifi_ssid, g_config.wifi_pass);
-        Serial.printf("[KSTouch] joining %s", g_config.wifi_ssid);
+        WiFi.begin(g_config.wifi[0].ssid, g_config.wifi[0].pass);
+        Serial.printf("[KSTouch] joining %s", g_config.wifi[0].ssid);
         uint32_t t0 = millis();
         while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) { delay(250); Serial.print("."); }
         Serial.println();
         if (WiFi.status() == WL_CONNECTED) {
             uint8_t mac[6]; WiFi.macAddress(mac);
             snprintf(g_ks_host, sizeof(g_ks_host), "kstouch-%02x%02x", mac[4], mac[5]);
-            if (MDNS.begin(g_ks_host)) MDNS.addService("http", "tcp", 80);
+            if (MDNS.begin(g_ks_host)) {
+                MDNS.addService("http", "tcp", 80);
+                /* ESP-031: this unit advertises as kstouch-XXXX, which does not match the
+                 * app's `kitchensync-*` hostname filter -- so a real Touch is invisible to
+                 * it. Publish identity in TXT and let the client match on `dev`. `target`
+                 * is the build's, so a client can refuse a cross-target OTA. */
+                MDNS.addServiceTxt("http", "tcp", "dev",    "kitchensync");
+                MDNS.addServiceTxt("http", "tcp", "model",  "touch");
+                MDNS.addServiceTxt("http", "tcp", "target", CONFIG_IDF_TARGET);
+                MDNS.addServiceTxt("http", "tcp", "fw",     FW_VERSION);
+            }
             Serial.printf("[KSTouch] ip %s  http://%s.local\n",
                           WiFi.localIP().toString().c_str(), g_ks_host);
             tempo_source_begin();   // Link + the DIN clock task
