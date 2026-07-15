@@ -28,6 +28,31 @@ void test_set_bpm_computes_micros_per_beat(void) {
     TEST_ASSERT_EQUAL_INT64(500000, mc.micros_per_beat);
 }
 
+// ESP-037: a user-set tempo drives the DIN clock when solo, so a garbage value must not
+// reach the writer. set_bpm guarded only bpm<=0 -- 5000 BPM sailed through as a valid-
+// looking micros_per_beat=12000 and would have clocked an RC-505 at a nonsense rate.
+// Out of the musical range -> rejected, current tempo KEPT (the config-validate rule:
+// keep the change only if it holds).
+void test_set_bpm_rejects_a_non_musical_tempo(void) {
+    master_clock_set_bpm(&mc, 128.0f);
+    int64_t good = mc.micros_per_beat;
+
+    master_clock_set_bpm(&mc, 5000.0f);                     // way too fast
+    TEST_ASSERT_EQUAL_INT64(good, mc.micros_per_beat);      // unchanged
+    master_clock_set_bpm(&mc, 3.0f);                        // sub-musical
+    TEST_ASSERT_EQUAL_INT64(good, mc.micros_per_beat);      // unchanged
+}
+
+// The edges of the accepted band are IN. A clock box that rejects 300 BPM because the
+// constant was one too low is its own bug.
+void test_set_bpm_accepts_the_range_edges(void) {
+    master_clock_set_bpm(&mc, (float)MASTER_CLOCK_BPM_MIN);
+    TEST_ASSERT_TRUE(mc.has_tempo);
+    master_clock_reset(&mc);
+    master_clock_set_bpm(&mc, (float)MASTER_CLOCK_BPM_MAX);
+    TEST_ASSERT_TRUE(mc.has_tempo);
+}
+
 // Two taps 500ms apart -> 120 bpm. The first tap alone can't compute an
 // interval; has_tempo only flips true on the second.
 void test_two_taps_compute_tempo(void) {
@@ -99,6 +124,8 @@ void test_arbiter_rejoin_defers_to_link(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_set_bpm_computes_micros_per_beat);
+    RUN_TEST(test_set_bpm_rejects_a_non_musical_tempo);
+    RUN_TEST(test_set_bpm_accepts_the_range_edges);
     RUN_TEST(test_two_taps_compute_tempo);
     RUN_TEST(test_stale_gap_does_not_compute_tempo);
     RUN_TEST(test_arbiter_defers_to_link_when_peers_present);

@@ -175,6 +175,45 @@ void test_v1_still_migrates_after_v3_exists(void) {
     TEST_ASSERT_EQUAL_INT(24, out.ppqn);
 }
 
+// ---- ESP-037: v3 -> v4, the Touch grows a SETTABLE TEMPO ------------------
+//
+// The bench Super Mini holds a v3 blob RIGHT NOW. Same hazard as every bump: default
+// on a version mismatch and it loses WiFi, drops to SoftAP.
+static void make_v3_blob(AppConfigV3* v3) {
+    memset(v3, 0, sizeof(*v3));
+    strcpy(v3->wifi[0].ssid, "Bench-2G");
+    strcpy(v3->wifi[0].pass, "not-a-real-pass");
+    strcpy(v3->wifi[1].ssid, "Backline");
+    v3->quantum_beats = 4;
+    v3->clock_enable  = 1;
+    v3->nudge_mbeats  = -35;
+    v3->brightness    = 80;
+    v3->ppqn          = 24;
+    v3->swing_mbeats  = 90;
+}
+
+// THE ONE THAT MATTERS. The bench board must keep its network across the bump.
+void test_v3_blob_is_migrated_and_keeps_wifi_and_settings(void) {
+    AppConfigV3 v3; make_v3_blob(&v3);
+    AppConfig out;
+    cfg_decode_result r = config_decode(&out, &v3, sizeof(v3), true, 3u);
+
+    TEST_ASSERT_EQUAL_INT(CFG_DECODE_MIGRATED, r);
+    TEST_ASSERT_EQUAL_STRING("Bench-2G", out.wifi[0].ssid);
+    TEST_ASSERT_EQUAL_STRING("Backline", out.wifi[1].ssid);
+    TEST_ASSERT_EQUAL_INT(-35, out.nudge_mbeats);
+    TEST_ASSERT_EQUAL_INT(90,  out.swing_mbeats);
+}
+
+// v3 had no tempo. The new field comes up at its DEFAULT -- 120 BPM (Link default), so
+// a migrated box free-runs at 120 exactly as it did before tempo was settable.
+void test_v3_migration_defaults_the_tempo(void) {
+    AppConfigV3 v3; make_v3_blob(&v3);
+    AppConfig out;
+    config_decode(&out, &v3, sizeof(v3), true, 3u);
+    TEST_ASSERT_EQUAL_INT(120000, out.tempo_mbpm);
+}
+
 // Swing/rate must VALIDATE. Garbage in the form must not reach the clock writer.
 void test_rate_and_swing_are_range_checked(void) {
     TEST_ASSERT_TRUE(app_config_set(&c, ACF_SWING_MBEATS, 120));
@@ -188,6 +227,16 @@ void test_rate_and_swing_are_range_checked(void) {
     TEST_ASSERT_FALSE(app_config_set(&c, ACF_PPQN, 0));
     TEST_ASSERT_FALSE(app_config_set(&c, ACF_PPQN, 49));
     TEST_ASSERT_EQUAL_INT(48, c.ppqn);
+}
+
+// ESP-037: settable free-run tempo, stored as milli-BPM (nudge/swing already use milli).
+// Range = MASTER_CLOCK_BPM_MIN..MAX * 1000. Garbage must not reach the clock writer.
+void test_tempo_is_range_checked(void) {
+    TEST_ASSERT_TRUE(app_config_set(&c, ACF_TEMPO_MBPM, 128000));   // 128.000 BPM
+    TEST_ASSERT_EQUAL_INT(128000, c.tempo_mbpm);
+    TEST_ASSERT_FALSE(app_config_set(&c, ACF_TEMPO_MBPM, 19999));   // < 20 BPM
+    TEST_ASSERT_FALSE(app_config_set(&c, ACF_TEMPO_MBPM, 300001));  // > 300 BPM
+    TEST_ASSERT_EQUAL_INT(128000, c.tempo_mbpm);                    // unchanged
 }
 
 void test_defaults_valid(void) {
@@ -333,6 +382,9 @@ int main(void) {
     RUN_TEST(test_v2_migration_defaults_the_new_rate_and_swing_fields);
     RUN_TEST(test_v1_still_migrates_after_v3_exists);
     RUN_TEST(test_rate_and_swing_are_range_checked);
+    RUN_TEST(test_tempo_is_range_checked);
+    RUN_TEST(test_v3_blob_is_migrated_and_keeps_wifi_and_settings);
+    RUN_TEST(test_v3_migration_defaults_the_tempo);
     // ESP-030 migration — the tests that stop a field device losing its network.
     RUN_TEST(test_v1_blob_is_migrated_and_keeps_its_wifi_credentials);
     RUN_TEST(test_v1_migration_preserves_the_other_settings);

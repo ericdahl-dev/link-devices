@@ -32,6 +32,14 @@ void master_clock_reset(MasterClock* mc);
 // instead of computing a tempo from it (stale double-tap guard).
 #define MASTER_CLOCK_TAP_TIMEOUT_US 2000000
 
+// ESP-037: the musical band a user-set tempo may land in. A settable tempo means a
+// client (or a fat-fingered tap) can hand this any float, and set_bpm feeds the DIN
+// clock writer directly -- so anything outside the band is REJECTED, not clocked. 20
+// covers the slowest ballad; 300 covers fast DnB/footwork. Widen here if a genre needs
+// it -- both the firmware and the app clamp to the same pair.
+#define MASTER_CLOCK_BPM_MIN 20
+#define MASTER_CLOCK_BPM_MAX 300
+
 void master_clock_tap(MasterClock* mc, int64_t now_us);
 void master_clock_set_bpm(MasterClock* mc, float bpm);
 
