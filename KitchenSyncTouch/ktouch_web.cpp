@@ -652,6 +652,24 @@ void ktouch_web_begin(void) {
 
 void ktouch_web_tick(void) {
     server.handleClient();
+
+    /* ESP-037: while a Link session is DRIVING, remember its tempo as ours. Link teaches
+     * the box the tempo; when Link goes away the box keeps playing it (the arbiter's
+     * free-run seed), and now it also PERSISTS, so a power-cycle comes back at the last
+     * tempo it actually played -- no jump, no surprise reset to an old manual value.
+     *
+     * Only while peers>0: solo, g_config.tempo_mbpm is the user's own set tempo and the
+     * writer applies it, so mirroring here would fight that. Marked (debounced), not
+     * written -- a stable Link tempo persists once; an Ableton tempo ramp coalesces. */
+    if (link_proto_peers() > 0) {
+        float b = ktouch_midi_bpm();
+        int eff = (int)(b * 1000.0f + 0.5f);
+        if (eff >= 20000 && eff <= 300000 && eff != g_config.tempo_mbpm) {
+            g_config.tempo_mbpm = eff;
+            config_persist_mark(&s_persist, millis());
+        }
+    }
+
     // ARC-022: write the blob once the live edits have settled. loop() calls this
     // every ~5 ms, and due() is a couple of unsigned compares when nothing is owed,
     // so polling it here is free. The write itself is rare by construction -- once
