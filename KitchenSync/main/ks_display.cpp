@@ -13,12 +13,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/ledc.h"
+#include "driver/gpio.h"
+#include "driver/i2c_master.h"
 #include "esp_log.h"
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 
 #include "fw_version.h"
+#include "axs5106l.h"     // ESP-026 inc3: pure, host-tested AXS5106L report parser (X32Link)
 
 static const char *TAG = "ks_display";
 
@@ -52,7 +55,14 @@ public:
 #define SCR_W    320
 #define SCR_H    172
 
+// Touch (AXS5106L, I2C 0x63) — same pins as KitchenSyncTouch/ktouch_display.cpp.
+#define TP_SDA   42
+#define TP_SCL   41
+#define TP_RST   47
+
 static LGFX s_lcd;
+static i2c_master_bus_handle_t s_i2c_bus = NULL;
+static i2c_master_dev_handle_t s_touch   = NULL;
 
 // ---- Backlight: ledc PWM on GPIO46 (replaces Arduino analogWrite). ----------------
 #define BL_TIMER    LEDC_TIMER_0
@@ -99,6 +109,44 @@ static void draw_hello(void) {
     s_lcd.setCursor(8, SCR_H - 14); s_lcd.print("fw "); s_lcd.println(FW_VERSION);
 }
 
+// ---- AXS5106L touch over i2c_master (replaces Arduino Wire + pinMode/delay). ------
+static void touch_init(void) {
+    // Reset pulse on TP_RST, then bring up the I2C bus (order matches the Arduino glue).
+    gpio_config_t rst = {};
+    rst.pin_bit_mask = 1ULL << TP_RST;
+    rst.mode = GPIO_MODE_OUTPUT;
+    gpio_config(&rst);
+    gpio_set_level((gpio_num_t)TP_RST, 0); vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level((gpio_num_t)TP_RST, 1); vTaskDelay(pdMS_TO_TICKS(80));
+
+    i2c_master_bus_config_t bus = {};
+    bus.i2c_port                 = I2C_NUM_0;
+    bus.sda_io_num               = (gpio_num_t)TP_SDA;
+    bus.scl_io_num               = (gpio_num_t)TP_SCL;
+    bus.clk_source               = I2C_CLK_SRC_DEFAULT;
+    bus.glitch_ignore_cnt        = 7;
+    bus.flags.enable_internal_pullup = true;
+    if (i2c_new_master_bus(&bus, &s_i2c_bus) != ESP_OK) { ESP_LOGE(TAG, "i2c bus init failed"); return; }
+
+    i2c_device_config_t dev = {};
+    dev.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev.device_address  = AXS5106L_I2C_ADDR;
+    dev.scl_speed_hz    = 400000;
+    if (i2c_master_bus_add_device(s_i2c_bus, &dev, &s_touch) != ESP_OK)
+        ESP_LOGE(TAG, "i2c add device failed");
+}
+
+// I2C read (write reg 0x01, then read the 14-byte report) + pure parse. The decode
+// lives in the host-tested axs5106l.c; this glue owns only the bus transaction.
+static bool read_touch(axs_touch_t *t) {
+    if (!s_touch) return false;
+    uint8_t reg = AXS5106L_TOUCH_REG;
+    if (i2c_master_transmit(s_touch, &reg, 1, 50) != ESP_OK) return false;
+    uint8_t buf[AXS5106L_REPORT_LEN];
+    if (i2c_master_receive(s_touch, buf, sizeof(buf), 50) != ESP_OK) return false;
+    return axs5106l_parse(buf, sizeof(buf), t) == 0;
+}
+
 static void display_task(void *arg) {
     (void)arg;
     ESP_LOGI(TAG, "display_task: init panel");
@@ -108,8 +156,24 @@ static void display_task(void *arg) {
     draw_hello();
     ESP_LOGI(TAG, "display_task: panel up, %dx%d", (int)s_lcd.width(), (int)s_lcd.height());
 
-    // Increment 2 will replace this idle loop with live BPM/sync from beat_source.
-    for (;;) vTaskDelay(pdMS_TO_TICKS(100));
+    touch_init();
+    ESP_LOGI(TAG, "display_task: touch ready — tap the glass");
+
+    // Increment 3: echo the last tap (raw controller coords) on screen + serial, to
+    // prove the AXS5106L i2c path and the shared axs5106l.c parser. Coordinate rotation
+    // and hit-testing (the pure ktouch_ui.c) come in a later increment.
+    axs_touch_t t;
+    for (;;) {
+        if (read_touch(&t) && t.points_len > 0) {
+            ESP_LOGI(TAG, "touch: count=%d p0=(%u,%u)", t.count,
+                     (unsigned)t.points[0].x, (unsigned)t.points[0].y);
+            s_lcd.fillRect(0, 120, SCR_W, 30, TFT_BLACK);
+            s_lcd.setTextColor(0x36B6FFu, TFT_BLACK); s_lcd.setTextSize(2);
+            s_lcd.setCursor(8, 124);
+            s_lcd.printf("TAP %u,%u", (unsigned)t.points[0].x, (unsigned)t.points[0].y);
+        }
+        vTaskDelay(pdMS_TO_TICKS(33));
+    }
 }
 
 extern "C" void ks_display_start(void) {
