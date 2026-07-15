@@ -109,6 +109,13 @@ typedef struct {
 // No I/O: the caller emits the plan (USB packets, speaker click, LED). Pure.
 KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in);
 
+// ESP-038: the ordered System Real-Time bytes for output `out` this tick — the
+// 0xFA/0xFC transport edge (if any) FIRST, then plan.pulses[out] x 0xF8. The ORDER
+// is the invariant (ESP-023: a slave starting on this downbeat must see START before
+// its first clock). Owned and host-tested here, once, instead of implied by the loop
+// order of two 1 ms writer glue tasks. Returns bytes written (<= cap); never overflows.
+int ks_tick_out_bytes(const KsTickPlan* p, int out, uint8_t* buf, int cap);
+
 #ifdef __cplusplus
 }
 #endif
