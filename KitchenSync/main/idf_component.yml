@@ -19,9 +19,12 @@ dependencies:
   espressif/mdns: "^1.8.0"
   # ESP-026 spike: the 1.47" touch LCD lives only on the Waveshare S3 board. LovyanGFX
   # drives ESP-IDF's SPI natively, so the same Panel_ST7789 config as the Arduino Touch
-  # sketch carries over. Pulled only for the S3 target; gated further by the
-  # CONFIG_KS_TOUCH_DISPLAY Kconfig flag (a headless S3 leaves it off).
-  lovyan03/LovyanGFX:
-    version: "^1.1.16"
+  # sketch carries over. It is NOT in the Espressif component registry, so pull it as a
+  # git dependency PINNED to tag 1.2.21 — the exact version the Arduino firmware already
+  # ships (THIRD_PARTY.md, BSD-2-Clause). Cloned into managed_components/ at build time,
+  # gated to the S3 target; CONFIG_KS_TOUCH_DISPLAY gates it further (headless S3 off).
+  lovyangfx:
+    git: https://github.com/lovyan03/LovyanGFX.git
+    version: "1.2.21"
     rules:
       - if: "target in [esp32s3]"
