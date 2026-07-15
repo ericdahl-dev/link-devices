@@ -79,7 +79,8 @@ static void backlight_init(void) {
 }
 
 extern "C" void ks_display_set_brightness(int pct) {
-    if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
     ledc_set_duty(BL_MODE, BL_CHANNEL, (uint32_t)(pct * 255 / 100));
     ledc_update_duty(BL_MODE, BL_CHANNEL);
 }
