@@ -208,6 +208,7 @@ void ks_config_live_safe_copy(KsConfig* dst, const KsConfig* src) {
     dst->led_beat_color   = src->led_beat_color;
     dst->led_accent_color = src->led_accent_color;
     for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) dst->clock[o] = src->clock[o];
+    dst->tempo_mbpm = src->tempo_mbpm;   /* ESP-037: a set tempo is a LIVE edit */
 }
 
 /* ESP-013: the v1 layout, FROZEN. This is a copy of what shipped, not an alias of
