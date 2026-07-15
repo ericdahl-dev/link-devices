@@ -194,3 +194,13 @@ uint32_t ks_tick_dropped(const KsTickState* st) {
     for (int i = 0; i < KS_CLOCK_OUTPUTS; i++) live += st->cts[i].dropped;
     return st->dropped_total + live;
 }
+
+int ks_tick_out_bytes(const KsTickPlan* p, int out, uint8_t* buf, int cap) {
+    int n = 0;
+    /* Transport edge FIRST — this is the ESP-023 invariant, and the whole reason
+     * this lives in one tested place instead of in glue loop order. */
+    if (p->transport[out] == TRANSPORT_START && n < cap)      buf[n++] = 0xFA;
+    else if (p->transport[out] == TRANSPORT_STOP && n < cap)  buf[n++] = 0xFC;
+    for (int i = 0; i < p->pulses[out] && n < cap; i++)       buf[n++] = 0xF8;
+    return n;
+}
