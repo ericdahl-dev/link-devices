@@ -33,7 +33,7 @@ jobs:
       # X32Link's 4 variants: same FQBN, differing only by build_opt.h -- exactly as
       # ci.yml already compiles them. min_spiffs so every flashed image lands on an
       # OTA-capable table and can use /update afterwards without a second USB trip.
-      X32_FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=min_spiffs
+      X32_FQBN: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom
       # KitchenSync Touch ships its own partitions.csv (16MB, dual-OTA, 4MB app slots).
       # PartitionScheme=custom is what makes the core USE that file -- without it the core
       # silently falls back to its 4MB default table and the app slot is 1.25MB.
