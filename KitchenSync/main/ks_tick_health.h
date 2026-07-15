@@ -36,6 +36,9 @@ extern "C" {
  * measurement -- unlike X32Link, whose writer exists only when clock-out is enabled. */
 bool ks_tick_health(WebTickHealth* out);
 
+// ESP-037: the tempo the clock is actually running (settled value; survives peer loss).
+float ks_clock_effective_bpm(void);
+
 #ifdef __cplusplus
 }
 #endif
