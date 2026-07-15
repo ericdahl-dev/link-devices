@@ -43,7 +43,11 @@ typedef struct {
 //   exists to abolish. See ks_config_decode().
 // v4 (ESP-037): a settable free-run tempo (tempo_mbpm). Drives the clock when SOLO; a
 //   Link session still wins. A v3 blob is MIGRATED, never discarded.
-#define KS_CONFIG_VERSION 4u
+// v5 (ESP-042): KsConfig becomes the FLEET config -- the Touch retires its own AppConfig
+//   and stores this. It brings four fields that were AppConfig-only: quantum_beats,
+//   transport_enable, play_on_release, lcd_brightness. The P4 defaults them (it hardcodes
+//   its quantum and has no LCD); a v4 blob is MIGRATED, never discarded.
+#define KS_CONFIG_VERSION 5u
 
 // One configurable clock output (routed to a USB-MIDI cable). Division, phase and
 // swing are the E-RM-Multiclock-style controls.
@@ -84,6 +88,18 @@ typedef struct {
     // clock when SOLO -- a Link session still wins (master_clock_arbiter). Milli so tap
     // tempo's fractional BPM survives. Range MASTER_CLOCK_BPM_MIN..MAX * 1000.
     int  tempo_mbpm;
+
+    // ESP-042: fields the Touch's AppConfig owned before the fleet converged on ONE
+    // config. The P4 defaults them today (it hardcodes its quantum, drives transport per
+    // output via follow_link, and has no touch screen or LCD) -- they are here so a
+    // single struct, migration, and live-safe list serve both products.
+    int  quantum_beats;     // launch/phase quantize in Link beats (1..64). Web UI edits
+                            // BARS (x4). The Touch's transport arms to this; the P4
+                            // currently hardcodes 4 (KS_TICK_METRO_QUANTUM).
+    int  transport_enable;  // 0/1 -- allow PLAY/STOP from the device's own UI (Touch).
+    int  play_on_release;   // 0 = fire on touch, 1 = on release (Touch turntable feel).
+    int  lcd_brightness;    // 10..100 -- LCD backlight %, distinct from led_brightness
+                            // (the WS2812 strip). The Touch has a screen; the P4 does not.
 } KsConfig;
 
 // P4-014 tripwire. sizeof alone can't detect a same-size field reorder, so it is
@@ -100,7 +116,7 @@ typedef struct {
 #else
 #  define KS_CONFIG_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 #endif
-KS_CONFIG_STATIC_ASSERT(sizeof(KsConfig) == 440,
+KS_CONFIG_STATIC_ASSERT(sizeof(KsConfig) == 456,
                "KsConfig layout changed: bump KS_CONFIG_VERSION, then fix this size (P4-014)");
 
 void ks_config_defaults(KsConfig* c);

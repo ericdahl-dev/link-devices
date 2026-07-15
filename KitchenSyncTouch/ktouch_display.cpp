@@ -10,14 +10,14 @@
 #include <math.h>
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
-#include "app_config.h"
+#include "ks_config.h"
 #include "tempo_source.h"
 #include "axs5106l.h"
 #include "ktouch_ui.h"
 #include "ktouch_transport.h"
 #include "transport_launch.h"
 
-extern AppConfig g_config;
+extern KsConfig g_config;
 extern char g_ks_host[];
 extern bool g_ap_mode;   // true = SoftAP setup: show how to connect, not a name
 
@@ -133,7 +133,7 @@ static void draw_frame(void) {
 void ktouch_display_begin(void) {
     s_lcd.init();
     s_lcd.setRotation(7);   // landscape 320x172
-    backlight_apply(g_config.brightness);
+    backlight_apply(g_config.lcd_brightness);
     draw_frame();
     draw_toggle(TL_STOPPED); s_shown_state = TL_STOPPED;
     pinMode(TP_RST, OUTPUT);
