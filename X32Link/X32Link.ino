@@ -352,7 +352,11 @@ static bool wifi_try_connect() {
          * `target` comes from the build (CONFIG_IDF_TARGET), never a typed-in string, so a
          * client can REFUSE a cross-target OTA rather than ask the user to promise the .bin
          * is right -- which is all POST /update can do today. */
-        MDNS.addServiceTxt("http", "tcp", "dev",    "kitchensync");
+        // ESP-037: X32Link is its OWN product, not a KitchenSync. It publishes dev=x32link
+        // so the KitchenSync app (which matches dev=kitchensync) does not pick it up -- it
+        // has its own app. It shares the fleet PROTOCOL (Link, /status, /config.json), not
+        // the product identity.
+        MDNS.addServiceTxt("http", "tcp", "dev",    "x32link");
         MDNS.addServiceTxt("http", "tcp", "model",  "x32link");
         MDNS.addServiceTxt("http", "tcp", "target", CONFIG_IDF_TARGET);
         MDNS.addServiceTxt("http", "tcp", "fw",     FW_VERSION);
