@@ -44,6 +44,17 @@ generator, config) is **Arduino-free and portable across hardware targets** —
 which is exactly what makes the P4 tier cheap to spin up. `docs/adr/0004` records
 the touch-vs-web config split.
 
+KitchenSync is an embedded **synchronization platform**; Ableton Link is one
+supported input protocol, not the identity of the system. For the whole-platform
+picture — product family, timing pipeline, control-plane boundary, and where this
+is going — start here:
+
+- [`docs/architecture/system-overview.md`](docs/architecture/system-overview.md) — the source of truth for current state.
+- [`docs/architecture/repository-roadmap.md`](docs/architecture/repository-roadmap.md) — the `ks-*` direction and its triggers.
+- [`docs/architecture/alignment-report.md`](docs/architecture/alignment-report.md) — aligned / technical-debt / future-evolution snapshot.
+- [`docs/contracts/firmware-http-contract.md`](docs/contracts/firmware-http-contract.md) — the firmware↔client HTTP + Bonjour API.
+- [`docs/adr/`](docs/adr/) — the numbered decision log (0003–0014).
+
 ## Build / test
 
 - **Host tests:** `make -C test` (Unity is vendored in `lib/unity/` — no submodule).
