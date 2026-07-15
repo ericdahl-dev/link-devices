@@ -24,7 +24,10 @@ extern "C" {
 // clock ENGINE already does both (clock_output.c, symlinked in); there were simply
 // no config fields to drive it, so a client saw a SWING stepper that could never
 // work. A v2 blob is MIGRATED, never discarded.
-#define APP_CONFIG_VERSION 3u
+// v4 (ESP-037): a settable free-run tempo (tempo_mbpm). Standalone, with no Link
+// session, the box needs its own tempo -- and it powers on at the last one you set.
+// A v3 blob is MIGRATED, never discarded.
+#define APP_CONFIG_VERSION 4u
 
 // ESP-030: the v1 layout, FROZEN. This is a copy of what SHIPPED, not an alias of
 // the current struct: if the live struct changes, this must NOT follow, or the
@@ -54,6 +57,20 @@ typedef struct {
     int  brightness;
 } AppConfigV2;
 
+// ESP-037: the v3 layout, FROZEN. Bytes in the field the moment ESP-030 pt3 shipped
+// (ppqn + swing). Never edit -- the migration reads v3 bytes at v3 offsets.
+typedef struct {
+    WifiCred wifi[KS_WIFI_SLOTS];
+    int  quantum_beats;
+    int  clock_enable;
+    int  transport_enable;
+    int  play_on_release;
+    int  nudge_mbeats;
+    int  brightness;
+    int  ppqn;
+    int  swing_mbeats;
+} AppConfigV3;
+
 typedef struct {
     // ESP-030: multiple saved networks, like the P4 (ESP-013). wifi[0].ssid empty
     // => SoftAP config mode, same rule as KsConfig.
@@ -75,6 +92,12 @@ typedef struct {
     // edits ONE field per concept across the whole fleet.
     int  ppqn;               // 1..48 pulses per beat: 24 = MIDI clock, 48 = x2, 12 = /2
     int  swing_mbeats;       // 0..250 millibeats of off-eighth delay (0 = straight)
+
+    // ESP-037: settable free-run tempo, milli-BPM (128000 = 128.000 BPM). Drives the
+    // clock when SOLO -- a Link session still wins (master_clock_arbiter). Milli, like
+    // nudge/swing, so tap tempo's fractional BPM survives. Range MASTER_CLOCK_BPM_MIN..
+    // MAX * 1000.
+    int  tempo_mbpm;
 } AppConfig;
 
 // ARC-020: the size is not the safety mechanism — APP_CONFIG_VERSION is. This
@@ -89,7 +112,7 @@ typedef struct {
 #else
 #  define APP_CONFIG_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 #endif
-APP_CONFIG_STATIC_ASSERT(sizeof(AppConfig) == 324,
+APP_CONFIG_STATIC_ASSERT(sizeof(AppConfig) == 328,
     "AppConfig layout changed: bump APP_CONFIG_VERSION, then fix this size (ARC-020)");
 
 // ESP-030: the FROZEN v1 size. This one must never change — it is the length gate
@@ -99,6 +122,8 @@ APP_CONFIG_STATIC_ASSERT(sizeof(AppConfigV1) == 152,
     "the v1 layout is FROZEN — it describes bytes already in the field (ESP-030)");
 APP_CONFIG_STATIC_ASSERT(sizeof(AppConfigV2) == 316,
     "the v2 layout is FROZEN — the bench unit holds one of these (ESP-030 pt3)");
+APP_CONFIG_STATIC_ASSERT(sizeof(AppConfigV3) == 324,
+    "the v3 layout is FROZEN — field units shipped with ppqn+swing (ESP-037)");
 
 void config_defaults(AppConfig* cfg);
 
@@ -118,6 +143,7 @@ typedef enum {
     ACF_BRIGHTNESS,
     ACF_PPQN,           // ESP-030 pt3
     ACF_SWING_MBEATS,   // ESP-030 pt3
+    ACF_TEMPO_MBPM,     // ESP-037
 } AppConfigField;
 
 bool app_config_set(AppConfig* cfg, AppConfigField field, int value);
