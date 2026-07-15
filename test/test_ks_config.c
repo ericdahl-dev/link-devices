@@ -254,11 +254,13 @@ void test_live_safe_copy_carries_live_fields_not_wifi(void) {
     strcpy(cand.wifi[0].ssid, "SHOULD_NOT_COPY");
     cand.led_enable = 1; cand.led_brightness = 42; cand.metronome_voice = 2;
     cand.clock[1].enable = 1; cand.clock[1].cable = 3; cand.clock[1].ppqn = 24;
+    cand.tempo_mbpm = 145000;   // ESP-037: a set tempo is a LIVE edit
 
     ks_config_live_safe_copy(&live, &cand);
 
     TEST_ASSERT_EQUAL_STRING("home", live.wifi[0].ssid);   // creds untouched (reboot-only)
     TEST_ASSERT_EQUAL_INT(1, live.led_enable);          // live fields carried
+    TEST_ASSERT_EQUAL_INT(145000, live.tempo_mbpm);     // ESP-037: tempo is live, or /live drops it
     TEST_ASSERT_EQUAL_INT(42, live.led_brightness);
     TEST_ASSERT_EQUAL_INT(2, live.metronome_voice);
     TEST_ASSERT_EQUAL_INT(1, live.clock[1].enable);
