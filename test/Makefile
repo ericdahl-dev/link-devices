@@ -41,7 +41,6 @@ P4FORM  = ../KitchenSync/main/ks_form.c
 P4HOST  = ../KitchenSync/main/ks_hostname.c
 UICHROME = ../X32Link/ui_chrome.c
 KTOUCHUI = ../KitchenSyncTouch/ktouch_ui.c
-KTOUCHCFG = ../KitchenSyncTouch/app_config.c
 KTOUCHMIGRATE = ../KitchenSyncTouch/ktouch_config_migrate.c
 KSTICK  = ../KitchenSync/main/ks_tick.c
 MIDICLOCKIN = ../KitchenSync/main/midi_clock_in.c
@@ -74,7 +73,7 @@ HEADERS = $(wildcard ../X32Link/*.h ../KitchenSync/main/*.h ../LoraLink/*.h \
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_config_json test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper test_transport_launch test_ks_hostname test_ui_chrome test_ktouch_ui test_ktouch_config test_ktouch_migrate test_usb_midi_batch test_config_persist test_master_clock test_buttons test_transport_led
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_config_json test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper test_transport_launch test_ks_hostname test_ui_chrome test_ktouch_ui test_ktouch_migrate test_usb_midi_batch test_config_persist test_master_clock test_buttons test_transport_led
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -124,7 +123,6 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_ks_hostname
 	./test_ui_chrome
 	./test_ktouch_ui
-	./test_ktouch_config
 	./test_ktouch_migrate
 	./test_config_persist
 	./test_master_clock
@@ -235,8 +233,6 @@ clean:
 test_config_persist: test_config_persist.c $(CFGPERSIST) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-test_ktouch_config: test_ktouch_config.c $(KTOUCHCFG) $(UNITY) $(HEADERS)
-	$(CC) -I../KitchenSyncTouch $(CFLAGS) $(filter %.c,$^) -o $@
 
 test_ktouch_ui: test_ktouch_ui.c $(KTOUCHUI) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) -I../KitchenSyncTouch $(filter %.c,$^) -o $@
