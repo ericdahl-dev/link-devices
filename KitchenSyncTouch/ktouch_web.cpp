@@ -506,6 +506,7 @@ static void handle_config_json() {
         .follow_beat = (bool)KSTOUCH_HAS_FOLLOWBEAT,
         .outputs     = KSTOUCH_CLOCK_OUTPUTS,
         .wifi_slots  = KS_WIFI_SLOTS,   /* ESP-035: the Touch really does hold three */
+        .settable_tempo = true,         /* ESP-037: a clock box; free-runs at a set BPM */
     };
 
     /* This device's own AppConfig, expressed in the shared KsConfig shape. Only the
@@ -531,6 +532,7 @@ static void handle_config_json() {
     c.clock[0].phase_mbeats = g_config.nudge_mbeats;
     c.clock[0].swing_mbeats = g_config.swing_mbeats;
     c.clock[0].follow_link  = g_config.transport_enable ? 0 : 1;
+    c.tempo_mbpm            = g_config.tempo_mbpm;   /* ESP-037: the STORED tempo */
 
     char buf[768];
     ks_config_json(buf, sizeof(buf), &c, &caps);

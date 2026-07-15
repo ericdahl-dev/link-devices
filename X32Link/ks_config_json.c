@@ -42,6 +42,12 @@ int ks_config_json(char* buf, size_t len, const KsConfig* c, const KsCaps* caps)
     if (caps->follow_beat) {
         APPEND(",\"follow_beat\":%s", c->follow_beat_enable ? "true" : "false");
     }
+    /* ESP-037: the STORED tempo, decimal BPM. Distinct from /status.bpm (the EFFECTIVE
+     * tempo -- Link's, when a session is driving). A listener-only box (settable_tempo
+     * false) says nothing: a tempo it cannot set is a lie like unfitted hardware. */
+    if (caps->settable_tempo) {
+        APPEND(",\"bpm\":%d.%03d", c->tempo_mbpm / 1000, c->tempo_mbpm % 1000);
+    }
 
     /* The array LENGTH is the number of credentials this build can actually STORE --
      * never padded (ESP-035). Advertising three slots on a board that holds one makes a

@@ -25,6 +25,7 @@ void ks_config_defaults(KsConfig* c) {
         c->clock[i].swing_mbeats = 0;   // straight by default (P4-013)
         c->clock[i].follow_link  = 1;   // Link owns transport by default (ESP-011)
     }
+    c->tempo_mbpm = 120000;   // ESP-037: 120.000 BPM (Link default) when solo
 }
 
 bool ks_config_valid(const KsConfig* c) {
@@ -49,6 +50,9 @@ bool ks_config_valid(const KsConfig* c) {
         if (o->swing_mbeats < 0 || o->swing_mbeats > 250) return false;
         if (o->follow_link != 0 && o->follow_link != 1) return false;
     }
+    /* ESP-037: milli-BPM in the musical band (MASTER_CLOCK_BPM_MIN..MAX * 1000).
+     * Literals, not the clock header -- this pure config must not pull in Link types. */
+    if (c->tempo_mbpm < 20000 || c->tempo_mbpm > 300000) return false;
     return true;
 }
 
@@ -98,6 +102,14 @@ bool ks_config_set(KsConfig* c, const char* key, const char* value) {
         int v = atoi(value);
         if (v != 0 && v != 1) return false;
         c->clock_out_enable = v;
+        return true;
+    }
+    if (strcmp(key, "bpm") == 0) {
+        // ESP-037: decimal BPM -> milli-BPM, range-checked. A bad number is rejected
+        // (config stays valid) rather than clocking gear at a nonsense rate.
+        int mbpm = (int)(atof(value) * 1000.0 + 0.5);
+        if (mbpm < 20000 || mbpm > 300000) return false;
+        c->tempo_mbpm = mbpm;
         return true;
     }
     if (strcmp(key, "metronome") == 0) {
@@ -241,6 +253,28 @@ static void migrate_v1(KsConfig* out, const KsConfigV1* v1) {
     out->follow_beat_enable = v1->follow_beat_enable;
 }
 
+// ESP-037: the v3 layout, FROZEN -- the KsConfig that shipped right before tempo. It is
+// byte-identical to the first (sizeof(KsConfig)-4) bytes of the live v4 struct, since
+// tempo_mbpm was appended at the end, so the migration is a copy plus the one default.
+// The size assert is the tripwire: if the live ClockOutputCfg/WifiCred ever change, this
+// stops being 436 and the build breaks here instead of silently reading a P4's bytes wrong.
+typedef struct {
+    WifiCred wifi[KS_WIFI_SLOTS];
+    int  clock_out_enable, metronome_enable, metronome_accent, metronome_volume, metronome_voice;
+    ClockOutputCfg clock[KS_CLOCK_OUTPUTS];
+    int  led_enable, led_brightness, led_mode, led_fade, led_beat_color, led_accent_color;
+    int  follow_beat_enable;
+} KsConfigV3;
+_Static_assert(sizeof(KsConfigV3) == 436, "frozen v3 layout must not change (ESP-037 migration)");
+
+// v3 -> v4: every field carries across; the new tempo comes up at its default (120 BPM),
+// so a migrated P4 free-runs at 120 exactly as it did before tempo was settable.
+static void migrate_v3(KsConfig* out, const KsConfigV3* v3) {
+    ks_config_defaults(out);            // tempo_mbpm -> 120000, then the v3 bytes overwrite the rest
+    memcpy(out, v3, sizeof(*v3));        // v3 layout == first 436 bytes of KsConfig
+    out->tempo_mbpm = 120000;           // the one field v3 never had
+}
+
 // P4-014: the single owner of "is this persisted blob safe to load?" — see ks_config.h.
 // Every gate is fail-closed: anything we can't positively vouch for becomes defaults,
 // because loading a stale layout puts garbage in fields the user never sees until a
@@ -259,6 +293,16 @@ ks_decode_result ks_config_decode(KsConfig* out, const void* blob, size_t blob_l
         KsConfig candidate;
         migrate_v1(&candidate, &v1);
         // A migration is not a licence to skip the guard.
+        if (!ks_config_valid(&candidate)) return KS_DECODE_DEFAULTED;
+        *out = candidate;
+        return KS_DECODE_MIGRATED;
+    }
+
+    if (version == 3u && blob_len == sizeof(KsConfigV3)) {   // ESP-037
+        KsConfigV3 v3;
+        memcpy(&v3, blob, sizeof(v3));
+        KsConfig candidate;
+        migrate_v3(&candidate, &v3);
         if (!ks_config_valid(&candidate)) return KS_DECODE_DEFAULTED;
         *out = candidate;
         return KS_DECODE_MIGRATED;
