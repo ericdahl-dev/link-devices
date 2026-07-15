@@ -598,7 +598,8 @@ static esp_err_t config_json_handler(httpd_req_t *req)
      * keys; nothing here fakes hardware. */
     static const KsCaps caps = { .metronome = true, .led = true, .follow_beat = true,
                                  .outputs = KS_CLOCK_OUTPUTS,
-                                 .wifi_slots = KS_WIFI_SLOTS };   /* ESP-035 */
+                                 .wifi_slots = KS_WIFI_SLOTS,     /* ESP-035 */
+                                 .settable_tempo = true };        /* ESP-037: clock box */
     ks_config_json(buf, sizeof(buf), &snap, &caps);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);

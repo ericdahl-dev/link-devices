@@ -398,6 +398,8 @@ static void handle_config_json() {
         .follow_beat = false,   // no mic
         .outputs     = 0,       // no CONFIGURABLE clock outputs -- see above
         .wifi_slots  = 1,       // this build stores exactly one credential
+        .settable_tempo = false, // ESP-037: listener-only. It follows Link; it never
+                                 // originates a tempo, so /config.json emits no bpm.
     };
 
     /* This device's AppConfig, expressed in the shared KsConfig shape. Only what it
