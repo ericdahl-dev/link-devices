@@ -385,16 +385,12 @@ static void handle_config_json() {
      *
      * Capabilities are a property of the BUILD. Solder a WS2812 on and rebuild with
      * LED_RGB, and the LED section appears with no client change at all. */
-    /* NB: LED_RGB itself is derived inside X32Link.ino and is NOT visible in this
-     * translation unit. BOARD_QTPY_ESP32S3 is a -D build flag, so it is. Keyed off the
-     * flag that actually reaches here, not the one that reads nicer. */
+    /* ESP-037: the QT Py NeoPixel was the only addressable-strip X32Link and it's gone,
+     * so no X32Link build has a controllable colour strip: the Super Mini's LED is a
+     * bare on/off pin, the Waveshare has none. led = false. */
     static const KsCaps caps = {
         .metronome   = false,   // no speaker
-#if defined(BOARD_QTPY_ESP32S3)
-        .led         = true,    // addressable NeoPixel: colours really do apply
-#else
-        .led         = false,   // a bare on/off pin (headless), or none (Waveshare)
-#endif
+        .led         = false,   // bare on/off pin (Super Mini) or none (Waveshare)
         .follow_beat = false,   // no mic
         .outputs     = 0,       // no CONFIGURABLE clock outputs -- see above
         .wifi_slots  = 1,       // this build stores exactly one credential
