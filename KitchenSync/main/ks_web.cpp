@@ -746,6 +746,26 @@ static esp_err_t live_handler(httpd_req_t *req)
 void ks_web_config_persist_tick(void)
 {
     if (!s_cfg) return;
+
+    /* ESP-037: while a Link session is DRIVING, remember its tempo as ours -- the same
+     * behaviour the Touch has. Link teaches the box the tempo; when Link goes away the
+     * box keeps playing it (the arbiter's free-run seed, applied by the clock task) AND
+     * persists it, so a power-cycle comes back at the last tempo it actually played.
+     *
+     * Only while peers>0: solo, tempo_mbpm is the user's own set value and the clock task
+     * applies it, so mirroring then would fight it. Written under the config mutex; the
+     * clock task picks up the change on its next tick without a re-prime (no g_cfg_gen
+     * bump -- a tempo change is not a grid realign). Marked (debounced), not written. */
+    if (wifi_link_peers() > 0) {
+        int eff = (int)((float)link_proto_bpm() * 1000.0f + 0.5f);
+        if (eff >= 20000 && eff <= 300000 && eff != s_cfg->tempo_mbpm) {
+            if (s_cfg_mutex) xSemaphoreTake(s_cfg_mutex, portMAX_DELAY);
+            s_cfg->tempo_mbpm = eff;
+            if (s_cfg_mutex) xSemaphoreGive(s_cfg_mutex);
+            config_persist_mark(&s_persist, (uint32_t)(esp_timer_get_time() / 1000));
+        }
+    }
+
     if (!config_persist_due(&s_persist, (uint32_t)(esp_timer_get_time() / 1000))) return;
 
     // Copy under the mutex, write outside it: the clock task takes this mutex every
