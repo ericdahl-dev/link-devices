@@ -35,6 +35,12 @@ module** — and a shared module lives in `X32Link/` purely because arduino-cli 
 outside a sketch root. That is a build constraint, not a statement about which product
 matters.
 
+> **This file is the day-to-day map.** For the whole-platform architecture (identity,
+> timing pipeline, control-plane boundary, roadmap) see
+> [`docs/architecture/system-overview.md`](docs/architecture/system-overview.md); decisions
+> are in [`docs/adr/`](docs/adr/) (0003–0014, continue the numbering); the firmware↔client
+> API is [`docs/contracts/firmware-http-contract.md`](docs/contracts/firmware-http-contract.md).
+
 ## What X32Link is
 
 **Tempo → XR18/X32 FX delay sync.** One ESP32 firmware that reads a musical
