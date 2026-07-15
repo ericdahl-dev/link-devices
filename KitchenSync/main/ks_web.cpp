@@ -559,7 +559,7 @@ static esp_err_t status_handler(httpd_req_t *req)
      * writer we have not measured — which is exactly the lie ESP-028 exists to prevent.
      * Wiring the P4's writer state in is follow-up; this device's wire shape is unchanged. */
     ks_status_json(buf, sizeof(buf),
-                      (float)link_proto_bpm(), midi_clock_in_bpm(esp_timer_get_time()),
+                      ks_clock_effective_bpm(), midi_clock_in_bpm(esp_timer_get_time()),  /* ESP-037: effective, not link_proto_bpm (zeroes solo) */
                       wifi_link_peers(), usb_midi_host_ready(), usb_midi_host_tx(),
                       FW_VERSION, fb_enabled, fb.bpm, fb.confidence, fb.valid,
                       ls, KS_CLOCK_OUTPUTS,
