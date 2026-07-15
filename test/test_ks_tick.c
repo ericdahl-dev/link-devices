@@ -14,6 +14,67 @@ static LinkTimeline TL;
 
 static LinkGhostXForm no_xform(void) { LinkGhostXForm x; memset(&x, 0, sizeof x); x.valid = false; return x; }
 
+/* ---- ESP-038: emission order is an invariant owned by the plan ---------- */
+// The one rule that caused ESP-023: on a START tick, the 0xFA must be emitted
+// BEFORE the first 0xF8, or a slave starting on this downbeat is one tick late.
+static int idx_of(const uint8_t* buf, int n, uint8_t b) {
+    for (int i = 0; i < n; i++) if (buf[i] == b) return i;
+    return -1;
+}
+
+void test_start_byte_precedes_first_clock(void) {
+    KsTickPlan p;
+    memset(&p, 0, sizeof p);
+    p.transport[0] = TRANSPORT_START;
+    p.pulses[0]    = 3;
+
+    uint8_t buf[8];
+    int n = ks_tick_out_bytes(&p, 0, buf, sizeof buf);
+
+    int fa = idx_of(buf, n, 0xFA);
+    int f8 = idx_of(buf, n, 0xF8);
+    TEST_ASSERT_EQUAL_INT(4, n);                 // 1 start + 3 clocks
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, fa);     // start present
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, f8);     // clock present
+    TEST_ASSERT_LESS_THAN_INT(f8, fa);           // START strictly before first CLOCK
+}
+
+void test_none_emits_only_clocks(void) {
+    KsTickPlan p; memset(&p, 0, sizeof p);
+    p.transport[0] = TRANSPORT_NONE;
+    p.pulses[0]    = 2;
+    uint8_t buf[8];
+    int n = ks_tick_out_bytes(&p, 0, buf, sizeof buf);
+    TEST_ASSERT_EQUAL_INT(2, n);
+    TEST_ASSERT_EQUAL_INT(-1, idx_of(buf, n, 0xFA));
+    TEST_ASSERT_EQUAL_INT(-1, idx_of(buf, n, 0xFC));
+}
+
+void test_stop_emits_fc(void) {
+    KsTickPlan p; memset(&p, 0, sizeof p);
+    p.transport[0] = TRANSPORT_STOP;
+    uint8_t buf[8];
+    int n = ks_tick_out_bytes(&p, 0, buf, sizeof buf);
+    TEST_ASSERT_EQUAL_INT(1, n);
+    TEST_ASSERT_EQUAL_HEX8(0xFC, buf[0]);
+}
+
+void test_empty_plan_emits_nothing(void) {
+    KsTickPlan p; memset(&p, 0, sizeof p);   // NONE + 0 pulses
+    uint8_t buf[8];
+    TEST_ASSERT_EQUAL_INT(0, ks_tick_out_bytes(&p, 0, buf, sizeof buf));
+}
+
+void test_cap_never_overflows(void) {
+    KsTickPlan p; memset(&p, 0, sizeof p);
+    p.transport[0] = TRANSPORT_START;
+    p.pulses[0]    = 96;                      // KS_TICK_MAX_BURST
+    uint8_t buf[3];
+    int n = ks_tick_out_bytes(&p, 0, buf, sizeof buf);
+    TEST_ASSERT_EQUAL_INT(3, n);              // clamped to cap, no overflow
+    TEST_ASSERT_EQUAL_HEX8(0xFA, buf[0]);     // order still honored under clamp
+}
+
 void setUp(void) {
     ks_tick_reset(&st, 0);
     memset(&cfg, 0, sizeof cfg);
@@ -450,5 +511,10 @@ int main(void) {
     RUN_TEST(test_disabled_output_never_pulses);
     RUN_TEST(test_metronome_silent_when_stopped);
     RUN_TEST(test_metronome_clicks_when_playing);
+    RUN_TEST(test_start_byte_precedes_first_clock);
+    RUN_TEST(test_none_emits_only_clocks);
+    RUN_TEST(test_stop_emits_fc);
+    RUN_TEST(test_empty_plan_emits_nothing);
+    RUN_TEST(test_cap_never_overflows);
     return UNITY_END();
 }

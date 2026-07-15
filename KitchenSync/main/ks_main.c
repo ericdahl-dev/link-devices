@@ -285,57 +285,33 @@ static void clock_out_task(void *arg)
 
         bool usb_ready = in.usb_ready;   /* gate USB sends; the DIN wire emits regardless */
 
-        /* TRANSPORT FIRST, THEN CLOCK -- and the order is the whole point (ESP-021).
+        /* TRANSPORT-BEFORE-CLOCK is the whole point (ESP-021/ESP-023): a slave begins on the
+         * FIRST clock it receives after a Start, so the Start must precede the downbeat 0xF8
+         * or the slave is one 24-PPQN tick late on every start, forever (20.8 ms @ 120 BPM;
+         * measured on the analyzer). That ordering is no longer this loop's job: ESP-038 moved
+         * it into ks_tick_out_bytes(), which returns each output's bytes already ordered
+         * (0xFA/0xFC first, then 0xF8 x pulses) and host-tests the invariant so it can never
+         * again diverge from the Touch's copy. Here we only ROUTE the bytes.
          *
-         * The MIDI spec is explicit: a slave begins playing on the FIRST CLOCK IT RECEIVES
-         * AFTER a Start. So the Start must arrive BEFORE the clock byte that marks the
-         * downbeat. Emit the clock first and the slave discards it (it has not started yet)
-         * and begins on the NEXT one -- exactly one 24-PPQN tick late, on every single
-         * start, forever: 20.8 ms at 120 BPM, 17.2 ms at 145.
-         *
-         * That is precisely what "the drum machine falls behind when I start from stopped"
-         * is. It was measured on the analyzer: the downbeat 0xF8 went out at +0.018 ms from
-         * the bar strobe and the 0xFA followed it at +0.338 ms -- correct to the microsecond,
-         * and in the wrong ORDER.
-         *
-         * These bytes go into the same USB batch and the same UART, in the order added, so
-         * swapping the two loops is the entire fix. Stop (0xFC) is order-insensitive; it
-         * rides along because it shares the loop.
-         *
-         * P4-034: USB events are STAGED into one batch and submitted as a single bulk
-         * transfer at the end of the tick. Never call usb_midi_host_send() per output: it
-         * holds one in-flight transfer (~1 ms, a whole USB frame) and drops anything offered
-         * while busy, so the old per-output calls delivered only the FIRST output and
-         * silently binned the rest. Batching also puts every output's bytes in the same USB
-         * frame, so the outputs stay aligned to each other. */
+         * P4-034: USB events are STAGED into one batch and submitted as a single bulk transfer
+         * at the end of the tick -- never per output (usb_midi_host_send holds one ~1 ms
+         * in-flight transfer and drops anything offered while busy). Batching also puts every
+         * output's bytes in the same USB frame, so the outputs stay aligned to each other. */
         for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
-            if (plan.transport[o] == TRANSPORT_NONE) continue;
-            uint8_t status = (plan.transport[o] == TRANSPORT_START) ? 0xFA : 0xFC;
-            if (o == MIDI_MIRROR_OUT) midi_uart_out_byte(status);   /* DIN, always (ESP-015) */
-            if (usb_ready) {
-                uint8_t pkt[4];
-                usb_midi_pack_single(cfg.clock[o].cable, status, pkt);
-                usb_midi_batch_add(&usb_batch, pkt);   /* P4-034: staged, not submitted */
-            }
-            /* No ESP_LOG here (P4-033): this runs ON the bar line, so a blocking ~10 ms
-             * console write would stall the clock at the exact instant the downbeat lands.
-             * The web UI's transport pill already shows the state. */
-        }
-
-        /* Clock fan-out: plan.pulses[o] 0xF8 packets on output o's cable. Now emitted AFTER
-         * any transport byte for the same tick, so a slave's first clock IS the downbeat. */
-        for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) {
-            for (int i = 0; i < plan.pulses[o]; i++) {
-                /* DIN MIDI out (ESP-015): the wire clocks whether or not a USB host is
-                 * attached -- same code point as the USB emit, so their timing tracks. */
-                if (o == MIDI_MIRROR_OUT) midi_uart_out_byte(0xF8);
+            uint8_t obuf[1 + KS_TICK_MAX_BURST];
+            int on = ks_tick_out_bytes(&plan, o, obuf, (int)sizeof obuf);
+            for (int i = 0; i < on; i++) {
+                uint8_t b = obuf[i];
+                if (o == MIDI_MIRROR_OUT) midi_uart_out_byte(b);   /* DIN, always (ESP-015) */
                 if (usb_ready) {
                     uint8_t pkt[4];
-                    usb_midi_pack_single(cfg.clock[o].cable, 0xF8, pkt);
-                    usb_midi_batch_add(&usb_batch, pkt);
+                    usb_midi_pack_single(cfg.clock[o].cable, b, pkt);
+                    usb_midi_batch_add(&usb_batch, pkt);           /* P4-034: staged, not submitted */
                 }
-                pulses++;
+                if (b == 0xF8) pulses++;
             }
+            /* No ESP_LOG here (P4-033): this runs ON the bar line, so a blocking ~10 ms
+             * console write would stall the clock at the exact instant the downbeat lands. */
         }
 
         /* P4-034: ONE bulk transfer for the whole tick. If the endpoint is still busy
