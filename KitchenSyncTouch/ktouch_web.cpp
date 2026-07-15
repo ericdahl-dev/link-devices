@@ -1,6 +1,7 @@
 // KitchenSync Touch web config server — see ktouch_web.h (ESP-016, Inc3).
 #include "ktouch_web.h"
-#include "app_config.h"
+#include "ks_config.h"           // ESP-042: the SHARED fleet config (retired AppConfig)
+#include "ktouch_config_nvs.h"   // ESP-042: config_load/config_save on KsConfig
 #include "ui_chrome.h"
 #include "fw_version.h"
 #include "tempo_source.h"     // live BPM / sync for /status
@@ -29,9 +30,22 @@ static inline int      ktouch_btn_level(void)   { return -1; }   // -1 = no butt
 #define UPDATE_PAGE_MAX 3072   // ui_update_page worst case + slack (ESP-020: the fetch
                                // variant renders 2386 bytes, so 2560 left only 174 spare)
 
-extern AppConfig g_config;
+extern KsConfig g_config;
 
 static WebServer server(80);
+
+// ESP-042: the Touch's config edits now go through the SHARED grammar (ks_config_set) and,
+// for live edits, the SHARED live-safe field set (ks_config_live_safe_copy) -- the exact
+// path the P4 uses. This is the DRY win the whole ticket exists for: a live field can no
+// longer be silently dropped (the ESP-037 bug), because ONE list owns "what is live".
+//
+// Small helper: apply a present form arg through the shared setter, returning whether the
+// key was present AND accepted. The Touch page names two fields for humans (`nudge`, the
+// BARS `quantum`) that differ from the wire keys; those are translated at the call site.
+static bool set_if_present(KsConfig* c, const char* arg_key, const char* wire_key) {
+    if (!server.hasArg(arg_key)) return false;
+    return ks_config_set(c, wire_key, server.arg(arg_key).c_str());
+}
 
 // ARC-022: /nudge and /bright used to apply and return -- the edit was real until the
 // next power cycle and then silently wasn't. They now mark the config dirty and
@@ -195,9 +209,9 @@ static void handle_root() {
     h.replace("%SSID%", g_config.wifi[0].ssid);
     int bars = g_config.quantum_beats / BEATS_PER_BAR; if (bars < 1) bars = 1;
     h.replace("%Q%",    String(bars));
-    h.replace("%NUDGE%", String(g_config.nudge_mbeats));
-    h.replace("%BRIGHT%", String(g_config.brightness));
-    h.replace("%CLK%",  g_config.clock_enable ? "checked" : "");
+    h.replace("%NUDGE%", String(g_config.clock[0].phase_mbeats));
+    h.replace("%BRIGHT%", String(g_config.lcd_brightness));
+    h.replace("%CLK%",  g_config.clock_out_enable ? "checked" : "");
     h.replace("%TP%",   g_config.transport_enable ? "checked" : "");
     h.replace("%REL%",  g_config.play_on_release ? "checked" : "");
     h.replace("%FWVER%", FW_VERSION);
@@ -205,7 +219,7 @@ static void handle_root() {
 }
 
 static void handle_save() {
-    AppConfig c = g_config;
+    KsConfig c = g_config;
 
     /* ESP-030 pt3: EVERY WiFi slot, not just slot 0.
      *
@@ -272,31 +286,38 @@ static void handle_save() {
      *
      * /live is the endpoint for partial edits. /save being partial-tolerant is a
      * SAFETY net, not an invitation. */
+    /* ESP-042: everything below goes through the SHARED ks_config_set grammar, the exact
+     * keys the P4 and the iOS app already use. `clock` (the page's master toggle) and a
+     * lone `clk0_en` from the app both mean "the clock" on this single-output box, so both
+     * map to `clock_out` (the master gate); clock[0].enable stays pinned on. */
     const bool full_form = server.hasArg("full_form");
-    auto checkbox = [&](const char* key, AppConfigField field) {
-        if (full_form || server.hasArg(key))
-            app_config_set(&c, field, server.hasArg(key) ? 1 : 0);
+    auto checkbox = [&](const char* name, const char* wire_key) {
+        if (full_form || server.hasArg(name))
+            ks_config_set(&c, wire_key, server.hasArg(name) ? "1" : "0");
     };
-    checkbox("clock",     ACF_CLOCK_ENABLE);
-    checkbox("transport", ACF_TRANSPORT_ENABLE);
-    checkbox("play_rel",  ACF_PLAY_ON_RELEASE);
+    checkbox("clock",     "clock_out");
+    checkbox("transport", "transport");
+    checkbox("play_rel",  "play_rel");
 
-    // Numbers via the validating setter. The BARS field is bars; store as Link beats
-    // (x4). NUDGE persists whatever /live set.
-    if (server.hasArg("quantum"))
-        app_config_set(&c, ACF_QUANTUM_BEATS, server.arg("quantum").toInt() * BEATS_PER_BAR);
-    if (server.hasArg("nudge"))  app_config_set(&c, ACF_NUDGE_MBEATS, server.arg("nudge").toInt());
-    if (server.hasArg("bright")) app_config_set(&c, ACF_BRIGHTNESS,   server.arg("bright").toInt());
+    // The BARS field is bars; the shared `quantum` key is BEATS (x4). NUDGE persists
+    // whatever /live set, onto the single DIN output's clk0_phase.
+    if (server.hasArg("quantum")) {
+        char beats[12];
+        snprintf(beats, sizeof(beats), "%ld", server.arg("quantum").toInt() * BEATS_PER_BAR);
+        ks_config_set(&c, "quantum", beats);
+    }
+    set_if_present(&c, "nudge", "clk0_phase");
+    set_if_present(&c, "bright", "bright");
 
-    /* ESP-030 pt3: the SHARED form grammar, so the iOS app's /save and the P4's /save
-     * are the same request. clk0_* are this device's single DIN output. */
-    if (server.hasArg("clock_out")) app_config_set(&c, ACF_CLOCK_ENABLE, server.arg("clock_out").toInt());
-    if (server.hasArg("clk0_en"))    app_config_set(&c, ACF_CLOCK_ENABLE, server.arg("clk0_en").toInt());
-    if (server.hasArg("clk0_phase")) app_config_set(&c, ACF_NUDGE_MBEATS, server.arg("clk0_phase").toInt());
-    if (server.hasArg("clk0_swing")) app_config_set(&c, ACF_SWING_MBEATS, server.arg("clk0_swing").toInt());
-    if (server.hasArg("clk0_ppqn"))  app_config_set(&c, ACF_PPQN,         server.arg("clk0_ppqn").toInt());
+    /* The SHARED per-output grammar, so the iOS app's /save and the P4's /save are the
+     * same request. clk0_* are this device's single DIN output. */
+    set_if_present(&c, "clock_out", "clock_out");
+    set_if_present(&c, "clk0_en",   "clock_out");   // single output: enabling it == the clock
+    set_if_present(&c, "clk0_phase","clk0_phase");
+    set_if_present(&c, "clk0_swing","clk0_swing");
+    set_if_present(&c, "clk0_ppqn", "clk0_ppqn");
 
-    if (!config_validate(&c)) {
+    if (!ks_config_valid(&c)) {
         char p[1024]; ui_result_page(p, sizeof(p), "Invalid Config", "Check the values and go back.", false);
         server.send(200, "text/html", p); return;
     }
@@ -376,7 +397,7 @@ static void handle_status() {
              "\"tfail\":%lu,\"tzero\":%lu,\"ccancel\":%lu,\"wtport\":%lu,"
              "\"beats\":%.2f,\"locked\":%d,\"bsactive\":%d,"
              "\"btn\":%d,\"btnlows\":%lu,\"btnpress\":%lu",
-             sync, g_config.clock_enable ? 1 : 0, ktouch_transport_state(), ktouch_cueing(),
+             sync, g_config.clock_out_enable ? 1 : 0, ktouch_transport_state(), ktouch_cueing(),
              (unsigned long)ktouch_touch_fails(), (unsigned long)ktouch_touch_zeros(),
              (unsigned long)ktouch_cue_cancels(), (unsigned long)ktouch_midi_w_tport(),
              (double)ktouch_midi_beats(), ktouch_midi_locked(), ktouch_midi_bs_active(),
@@ -450,36 +471,36 @@ static void handle_status() {
  * did. Marked, not written: a slider drag is dozens of POSTs, and config is one blob.
  */
 static void handle_live() {
-    AppConfig c = g_config;
-    bool changed = false;
+    /* ESP-042: patch present keys onto a candidate through the SHARED grammar, then fold
+     * the LIVE-SAFE fields into the running config with ks_config_live_safe_copy -- the
+     * EXACT path the P4's /live uses. That single list is now the one owner of "what is
+     * live" across the fleet, so the ESP-037 class of bug (a live field parsed, validated,
+     * then silently dropped) cannot recur: a field is live iff it is in that copy.
+     *
+     * The candidate starts as the running config, so absent keys are unchanged (a partial
+     * patch). WiFi is deliberately NOT touched here -- it needs a reconnect, so it is a
+     * /save-and-reboot field, exactly as on the P4. */
+    KsConfig cand = g_config;
+    bool touched = false;
 
-    /* Only what this hardware HAS. A key it cannot honour is not silently accepted —
-     * pretending to apply a setting is how /save quietly ate a WiFi slot. */
-    if (server.hasArg("clk0_phase"))
-        changed |= app_config_set(&c, ACF_NUDGE_MBEATS, server.arg("clk0_phase").toInt());
-    if (server.hasArg("clk0_swing"))
-        changed |= app_config_set(&c, ACF_SWING_MBEATS, server.arg("clk0_swing").toInt());
-    if (server.hasArg("clk0_ppqn"))
-        changed |= app_config_set(&c, ACF_PPQN, server.arg("clk0_ppqn").toInt());
-    if (server.hasArg("clk0_en"))
-        changed |= app_config_set(&c, ACF_CLOCK_ENABLE, server.arg("clk0_en").toInt());
-    if (server.hasArg("clock_out"))
-        changed |= app_config_set(&c, ACF_CLOCK_ENABLE, server.arg("clock_out").toInt());
-    if (server.hasArg("quantum"))
-        changed |= app_config_set(&c, ACF_QUANTUM_BEATS, server.arg("quantum").toInt());
-    if (server.hasArg("bright"))
-        changed |= app_config_set(&c, ACF_BRIGHTNESS, server.arg("bright").toInt());
-    /* ESP-037: settable tempo. The app sends whole/fractional BPM (tap, numeric, +/-
-     * all resolve to a number here); stored milli-BPM. The writer picks up the config
-     * change and re-seeds the master clock on its next tick, so it applies live -- and
-     * because /live persists (ARC-022), a standalone box powers back on at this tempo. */
-    if (server.hasArg("bpm"))
-        changed |= app_config_set(&c, ACF_TEMPO_MBPM,
-                                  (int)(server.arg("bpm").toFloat() * 1000.0f + 0.5f));
+    /* The shared per-output + fleet keys. clk0_en and clock_out both mean "the clock" on
+     * this single-output box (-> clock_out); tempo arrives as decimal BPM under `bpm`. */
+    touched |= set_if_present(&cand, "clk0_phase", "clk0_phase");
+    touched |= set_if_present(&cand, "clk0_swing", "clk0_swing");
+    touched |= set_if_present(&cand, "clk0_ppqn",  "clk0_ppqn");
+    touched |= set_if_present(&cand, "clk0_en",    "clock_out");
+    touched |= set_if_present(&cand, "clock_out",  "clock_out");
+    touched |= set_if_present(&cand, "quantum",    "quantum");
+    touched |= set_if_present(&cand, "bright",     "bright");
+    touched |= set_if_present(&cand, "transport",  "transport");
+    touched |= set_if_present(&cand, "play_rel",   "play_rel");
+    touched |= set_if_present(&cand, "bpm",        "bpm");
 
-    if (changed) {
-        g_config = c;
-        config_persist_mark(&s_persist, millis());   /* ARC-022: it will survive a reboot */
+    if (!ks_config_valid(&cand)) { server.send(400, "text/plain", "invalid"); return; }
+
+    if (touched) {
+        ks_config_live_safe_copy(&g_config, &cand);   // ONE owner of the live field set
+        config_persist_mark(&s_persist, millis());    /* ARC-022: survives a reboot */
     }
     server.send(200, "text/plain", "ok");
 }
@@ -509,30 +530,14 @@ static void handle_config_json() {
         .settable_tempo = true,         /* ESP-037: a clock box; free-runs at a set BPM */
     };
 
-    /* This device's own AppConfig, expressed in the shared KsConfig shape. Only the
-     * fields it really has are populated; the rest are defaults that `caps` then stops
-     * from ever being emitted. */
-    KsConfig c;
-    ks_config_defaults(&c);
-
-    for (int i = 0; i < KS_WIFI_SLOTS; i++) c.wifi[i] = g_config.wifi[i];
-
-    c.clock_out_enable = g_config.clock_enable;
-
-    /* The single DIN output. `nudge_mbeats` IS the phase trim -- the same concept the P4
-     * calls clk0_phase, so it maps 1:1 and a client edits one field, not two. DIN MIDI is
-     * fixed at 24 PPQN and has no USB cable, so those carry their honest constants. */
-    c.clock[0].enable       = g_config.clock_enable;
-    c.clock[0].cable        = 0;          /* DIN, not a USB-MIDI virtual cable */
-    /* ESP-030 pt3: the REAL fields now. These used to be hardcoded 24 / 0 — so a client
-     * rendered a SWING stepper and a RATE picker for settings the device did not have,
-     * and they could never work no matter what the endpoint did. Emitting a value you
-     * cannot honour is the same lie as reporting hardware you do not have. */
-    c.clock[0].ppqn         = g_config.ppqn;
-    c.clock[0].phase_mbeats = g_config.nudge_mbeats;
-    c.clock[0].swing_mbeats = g_config.swing_mbeats;
-    c.clock[0].follow_link  = g_config.transport_enable ? 0 : 1;
-    c.tempo_mbpm            = g_config.tempo_mbpm;   /* ESP-037: the STORED tempo */
+    /* ESP-042: g_config IS a KsConfig now, so /config.json emits it directly -- no
+     * hand-copied transient that could drift from storage. The only touch-up: mirror the
+     * single output's enable to the master clock gate so the app's per-output card reflects
+     * the one MIDI Clock toggle a user actually flips (clock[0].enable is otherwise pinned
+     * on). `caps` still hides the fields this hardware lacks (metronome, LED, USB cables,
+     * outputs 1..3) so absent hardware is ABSENT from the document, never reported false. */
+    KsConfig c = g_config;
+    c.clock[0].enable = g_config.clock_out_enable;
 
     char buf[768];
     ks_config_json(buf, sizeof(buf), &c, &caps);
@@ -545,7 +550,7 @@ static void handle_config_json() {
 // dials it in)" -- the flash-wear worry was real, but the answer to it is a
 // debounce, not throwing the edit away at the next power cycle.
 static void handle_nudge() {
-    if (server.hasArg("mb") && app_config_set(&g_config, ACF_NUDGE_MBEATS, server.arg("mb").toInt()))
+    if (server.hasArg("mb") && ks_config_set(&g_config, "clk0_phase", server.arg("mb").c_str()))
         config_persist_mark(&s_persist, millis());
     server.send(200, "text/plain", "ok");
 }
@@ -578,8 +583,8 @@ static void handle_transport() {
 
 // Live backlight brightness. Same pattern as /nudge: apply now, persist once settled.
 static void handle_bright() {
-    if (server.hasArg("pct") && app_config_set(&g_config, ACF_BRIGHTNESS, server.arg("pct").toInt())) {
-        ktouch_display_set_brightness(g_config.brightness);
+    if (server.hasArg("pct") && ks_config_set(&g_config, "bright", server.arg("pct").c_str())) {
+        ktouch_display_set_brightness(g_config.lcd_brightness);
         config_persist_mark(&s_persist, millis());
     }
     server.send(200, "text/plain", "ok");

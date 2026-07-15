@@ -12,7 +12,8 @@
 #define KSTOUCH_WIFI_PASS ""
 #endif
 #include "fw_version.h"
-#include "app_config.h"
+#include "ks_config.h"            // ESP-042: the SHARED fleet config (retired AppConfig)
+#include "ktouch_config_nvs.h"    // ESP-042: config_load/config_save on KsConfig
 #include "tempo_source.h"
 #ifdef HAS_TOUCH_DISPLAY
 #include "ktouch_display.h"
@@ -24,7 +25,7 @@
 #endif
 #include "ktouch_web.h"
 
-AppConfig g_config;                       // the one config instance
+KsConfig  g_config;                       // ESP-042: the one config instance (fleet KsConfig)
 char      g_ks_host[32] = "kstouch";      // display name: mDNS name or AP address
 bool      g_ap_mode = false;              // true when serving the setup SoftAP
 
