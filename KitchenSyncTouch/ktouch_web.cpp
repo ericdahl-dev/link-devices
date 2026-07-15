@@ -469,6 +469,13 @@ static void handle_live() {
         changed |= app_config_set(&c, ACF_QUANTUM_BEATS, server.arg("quantum").toInt());
     if (server.hasArg("bright"))
         changed |= app_config_set(&c, ACF_BRIGHTNESS, server.arg("bright").toInt());
+    /* ESP-037: settable tempo. The app sends whole/fractional BPM (tap, numeric, +/-
+     * all resolve to a number here); stored milli-BPM. The writer picks up the config
+     * change and re-seeds the master clock on its next tick, so it applies live -- and
+     * because /live persists (ARC-022), a standalone box powers back on at this tempo. */
+    if (server.hasArg("bpm"))
+        changed |= app_config_set(&c, ACF_TEMPO_MBPM,
+                                  (int)(server.arg("bpm").toFloat() * 1000.0f + 0.5f));
 
     if (changed) {
         g_config = c;
