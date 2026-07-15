@@ -28,6 +28,7 @@ idf_component_register(
          # CONFIG_KS_TOUCH_DISPLAY (S3), a no-op otherwise, so ks_main calls it
          # unconditionally. LovyanGFX comes in via idf_component.yml (S3 target only).
          "ks_display.cpp"
+         "${X32LINK_DIR}/axs5106l.c"   # ESP-026 inc3: pure AXS5106L touch-report parser (shared, host-tested)
          # ESP-029: /status is now a SHARED module. It moved to X32Link/ and is symlinked
          # into KitchenSyncTouch/, so both firmwares emit /status from ONE implementation
          # and cannot drift apart again (ARC-024).
