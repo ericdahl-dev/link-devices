@@ -159,18 +159,26 @@ static void display_task(void *arg) {
     touch_init();
     ESP_LOGI(TAG, "display_task: touch ready — tap the glass");
 
-    // Increment 3: echo the last tap (raw controller coords) on screen + serial, to
-    // prove the AXS5106L i2c path and the shared axs5106l.c parser. Coordinate rotation
-    // and hit-testing (the pure ktouch_ui.c) come in a later increment.
+    // Increment 3: echo the last tap on screen + serial to prove the AXS5106L i2c path
+    // and the shared axs5106l.c parser. Raw controller coords are portrait-native; the
+    // landscape setRotation(7) maps them screen_x = 319 - raw_y, screen_y = 171 - raw_x
+    // (verified against a corner tap). A dot is drawn at the mapped point so it lands
+    // under the finger. Real hit-testing (the pure ktouch_ui.c) comes with the UI port.
     axs_touch_t t;
+    int prev_dx = -1, prev_dy = -1;
     for (;;) {
         if (read_touch(&t) && t.points_len > 0) {
-            ESP_LOGI(TAG, "touch: count=%d p0=(%u,%u)", t.count,
-                     (unsigned)t.points[0].x, (unsigned)t.points[0].y);
-            s_lcd.fillRect(0, 120, SCR_W, 30, TFT_BLACK);
+            int rx = t.points[0].x, ry = t.points[0].y;
+            int sx = 319 - ry;  if (sx < 0) sx = 0; if (sx > 319) sx = 319;
+            int sy = 171 - rx;  if (sy < 0) sy = 0; if (sy > 171) sy = 171;
+            ESP_LOGI(TAG, "touch: count=%d raw=(%d,%d) screen=(%d,%d)", t.count, rx, ry, sx, sy);
+            if (prev_dx >= 0) s_lcd.fillCircle(prev_dx, prev_dy, 6, TFT_BLACK);
+            s_lcd.fillCircle(sx, sy, 6, 0x36B6FFu);
+            prev_dx = sx; prev_dy = sy;
+            s_lcd.fillRect(0, 120, 160, 26, TFT_BLACK);
             s_lcd.setTextColor(0x36B6FFu, TFT_BLACK); s_lcd.setTextSize(2);
             s_lcd.setCursor(8, 124);
-            s_lcd.printf("TAP %u,%u", (unsigned)t.points[0].x, (unsigned)t.points[0].y);
+            s_lcd.printf("%d,%d", sx, sy);
         }
         vTaskDelay(pdMS_TO_TICKS(33));
     }
