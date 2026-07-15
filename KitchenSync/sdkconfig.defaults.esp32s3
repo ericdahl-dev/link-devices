@@ -14,3 +14,10 @@
 # Spike convenience: productization will gate the display on a per-board Kconfig, not
 # on "every S3" — a headless S3 Super Mini has no panel. See ADR-0009 / ESP-026.
 CONFIG_KS_TOUCH_DISPLAY=y
+
+# Route the console to the S3's USB-Serial-JTAG (the same controller the Arduino
+# build reached via "hardware CDC/JTAG"/hwcdc). ESP-IDF defaults the console to UART,
+# which leaves the board's USB port dark once the app boots — so the cu.usbmodem port
+# vanishes after boot and esptool can no longer auto-reset for the next flash. Driving
+# USB-Serial-JTAG keeps the port alive (normal flash + monitor) and gives serial logs.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
