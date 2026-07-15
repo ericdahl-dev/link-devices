@@ -8,7 +8,10 @@ void master_clock_reset(MasterClock* mc) {
 }
 
 void master_clock_set_bpm(MasterClock* mc, float bpm) {
-    if (bpm <= 0.0f) return;
+    // ESP-037: reject anything outside the musical band, keeping the current tempo. The
+    // old `bpm <= 0` guard stopped a divide but let 5000 BPM through as a nonsense rate.
+    // (>= / <= so the MIN/MAX edges are IN.) NaN fails both compares and is rejected too.
+    if (!(bpm >= (float)MASTER_CLOCK_BPM_MIN && bpm <= (float)MASTER_CLOCK_BPM_MAX)) return;
     mc->micros_per_beat = (int64_t)llround(60.0e6 / (double)bpm);
     mc->has_tempo = true;
 }

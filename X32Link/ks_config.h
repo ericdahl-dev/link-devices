@@ -41,7 +41,9 @@ typedef struct {
 //   A v1 blob is MIGRATED, not discarded — a version bump that silently forgot
 //   the user's network would inflict exactly the SoftAP re-setup this feature
 //   exists to abolish. See ks_config_decode().
-#define KS_CONFIG_VERSION 3u
+// v4 (ESP-037): a settable free-run tempo (tempo_mbpm). Drives the clock when SOLO; a
+//   Link session still wins. A v3 blob is MIGRATED, never discarded.
+#define KS_CONFIG_VERSION 4u
 
 // One configurable clock output (routed to a USB-MIDI cable). Division, phase and
 // swing are the E-RM-Multiclock-style controls.
@@ -77,6 +79,11 @@ typedef struct {
     int  led_beat_color;    // 0xRRGGBB — colour for beats 2..N
     int  led_accent_color;  // 0xRRGGBB — colour for the bar-1 downbeat
     int  follow_beat_enable; // 0/1 -- mic-based tempo detection (P4-020, display only)
+
+    // ESP-037: settable free-run tempo, milli-BPM (128000 = 128.000 BPM). Drives the
+    // clock when SOLO -- a Link session still wins (master_clock_arbiter). Milli so tap
+    // tempo's fractional BPM survives. Range MASTER_CLOCK_BPM_MIN..MAX * 1000.
+    int  tempo_mbpm;
 } KsConfig;
 
 // P4-014 tripwire. sizeof alone can't detect a same-size field reorder, so it is
@@ -93,7 +100,7 @@ typedef struct {
 #else
 #  define KS_CONFIG_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 #endif
-KS_CONFIG_STATIC_ASSERT(sizeof(KsConfig) == 436,
+KS_CONFIG_STATIC_ASSERT(sizeof(KsConfig) == 440,
                "KsConfig layout changed: bump KS_CONFIG_VERSION, then fix this size (P4-014)");
 
 void ks_config_defaults(KsConfig* c);

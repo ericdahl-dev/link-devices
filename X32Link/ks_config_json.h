@@ -55,6 +55,13 @@ typedef struct {
      * Touch (ESP-030 pt3), here reachable from the READ side. The array's LENGTH is the
      * truth, exactly as it already is for `clock`. */
     int  wifi_slots;
+
+    /* ESP-037: can a user SET this box's tempo? True on the clock boxes (P4, Touch),
+     * which free-run at a settable BPM when solo. False on X32Link -- it is listener-
+     * only, syncs a mixer to Link, and originates nothing. When false, /config.json
+     * emits no `bpm` at all: reporting a tempo a device cannot set is the same lie as
+     * reporting hardware it does not have. */
+    bool settable_tempo;
 } KsCaps;
 
 // Formats KsConfig as JSON, emitting ONLY what `caps` says the board has:

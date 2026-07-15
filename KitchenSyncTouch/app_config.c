@@ -14,6 +14,8 @@ void config_defaults(AppConfig* cfg) {
      * clock does not change when it migrates. 24 PPQN = MIDI clock; swing 0 = straight. */
     cfg->ppqn             = 24;
     cfg->swing_mbeats     = 0;
+    /* ESP-037: 120.000 BPM, the Link default. Used when SOLO; a Link session overrides. */
+    cfg->tempo_mbpm       = 120000;
 }
 
 static bool is_bool(int v) { return v == 0 || v == 1; }
@@ -29,6 +31,10 @@ bool config_validate(const AppConfig* cfg) {
      * as the P4's ClockOutputCfg, so one client rule covers the fleet. */
     if (cfg->ppqn < 1 || cfg->ppqn > 48) return false;
     if (cfg->swing_mbeats < 0 || cfg->swing_mbeats > 250) return false;
+    /* ESP-037: milli-BPM in the musical band. Literals, not master_clock's MIN/MAX --
+     * this pure config layer must not pull in the Link-typed clock header. Mirrors
+     * MASTER_CLOCK_BPM_MIN/MAX (20..300) * 1000; keep them in step. */
+    if (cfg->tempo_mbpm < 20000 || cfg->tempo_mbpm > 300000) return false;
     return true;   // empty ssid is valid (AP setup mode); caller checks it separately
 }
 
@@ -106,6 +112,34 @@ static cfg_decode_result migrate_v2(AppConfig* out, const void* blob, size_t blo
     return CFG_DECODE_MIGRATED;
 }
 
+/* ESP-037: a v3 blob, upgraded. The bench Super Mini holds one of these. v3 had every
+ * field but the tempo, so this is a straight copy plus the tempo DEFAULT (120 BPM) --
+ * a migrated box free-runs at 120 exactly as it did before there was a tempo to set. */
+static cfg_decode_result migrate_v3(AppConfig* out, const void* blob, size_t blob_len) {
+    if (blob_len != sizeof(AppConfigV3)) return CFG_DECODE_DEFAULTED;
+
+    AppConfigV3 v3;
+    memcpy(&v3, blob, sizeof(v3));
+
+    AppConfig up;
+    config_defaults(&up);            /* tempo_mbpm starts at 120000 */
+
+    for (int i = 0; i < KS_WIFI_SLOTS; i++) up.wifi[i] = v3.wifi[i];
+    up.quantum_beats    = v3.quantum_beats;
+    up.clock_enable     = v3.clock_enable;
+    up.transport_enable = v3.transport_enable;
+    up.play_on_release  = v3.play_on_release;
+    up.nudge_mbeats     = v3.nudge_mbeats;
+    up.brightness       = v3.brightness;
+    up.ppqn             = v3.ppqn;
+    up.swing_mbeats     = v3.swing_mbeats;
+
+    if (!config_validate(&up)) return CFG_DECODE_DEFAULTED;
+
+    *out = up;
+    return CFG_DECODE_MIGRATED;
+}
+
 cfg_decode_result config_decode(AppConfig* out, const void* blob, size_t blob_len,
                                 bool version_present, uint32_t version) {
     config_defaults(out);
@@ -120,6 +154,7 @@ cfg_decode_result config_decode(AppConfig* out, const void* blob, size_t blob_le
     // this the hard way in ESP-013.
     if (version == 1u) return migrate_v1(out, blob, blob_len);
     if (version == 2u) return migrate_v2(out, blob, blob_len);
+    if (version == 3u) return migrate_v3(out, blob, blob_len);
 
     if (version != APP_CONFIG_VERSION || blob_len != sizeof(AppConfig))
         return CFG_DECODE_DEFAULTED;
@@ -145,6 +180,7 @@ bool app_config_set(AppConfig* cfg, AppConfigField field, int value) {
         case ACF_BRIGHTNESS:       t.brightness       = value; break;
         case ACF_PPQN:             t.ppqn             = value; break;   /* ESP-030 pt3 */
         case ACF_SWING_MBEATS:     t.swing_mbeats     = value; break;   /* ESP-030 pt3 */
+        case ACF_TEMPO_MBPM:       t.tempo_mbpm       = value; break;   /* ESP-037 */
         default: return false;
     }
     if (!config_validate(&t)) return false;   // keep the change only if it validates

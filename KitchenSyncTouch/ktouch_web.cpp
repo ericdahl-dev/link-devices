@@ -469,6 +469,13 @@ static void handle_live() {
         changed |= app_config_set(&c, ACF_QUANTUM_BEATS, server.arg("quantum").toInt());
     if (server.hasArg("bright"))
         changed |= app_config_set(&c, ACF_BRIGHTNESS, server.arg("bright").toInt());
+    /* ESP-037: settable tempo. The app sends whole/fractional BPM (tap, numeric, +/-
+     * all resolve to a number here); stored milli-BPM. The writer picks up the config
+     * change and re-seeds the master clock on its next tick, so it applies live -- and
+     * because /live persists (ARC-022), a standalone box powers back on at this tempo. */
+    if (server.hasArg("bpm"))
+        changed |= app_config_set(&c, ACF_TEMPO_MBPM,
+                                  (int)(server.arg("bpm").toFloat() * 1000.0f + 0.5f));
 
     if (changed) {
         g_config = c;
@@ -499,6 +506,7 @@ static void handle_config_json() {
         .follow_beat = (bool)KSTOUCH_HAS_FOLLOWBEAT,
         .outputs     = KSTOUCH_CLOCK_OUTPUTS,
         .wifi_slots  = KS_WIFI_SLOTS,   /* ESP-035: the Touch really does hold three */
+        .settable_tempo = true,         /* ESP-037: a clock box; free-runs at a set BPM */
     };
 
     /* This device's own AppConfig, expressed in the shared KsConfig shape. Only the
@@ -524,6 +532,7 @@ static void handle_config_json() {
     c.clock[0].phase_mbeats = g_config.nudge_mbeats;
     c.clock[0].swing_mbeats = g_config.swing_mbeats;
     c.clock[0].follow_link  = g_config.transport_enable ? 0 : 1;
+    c.tempo_mbpm            = g_config.tempo_mbpm;   /* ESP-037: the STORED tempo */
 
     char buf[768];
     ks_config_json(buf, sizeof(buf), &c, &caps);
@@ -643,6 +652,24 @@ void ktouch_web_begin(void) {
 
 void ktouch_web_tick(void) {
     server.handleClient();
+
+    /* ESP-037: while a Link session is DRIVING, remember its tempo as ours. Link teaches
+     * the box the tempo; when Link goes away the box keeps playing it (the arbiter's
+     * free-run seed), and now it also PERSISTS, so a power-cycle comes back at the last
+     * tempo it actually played -- no jump, no surprise reset to an old manual value.
+     *
+     * Only while peers>0: solo, g_config.tempo_mbpm is the user's own set tempo and the
+     * writer applies it, so mirroring here would fight that. Marked (debounced), not
+     * written -- a stable Link tempo persists once; an Ableton tempo ramp coalesces. */
+    if (link_proto_peers() > 0) {
+        float b = ktouch_midi_bpm();
+        int eff = (int)(b * 1000.0f + 0.5f);
+        if (eff >= 20000 && eff <= 300000 && eff != g_config.tempo_mbpm) {
+            g_config.tempo_mbpm = eff;
+            config_persist_mark(&s_persist, millis());
+        }
+    }
+
     // ARC-022: write the blob once the live edits have settled. loop() calls this
     // every ~5 ms, and due() is a couple of unsigned compares when nothing is owed,
     // so polling it here is free. The write itself is rare by construction -- once

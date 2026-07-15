@@ -154,6 +154,16 @@ void test_output_bad_index_and_field(void) {
     TEST_ASSERT_FALSE(ks_config_set(&c, "clk0_bogus", "1"));
 }
 
+// ESP-037: the P4's /live|/save `bpm` field. Decimal BPM in, milli-BPM stored, range
+// checked, so the same one number the app computes (tap/numeric/+-) sets the tempo.
+void test_set_bpm_form_key(void) {
+    TEST_ASSERT_TRUE(ks_config_set(&c, "bpm", "128.5"));
+    TEST_ASSERT_EQUAL_INT(128500, c.tempo_mbpm);
+    TEST_ASSERT_FALSE(ks_config_set(&c, "bpm", "9"));     // < 20 BPM
+    TEST_ASSERT_FALSE(ks_config_set(&c, "bpm", "400"));   // > 300 BPM
+    TEST_ASSERT_EQUAL_INT(128500, c.tempo_mbpm);          // unchanged
+}
+
 void test_clock_out_toggle(void) {
     TEST_ASSERT_TRUE(ks_config_set(&c, "clock_out", "0"));
     TEST_ASSERT_EQUAL_INT(0, c.clock_out_enable);
@@ -288,6 +298,21 @@ void test_decode_legacy_unversioned_blob_falls_back_to_defaults(void) {
     TEST_ASSERT_EQUAL_INT(KS_DECODE_DEFAULTED, r);
     TEST_ASSERT_EQUAL_INT(80, out.metronome_volume);       // default, not the blob's 42
     TEST_ASSERT_EQUAL_STRING("", out.wifi[0].ssid);
+}
+
+// ESP-037: a v3 blob (the layout right before tempo) is MIGRATED, never discarded --
+// the P4 in the field holds one, and defaulting would drop it to SoftAP. tempo_mbpm is
+// the LAST field, so a v3 blob is exactly the first (sizeof(KsConfig)-4) bytes of a v4
+// one; migrate reads those and defaults the tempo.
+void test_v3_blob_is_migrated_and_defaults_tempo(void) {
+    KsConfig blob; make_good_blob(&blob);   // a valid v4 shape...
+    blob.tempo_mbpm = 777000;               // ...but the v3 read stops before this byte
+    KsConfig out;
+    ks_decode_result r = ks_config_decode(&out, &blob, sizeof(KsConfig) - sizeof(int), true, 3u);
+    TEST_ASSERT_EQUAL_INT(KS_DECODE_MIGRATED, r);
+    TEST_ASSERT_EQUAL_INT(42, out.metronome_volume);   // v3 fields preserved
+    TEST_ASSERT_EQUAL_STRING("Studio", out.wifi[0].ssid);
+    TEST_ASSERT_EQUAL_INT(120000, out.tempo_mbpm);     // DEFAULTED, not the 777 past the edge
 }
 
 // A blob from a DIFFERENT schema version: same size is not enough -- fields may
@@ -450,6 +475,7 @@ int main(void) {
     RUN_TEST(test_blank_pass_keeps_current);
     RUN_TEST(test_output_set_and_ranges);
     RUN_TEST(test_output_bad_index_and_field);
+    RUN_TEST(test_set_bpm_form_key);
     RUN_TEST(test_clock_out_toggle);
     RUN_TEST(test_metronome_toggle);
     RUN_TEST(test_led_toggle);
@@ -461,6 +487,7 @@ int main(void) {
     RUN_TEST(test_follow_beat_set);
     RUN_TEST(test_decode_accepts_current_version_blob);
     RUN_TEST(test_decode_legacy_unversioned_blob_falls_back_to_defaults);
+    RUN_TEST(test_v3_blob_is_migrated_and_defaults_tempo);
     RUN_TEST(test_decode_version_mismatch_falls_back_to_defaults);
     RUN_TEST(test_decode_size_mismatch_falls_back_to_defaults);
     RUN_TEST(test_decode_absent_blob_yields_defaults);

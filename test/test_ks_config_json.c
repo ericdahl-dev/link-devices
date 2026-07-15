@@ -24,13 +24,13 @@ void tearDown(void) {}
 // A full-featured board: everything fitted, four outputs. What the P4 declares.
 static const KsCaps kAllFitted = {
     .metronome = true, .led = true, .follow_beat = true, .outputs = 4,
-    .wifi_slots = KS_WIFI_SLOTS,
+    .wifi_slots = KS_WIFI_SLOTS, .settable_tempo = true,
 };
 
 // A board with the strip and speaker NOT wired, and one clock output.
 static const KsCaps kBareBoard = {
     .metronome = false, .led = false, .follow_beat = false, .outputs = 1,
-    .wifi_slots = KS_WIFI_SLOTS,
+    .wifi_slots = KS_WIFI_SLOTS, .settable_tempo = true,
 };
 
 /* ESP-035: the X32Link. A DIFFERENT product on the same fleet protocol -- it syncs an
@@ -39,7 +39,7 @@ static const KsCaps kBareBoard = {
  * swing. So: no configurable outputs, one wifi slot. */
 static const KsCaps kX32Link = {
     .metronome = false, .led = true, .follow_beat = false, .outputs = 0,
-    .wifi_slots = 1,
+    .wifi_slots = 1, .settable_tempo = false,
 };
 
 /* ESP-035: THE WIFI SLOT COUNT IS A CAPABILITY TOO, and this is not a nicety.
@@ -74,6 +74,24 @@ void test_a_board_with_no_configurable_outputs_emits_an_empty_clock_array(void) 
 
     TEST_ASSERT_NOT_NULL(strstr(b, "\"clock\":[]"));
     TEST_ASSERT_NOT_NULL(strstr(b, "\"clock_out\""));   // the on/off is still real
+}
+
+// ESP-037: a settable-tempo board publishes its STORED tempo so a client can show the
+// number you set -- distinct from /status.bpm, which is the EFFECTIVE tempo (Link's,
+// when a session is driving). Milli-BPM in, decimal BPM out.
+void test_a_settable_tempo_board_emits_its_stored_bpm(void) {
+    char b[768];
+    c.tempo_mbpm = 128000;
+    ks_config_json(b, sizeof(b), &c, &kAllFitted);
+    TEST_ASSERT_NOT_NULL(strstr(b, "\"bpm\":128.000"));
+}
+
+// ...and a listener-only board (X32Link) says NOTHING about tempo -- it cannot set one,
+// so emitting a bpm would be the same lie as reporting hardware it doesn't have.
+void test_a_listener_only_board_omits_bpm(void) {
+    char b[768];
+    ks_config_json(b, sizeof(b), &c, &kX32Link);
+    TEST_ASSERT_NULL(strstr(b, "\"bpm\""));
 }
 
 // THE RULE. Absent hardware is ABSENT from the document -- not reported false.
@@ -238,6 +256,8 @@ void test_fits_in_a_generously_sized_stack_buffer(void) {
 int main(void) {
     UNITY_BEGIN();
     // ESP-030: a device must not report hardware it does not have.
+    RUN_TEST(test_a_settable_tempo_board_emits_its_stored_bpm);
+    RUN_TEST(test_a_listener_only_board_omits_bpm);
     RUN_TEST(test_hardware_that_is_not_fitted_is_not_emitted_at_all);
     RUN_TEST(test_a_bare_board_still_reports_what_it_does_have);
     RUN_TEST(test_a_fitted_board_reports_the_full_document);
