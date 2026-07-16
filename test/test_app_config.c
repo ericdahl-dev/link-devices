@@ -5,6 +5,28 @@
 void setUp(void)    {}
 void tearDown(void) {}
 
+// ESP-040: THE BUG. X32Link's handle_save read input_source / midi_clock_out /
+// phase_flash UNCONDITIONALLY, and an absent key decodes to 0 — a LEGAL value for all
+// three. So a partial POST (the iOS app saving a WiFi network, a subset form) silently
+// reset the tempo source to Link, disabled the MIDI clock, and flipped the phase display
+// to sweep. A patch (full_form=false) must leave absent fields ALONE.
+void test_partial_post_preserves_legal_zero_fields(void) {
+    AppConfig base; config_defaults(&base);
+    app_config_set(&base, ACF_INPUT_SOURCE, 1);        // USB MIDI clock (legal 1)
+    app_config_set(&base, ACF_MIDI_CLOCK_OUT, 1);      // clock out ON
+    app_config_set(&base, ACF_PHASE_DISPLAY_MODE, 1);  // beat-flash dot
+
+    // The app saves only a WiFi network — nothing about the clock or phase.
+    const X32FormField fields[] = { {"wifi_ssid", "StudioNet"} };
+    AppConfig out;
+    x32_form_merge(&out, &base, fields, 1, /*full_form=*/false);
+
+    TEST_ASSERT_EQUAL_INT(1, out.input_source);         // NOT reset to Link
+    TEST_ASSERT_EQUAL_INT(1, out.midi_clock_out_enable);// NOT disabled
+    TEST_ASSERT_EQUAL_INT(1, out.phase_display_mode);   // NOT flipped to sweep
+    TEST_ASSERT_EQUAL_STRING("StudioNet", out.wifi_ssid);
+}
+
 void test_defaults_model_is_xr18(void) {
     AppConfig cfg;
     config_defaults(&cfg);
@@ -321,6 +343,106 @@ void test_decode_invalid_contents_defaults(void) {
     TEST_ASSERT_TRUE(out.mixer_ip[0] != '\0');
 }
 
+// The device's OWN page posts the whole form (full_form=true). An unchecked checkbox
+// sends nothing, so its absence MUST mean off — that's the only way the page can turn one
+// off. This is the flip side of the partial-POST rule and must not disable it.
+void test_full_form_absent_checkbox_turns_off(void) {
+    AppConfig base; config_defaults(&base);
+    app_config_set(&base, ACF_MIDI_CLOCK_OUT, 1);
+    app_config_set(&base, ACF_PHASE_DISPLAY_MODE, 1);
+
+    // A full form with the two checkboxes UNCHECKED (absent), value fields present.
+    const X32FormField fields[] = {
+        {"input_source", "0"}, {"model", "1"}, {"fx_slot", "1"}, {"mixer_ip", "192.168.0.2"},
+    };
+    AppConfig out;
+    x32_form_merge(&out, &base, fields, 4, /*full_form=*/true);
+    TEST_ASSERT_EQUAL_INT(0, out.midi_clock_out_enable);   // absent checkbox -> off
+    TEST_ASSERT_EQUAL_INT(0, out.phase_display_mode);
+}
+
+void test_full_form_present_checkbox_stays_on(void) {
+    AppConfig base; config_defaults(&base);
+    const X32FormField fields[] = { {"midi_clock_out", "1"}, {"phase_flash", "1"} };
+    AppConfig out;
+    x32_form_merge(&out, &base, fields, 2, /*full_form=*/true);
+    TEST_ASSERT_EQUAL_INT(1, out.midi_clock_out_enable);   // present -> back on after pre-clear
+    TEST_ASSERT_EQUAL_INT(1, out.phase_display_mode);
+}
+
+// A full form must NOT zero a VALUE field just because it's a legal 0 — only genuine
+// checkboxes get the absent-means-off treatment. input_source is a hidden value field
+// (always sent), so full-form pre-clear must never touch it.
+void test_full_form_does_not_zero_the_value_fields(void) {
+    AppConfig base; config_defaults(&base);
+    app_config_set(&base, ACF_INPUT_SOURCE, 1);   // USB MIDI
+    // A full form that (hypothetically) omitted input_source must keep it, not clear it —
+    // the pre-clear list is checkboxes only.
+    const X32FormField fields[] = { {"midi_clock_out", "1"} };
+    AppConfig out;
+    x32_form_merge(&out, &base, fields, 1, /*full_form=*/true);
+    TEST_ASSERT_EQUAL_INT(1, out.input_source);   // not a checkbox — never zeroed
+}
+
+// ESP-040 round-trip: the SHARED keys X32Link's /config.json publishes (clock_out,
+// led_beat, led_accent) must be accepted by /save under the SAME names, so a client can
+// read the config and write it back. Before this they were bespoke (midi_clock_out,
+// dot_beat, dot_acc) and a round-trip was impossible.
+void test_config_json_shared_keys_round_trip(void) {
+    AppConfig base; config_defaults(&base);
+    const X32FormField fields[] = {
+        {"clock_out",  "1"},        // /config.json's name for midi_clock_out_enable
+        {"led_beat",   "#112233"},  // dot_beat_color
+        {"led_accent", "#445566"},  // dot_accent_color
+    };
+    AppConfig out;
+    x32_form_merge(&out, &base, fields, 3, /*full_form=*/false);
+    TEST_ASSERT_EQUAL_INT(1, out.midi_clock_out_enable);
+    TEST_ASSERT_EQUAL_INT(0x112233, out.dot_beat_color);
+    TEST_ASSERT_EQUAL_INT(0x445566, out.dot_accent_color);
+}
+
+void test_kv_blank_password_keeps_current(void) {
+    AppConfig cfg; config_defaults(&cfg);
+    strcpy(cfg.wifi_pass, "downbeat99");
+    TEST_ASSERT_TRUE(app_config_set_kv(&cfg, "wifi_pass", ""));   // blank = keep
+    TEST_ASSERT_EQUAL_STRING("downbeat99", cfg.wifi_pass);
+}
+
+void test_kv_unknown_key_changes_nothing(void) {
+    AppConfig cfg; config_defaults(&cfg);
+    AppConfig before = cfg;
+    TEST_ASSERT_FALSE(app_config_set_kv(&cfg, "not_a_field", "9"));
+    TEST_ASSERT_EQUAL_INT(0, memcmp(&before, &cfg, sizeof(cfg)));
+}
+
+// An out-of-range value is rejected by config_validate (via app_config_set) and leaves the
+// field untouched — bit-rot in the form never reaches the mixer.
+void test_kv_over_range_value_is_rejected(void) {
+    AppConfig cfg; config_defaults(&cfg);
+    int before = cfg.quantum_beats;
+    TEST_ASSERT_FALSE(app_config_set_kv(&cfg, "quantum", "99"));   // max is 16
+    TEST_ASSERT_EQUAL_INT(before, cfg.quantum_beats);
+}
+
+// Regression guard: fx_slot validates against the model's slot max, so `model` must be
+// applied BEFORE `fx_slot` regardless of POST order. Here fx_slot=8 (valid only on X32)
+// appears in the array BEFORE model=X32 — a naive in-order merge would reject the 8
+// against the base XR18 (max 4) and silently drop it. The device's own full form relies
+// on this pairing every save.
+void test_merge_applies_model_before_fx_slot(void) {
+    AppConfig base; config_defaults(&base);   // XR18, slot 1
+    const X32FormField fields[] = {
+        {"fx_slot", "8"},        // deliberately before model in the array
+        {"model",   "2"},        // MODEL_X32 (slot max 8)
+        {"mixer_ip","192.168.0.2"},
+    };
+    AppConfig out;
+    x32_form_merge(&out, &base, fields, 3, /*full_form=*/true);
+    TEST_ASSERT_EQUAL_INT(MODEL_X32, out.model);
+    TEST_ASSERT_EQUAL_INT(8, out.fx_slot);   // not dropped to 1 by an ordering accident
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_decode_round_trip);
@@ -367,5 +489,14 @@ int main(void) {
     RUN_TEST(test_validate_accepts_midi_source);
     RUN_TEST(test_validate_rejects_source_above_range);
     RUN_TEST(test_validate_rejects_negative_source);
+    RUN_TEST(test_partial_post_preserves_legal_zero_fields);
+    RUN_TEST(test_full_form_absent_checkbox_turns_off);
+    RUN_TEST(test_full_form_present_checkbox_stays_on);
+    RUN_TEST(test_full_form_does_not_zero_the_value_fields);
+    RUN_TEST(test_config_json_shared_keys_round_trip);
+    RUN_TEST(test_kv_blank_password_keeps_current);
+    RUN_TEST(test_kv_unknown_key_changes_nothing);
+    RUN_TEST(test_kv_over_range_value_is_rejected);
+    RUN_TEST(test_merge_applies_model_before_fx_slot);
     return UNITY_END();
 }
