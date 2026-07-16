@@ -1,7 +1,7 @@
 # 15. Extract `ks-core` in-repo: move the shared engine out of `X32Link/`
 
 Date: 2026-07-16
-Status: proposed
+Status: accepted — **Option A** (bundle the move with ESP-026 / ADR-0009)
 
 ## Context
 
@@ -88,8 +88,14 @@ So the *symlink mechanics* don't improve now; the *ownership* does. Two sequenci
 
 **Recommendation: A**, unless decoupling the flagship from X32Link is urgent enough to
 justify B's throwaway churn. Either way the destination (`shared/`) and manifest are the
-same; only the timing differs. This ADR is *proposed* precisely so that call is made
-deliberately, not by a file sweep.
+same; only the timing differs.
+
+**Decision (2026-07-16): Option A.** The `shared/` extraction is bundled with the Touch's
+ESP-IDF convergence (ADR-0009 / ESP-026): when the Touch's 53 symlinks are deleted in favour
+of ESP-IDF path refs, the shared source relocates to `shared/` in the same change, so the
+move is symlink-neutral. This ADR therefore does not schedule a standalone move — it makes
+`shared/` the agreed destination and folds the mechanics into ESP-026's landing. The
+migration plan below is the checklist for that combined step.
 
 ## Migration plan
 
