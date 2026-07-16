@@ -182,9 +182,34 @@ void setup() {
     ktouch_web_begin();   // config form (on the STA IP or the AP)
 }
 
+#ifdef HAS_STATUS_RGB
+// ESP-043: drive the Super Mini's onboard WS2812 (GPIO48) as a status light. The
+// state->colour decision is the pure, host-tested ktouch_status_rgb(); this seam just
+// samples the live state and pushes the result to the LED. dark stopped, amber blink armed,
+// green beat-flash running, cyan when Link-locked, brighter accent on the bar-1 downbeat.
+#include "ktouch_status_rgb.h"
+#include "ktouch_midi_out.h"    // ktouch_midi_beats() / ktouch_midi_locked()
+#include "ktouch_transport.h"   // ktouch_transport_state()
+static void status_rgb_tick() {
+    StatusRgb c = ktouch_status_rgb((TransportLaunchState)ktouch_transport_state(),
+                                    ktouch_midi_locked() != 0,
+                                    ktouch_midi_beats(),
+                                    g_config.quantum_beats);
+    // Only touch the RMT when the colour actually changes -- loop() runs every ~5 ms and
+    // rgbLedWrite reconfigures the peripheral on each call.
+    static StatusRgb last = { 1, 1, 1 };   // impossible first value forces the first write
+    if (c.r == last.r && c.g == last.g && c.b == last.b) return;
+    last = c;
+    rgbLedWrite(STATUS_RGB_GPIO, c.r, c.g, c.b);
+}
+#endif
+
 void loop() {
     ktouch_web_tick();
     if (!g_ap_mode) tempo_source_poll();
+#ifdef HAS_STATUS_RGB
+    status_rgb_tick();
+#endif
 #ifdef HAS_TOUCH_DISPLAY
     ktouch_display_tick();
 #endif
