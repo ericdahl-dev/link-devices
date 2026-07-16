@@ -227,7 +227,7 @@ test_ktouch_migrate: test_ktouch_migrate.c $(KTOUCHMIGRATE) $(P4CONFIG) $(UNITY)
 	$(CC) $(CFLAGS) -I../KitchenSyncTouch $(filter %.c,$^) -o $@
 
 test_status_rgb: test_status_rgb.c $(STATUSRGB) $(UNITY) $(HEADERS)
-	$(CC) $(CFLAGS) -I../KitchenSyncTouch -I../X32Link $(filter %.c,$^) -o $@
+	$(CC) $(CFLAGS) -I../KitchenSyncTouch -I../X32Link $(filter %.c,$^) -o $@ -lm
 
 test_battery_gauge: test_battery_gauge.c $(BATTGAUGE) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
