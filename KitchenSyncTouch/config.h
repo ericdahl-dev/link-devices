@@ -86,3 +86,12 @@
 #if defined(BOARD_WAVESHARE_S3_TOUCH_LCD_147) && !defined(HAS_TOUCH_DISPLAY)
 #define HAS_TOUCH_DISPLAY
 #endif
+
+// ESP-043: the S3 Super Mini has ONE onboard addressable RGB (WS2812 on GPIO48, per the
+// Arduino esp32s3 variant's PIN_RGB_LED). A headless clock box has no screen, so drive it
+// as a visual beat/heartbeat -- the only local feedback the board can give. NOT enabled on
+// the Waveshare board (GPIO48 is spoken for by the panel there) or the DevKit.
+#if defined(BOARD_S3_SUPERMINI) && !defined(HAS_STATUS_RGB)
+#define HAS_STATUS_RGB
+#define STATUS_RGB_GPIO 48
+#endif
