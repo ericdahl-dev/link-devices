@@ -32,8 +32,15 @@ bool      g_ap_mode = false;              // true when serving the setup SoftAP
 static void start_ap(void) {
     g_ap_mode = true;
     WiFi.mode(WIFI_AP);
-    WiFi.softAP("KSTouch-Config");
+    // ESP-044: the setup SSID was invisible a few feet from a Super Mini even though
+    // softAP() returned true. Two causes, both fixed here: AP-mode modem sleep can gate
+    // the beacon, and the Super Mini's PCB antenna is weak, so the radio must run at full
+    // power. Harmless on the Touch product board (better beacon there too).
+    WiFi.setSleep(false);
+    bool ok = WiFi.softAP("KSTouch-Config");
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);   // max
     strlcpy(g_ks_host, "192.168.4.1", sizeof(g_ks_host));   // display shows this
+    if (!ok) Serial.println("[KSTouch] SoftAP start FAILED");
     Serial.println("[KSTouch] SoftAP 'KSTouch-Config' @ 192.168.4.1 for setup");
 }
 
