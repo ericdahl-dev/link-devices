@@ -14,4 +14,14 @@ menu "KitchenSync Configuration"
         help
             Password for the WiFi network. Set locally; do not commit.
 
+    config KS_TOUCH_DISPLAY
+        bool "Enable the 1.47\" touch LCD (Waveshare S3-Touch-LCD-1.47)"
+        depends on IDF_TARGET_ESP32S3
+        default n
+        help
+            ESP-026 spike: drive the KitchenSync Touch 1.47" LCD + AXS5106L touch from
+            this ESP-IDF firmware (see ks_display.cpp). S3-only — the panel exists on the
+            Waveshare S3-Touch-LCD board; a headless S3 (Super Mini) leaves this off.
+            Pulls in the LovyanGFX managed component (idf_component.yml, S3 target only).
+
 endmenu
