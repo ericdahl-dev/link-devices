@@ -11,6 +11,7 @@ typedef enum {
     TRANSPORT_NONE = 0,
     TRANSPORT_START,   // Link went stopped -> playing  (emit 0xFA)
     TRANSPORT_STOP,    // Link went playing -> stopped  (emit 0xFC)
+    TRANSPORT_RESTART, // realign on the bar line: stop THEN start (emit 0xFC then 0xFA)
 } TransportAction;
 
 typedef struct {

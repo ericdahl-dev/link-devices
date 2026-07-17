@@ -139,11 +139,14 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
                         st->tr[o].playing = false;
                         break;
                     case TL_RESTART:
-                        // Unreachable today: the P4 posts no TL_INTENT_REALIGN (only the
-                        // ESP-025 bench rig does). Supporting it here needs a plan-level
-                        // change -- a restart is TWO bytes (0xFC then 0xFA) in one tick,
-                        // and plan.transport[] holds exactly one action per output. Left
-                        // as an explicit no-op rather than silently degrading to Stop.
+                        // ESP-026: realign — stop THEN start, on the bar line. The plan
+                        // carries it as one RESTART action; ks_tick_out_bytes expands it to
+                        // 0xFC then 0xFA (both before the downbeat 0xF8 — the ESP-038
+                        // transport-before-clock invariant). Still playing afterward, so a
+                        // later session edge does not re-emit (mirror TL_START's tr sync).
+                        plan.transport[o] = TRANSPORT_RESTART;
+                        st->tr[o].primed  = true;
+                        st->tr[o].playing = true;
                         break;
                     case TL_NONE:
                     default:
@@ -201,6 +204,10 @@ int ks_tick_out_bytes(const KsTickPlan* p, int out, uint8_t* buf, int cap) {
      * this lives in one tested place instead of in glue loop order. */
     if (p->transport[out] == TRANSPORT_START && n < cap)      buf[n++] = 0xFA;
     else if (p->transport[out] == TRANSPORT_STOP && n < cap)  buf[n++] = 0xFC;
+    else if (p->transport[out] == TRANSPORT_RESTART) {       // realign: stop THEN start, one tick
+        if (n < cap) buf[n++] = 0xFC;
+        if (n < cap) buf[n++] = 0xFA;
+    }
     for (int i = 0; i < p->pulses[out] && n < cap; i++)       buf[n++] = 0xF8;
     return n;
 }
