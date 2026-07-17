@@ -39,6 +39,23 @@ void test_start_byte_precedes_first_clock(void) {
     TEST_ASSERT_LESS_THAN_INT(f8, fa);           // START strictly before first CLOCK
 }
 
+// ESP-038 for realign: the restart pair (0xFC then 0xFA) must both precede the downbeat
+// 0xF8 — same tick-late invariant as START, now with two transport bytes.
+void test_restart_pair_precedes_first_clock(void) {
+    KsTickPlan p; memset(&p, 0, sizeof p);
+    p.transport[0] = TRANSPORT_RESTART;
+    p.pulses[0]    = 3;
+    uint8_t buf[8];
+    int n = ks_tick_out_bytes(&p, 0, buf, sizeof buf);
+    int fc = idx_of(buf, n, 0xFC);
+    int fa = idx_of(buf, n, 0xFA);
+    int f8 = idx_of(buf, n, 0xF8);
+    TEST_ASSERT_EQUAL_INT(5, n);                  // FC + FA + 3 clocks
+    TEST_ASSERT_LESS_THAN_INT(f8, fc);            // STOP before first CLOCK
+    TEST_ASSERT_LESS_THAN_INT(f8, fa);            // START before first CLOCK
+    TEST_ASSERT_LESS_THAN_INT(fa, fc);            // and STOP strictly before START
+}
+
 void test_none_emits_only_clocks(void) {
     KsTickPlan p; memset(&p, 0, sizeof p);
     p.transport[0] = TRANSPORT_NONE;
@@ -57,6 +74,18 @@ void test_stop_emits_fc(void) {
     int n = ks_tick_out_bytes(&p, 0, buf, sizeof buf);
     TEST_ASSERT_EQUAL_INT(1, n);
     TEST_ASSERT_EQUAL_HEX8(0xFC, buf[0]);
+}
+
+// ESP-026: a realign (TL_RESTART) is a stop-then-start on the bar line — 0xFC THEN
+// 0xFA, in that order, as one tick's transport edge. Was a no-op on the P4 writer.
+void test_restart_emits_fc_then_fa(void) {
+    KsTickPlan p; memset(&p, 0, sizeof p);
+    p.transport[0] = TRANSPORT_RESTART;
+    uint8_t buf[8];
+    int n = ks_tick_out_bytes(&p, 0, buf, sizeof buf);
+    TEST_ASSERT_EQUAL_INT(2, n);
+    TEST_ASSERT_EQUAL_HEX8(0xFC, buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xFA, buf[1]);
 }
 
 void test_empty_plan_emits_nothing(void) {
@@ -304,6 +333,18 @@ void test_stop_is_immediate_per_output(void) {
     TEST_ASSERT_EQUAL_INT(TRANSPORT_STOP, ks_tick_step(&st, &b).transport[0]);
 }
 
+// ESP-026: through the full tick, a realign while running + on the bar line drives
+// TRANSPORT_RESTART on that output. Was a silent no-op — transport_launch produced
+// TL_RESTART but ks_tick dropped it on the floor, so the writer emitted nothing.
+void test_realign_drives_restart_through_the_tick(void) {
+    KsTickInputs a = mk(0, 0, true, true);
+    a.launch[0] = TL_INTENT_PLAY;
+    ks_tick_step(&st, &a);                                    // output 0 running, on the grid
+    KsTickInputs b = mk((int64_t)(4 * MPB), 0, true, true);   // beats = 4.0 — a bar line
+    b.launch[0] = TL_INTENT_REALIGN;
+    TEST_ASSERT_EQUAL_INT(TRANSPORT_RESTART, ks_tick_step(&st, &b).transport[0]);
+}
+
 // A disabled output never emits transport, whatever it is asked for.
 void test_disabled_output_emits_no_transport(void) {
     cfg.clock[0].enable = 0;
@@ -490,6 +531,7 @@ int main(void) {
     RUN_TEST(test_manual_owns_transport_when_session_silent);
     RUN_TEST(test_launch_tracks_without_usb);
     RUN_TEST(test_transport_is_per_output);
+    RUN_TEST(test_realign_drives_restart_through_the_tick);
     RUN_TEST(test_play_mid_bar_fires_on_the_downbeat);
     RUN_TEST(test_stop_is_immediate_per_output);
     RUN_TEST(test_disabled_output_emits_no_transport);
@@ -514,6 +556,8 @@ int main(void) {
     RUN_TEST(test_start_byte_precedes_first_clock);
     RUN_TEST(test_none_emits_only_clocks);
     RUN_TEST(test_stop_emits_fc);
+    RUN_TEST(test_restart_emits_fc_then_fa);
+    RUN_TEST(test_restart_pair_precedes_first_clock);
     RUN_TEST(test_empty_plan_emits_nothing);
     RUN_TEST(test_cap_never_overflows);
     return UNITY_END();
