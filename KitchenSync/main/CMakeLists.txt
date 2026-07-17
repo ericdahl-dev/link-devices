@@ -24,6 +24,11 @@ idf_component_register(
          "midi_clock_in.c"
          "${X32LINK_DIR}/midi_bpm_calc.c"
          "ks_web.cpp"
+         # ESP-026 spike: 1.47" touch LCD glue. Always compiled; real only under
+         # CONFIG_KS_TOUCH_DISPLAY (S3), a no-op otherwise, so ks_main calls it
+         # unconditionally. LovyanGFX comes in via idf_component.yml (S3 target only).
+         "ks_display.cpp"
+         "${X32LINK_DIR}/axs5106l.c"   # ESP-026 inc3: pure AXS5106L touch-report parser (shared, host-tested)
          # ESP-029: /status is now a SHARED module. It moved to X32Link/ and is symlinked
          # into KitchenSyncTouch/, so both firmwares emit /status from ONE implementation
          # and cannot drift apart again (ARC-024).
