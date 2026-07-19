@@ -54,6 +54,7 @@ CLOCKOUTPUT = ../X32Link/clock_output.c
 MVOICE = ../X32Link/metronome_voice.c
 SWING   = ../X32Link/swing.c
 METROSTRIP = ../X32Link/metro_strip.c
+LEDOUTPUT = ../X32Link/led_output.c
 CFGPERSIST = ../X32Link/config_persist.c
 LORAPKT    = ../LoraLink/lora_bpm_packet.c
 LORAFRESH  = ../LoraLink/lora_freshness.c
@@ -75,7 +76,7 @@ HEADERS = $(wildcard ../X32Link/*.h ../KitchenSync/main/*.h ../LoraLink/*.h \
 
 .PHONY: all clean
 
-all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_config_json test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper test_transport_launch test_ks_hostname test_ui_chrome test_ktouch_ui test_ktouch_migrate test_status_rgb test_usb_midi_batch test_config_persist test_master_clock test_buttons test_transport_led test_transport_button
+all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase test_led_phase test_wifi_down_blink test_app_config test_osc_out test_midi_bpm_calc test_bpm_publisher test_osc_in test_web_status_json test_touch_ui test_tempo_snapshot test_bar test_midi_clock_out test_clock_ticker test_beat_synth test_link_measurement_session test_session_timeline test_link_measure_pump test_ks_tick test_follow_beat test_usb_midi_pack test_beat_clock test_ks_status test_ks_config test_ks_config_json test_ks_form test_metronome test_transport test_clock_output test_metronome_voice test_beat_source test_swing test_midi_clock_in test_metro_strip test_led_output test_wifi_conn_policy test_lora_bpm_packet test_lora_freshness test_battery_gauge test_beat_stamper test_transport_launch test_ks_hostname test_ui_chrome test_ktouch_ui test_ktouch_migrate test_status_rgb test_usb_midi_batch test_config_persist test_master_clock test_buttons test_transport_led test_transport_button
 	./test_bpm_tracker
 	./test_link_protocol
 	./test_link_measurement
@@ -116,6 +117,7 @@ all: test_bpm_tracker test_link_protocol test_link_measurement test_link_phase t
 	./test_swing
 	./test_midi_clock_in
 	./test_metro_strip
+	./test_led_output
 	./test_wifi_conn_policy
 	./test_metronome
 	./test_lora_bpm_packet
@@ -281,6 +283,9 @@ test_swing: test_swing.c $(SWING) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
 test_metro_strip: test_metro_strip.c $(METROSTRIP) $(UNITY) $(HEADERS)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
+
+test_led_output: test_led_output.c $(LEDOUTPUT) $(METROSTRIP) $(UNITY) $(HEADERS)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ -lm
 
 test_wifi_conn_policy: test_wifi_conn_policy.c $(WIFICONNPOLICY) $(UNITY) $(HEADERS)
