@@ -41,6 +41,7 @@
 #include "i2s_audio_bus.h"     /* shared I2S_NUM_0 + ES8311 codec owner (P4-020) */
 #include "follow_beat_io.h"    /* mic capture task (P4-020) */
 #include "metro_strip.h"     /* pure WS2812 bar-position chase (P4-018) */
+#include "led_output.h"      /* ESP-046: per-output LED dispatcher (brightness owner) */
 #include "ks_led.h"       /* WS2812 strip glue (RMT) */
 #include "usb_midi_pack.h"
 #include "usb_midi_batch.h"   /* P4-034: one bulk transfer per tick, not one per output */
@@ -123,6 +124,16 @@ static volatile struct {
                                    * other counter here -- yet the wire goes silent. */
 } s_stat;
 
+/* ESP-046: LED inputs published by clock_out_task (plain stores, ~us) and consumed by the
+ * core-0 led_task. The render + blocking RMT push are OFF the 1 ms clock task now. A torn
+ * read just paints one slightly-stale frame -- invisible on a 50 fps strip. */
+static volatile struct {
+    bool     active, standby;
+    double   beats;
+    int      en, mode, fade, bright;
+    uint32_t beat_color, accent_color;
+} s_led;
+
 /* Priority 2 — the lowest thing running, and deliberately so. It logs (a blocking
  * UART write, ~10 ms: fatal in the 1 ms clock task, harmless here, P4-033) and, since
  * ARC-022, it also performs the debounced NVS write for live config edits. A flash
@@ -197,8 +208,6 @@ static void clock_out_task(void *arg)
 #if PHASE_DEBUG
     int64_t     last_phase_dbg = 0;     /* throttle the LNK-026 phase-debug log */
 #endif
-    int64_t     last_led = 0;           /* throttle the WS2812 refresh (P4-018) */
-    bool        led_showing = false;    /* is the strip currently lit (to clear once when off) */
 
     /* Tick-overrun probe: the analyzer caught the DIN clock stalling ~100 ms and then
      * emitting a capped catch-up burst (dropping pulses). Everything below shares this
@@ -353,38 +362,18 @@ static void clock_out_task(void *arg)
 
         int64_t now = esp_timer_get_time();
 
-        /* Visual metronome (P4-018): render the pure bar-position chase from the
-         * shared beat onto the WS2812 strip, throttled to ~50 fps so it doesn't
-         * steal time from the 1 ms clock loop. Independent of the audio metronome
-         * (its own led_enable switch); clears once when disabled or idle. */
-        if (now - last_led >= LED_FRAME_US) {
-            last_led = now;
-            if (cfg.led_enable && plan.active) {
-                MetroStripCfg lc = {
-                    .beat   = { (uint8_t)(cfg.led_beat_color   >> 16), (uint8_t)(cfg.led_beat_color   >> 8), (uint8_t)cfg.led_beat_color   },
-                    .accent = { (uint8_t)(cfg.led_accent_color >> 16), (uint8_t)(cfg.led_accent_color >> 8), (uint8_t)cfg.led_accent_color },
-                    .bright = (uint8_t)cfg.led_brightness,
-                    .mode   = (uint8_t)cfg.led_mode,
-                    .fade   = (uint8_t)cfg.led_fade,
-                };
-                RGB frame[LED_PIXELS];
-                if (plan.standby) {
-                    /* Joined but waiting for transport (ESP-009): breathe instead of
-                     * going dark, which is indistinguishable from a dead board. The
-                     * phase is wall-clock, not beat-derived -- in standby there is no
-                     * beat to derive it from. */
-                    double ph = (double)(now % STANDBY_PERIOD_US) / (double)STANDBY_PERIOD_US;
-                    metro_strip_standby(ph, LED_PIXELS, &lc, frame);
-                } else {
-                    metro_strip_render(plan.beats, (int)KS_TICK_METRO_QUANTUM, LED_PIXELS, &lc, frame);
-                }
-                ks_led_show(frame, LED_PIXELS);
-                led_showing = true;
-            } else if (led_showing) {
-                ks_led_clear();
-                led_showing = false;
-            }
-        }
+        /* ESP-046: publish LED inputs for the core-0 led_task. The render + blocking RMT
+         * push moved OFF this 1 ms clock loop (they were ~290us every 20th tick here, and
+         * would scale into ms with a longer strip). Plain stores, ~microseconds. */
+        s_led.active       = plan.active;
+        s_led.standby      = plan.standby;
+        s_led.beats        = plan.beats;
+        s_led.en           = cfg.led_enable;
+        s_led.mode         = cfg.led_mode;
+        s_led.fade         = cfg.led_fade;
+        s_led.bright       = cfg.led_brightness;
+        s_led.beat_color   = cfg.led_beat_color;
+        s_led.accent_color = cfg.led_accent_color;
 
         /* Publish, don't print (P4-033). Plain stores, ~microseconds; status_task
          * owns the console. This is what used to be a 7.5 ms blocking UART write. */
@@ -445,6 +434,41 @@ static void clock_out_task(void *arg)
     }
 }
 
+/* ESP-046: LED render + the blocking RMT push live HERE, on core 0 at low priority --
+ * NOT on the 1 ms clock task (core 1, pri 19). Reads the s_led snapshot the clock task
+ * publishes, so a slow strip push can no longer jitter the clock. The active path renders
+ * through led_output (the brightness owner); standby keeps metro_strip_standby's breathe. */
+static void led_task(void *arg)
+{
+    (void)arg;
+    bool led_showing = false;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(LED_FRAME_US / 1000));   /* ~50 fps */
+        if (s_led.en && s_led.active) {
+            RGB beat_rgb   = { (uint8_t)(s_led.beat_color   >> 16), (uint8_t)(s_led.beat_color   >> 8), (uint8_t)s_led.beat_color   };
+            RGB accent_rgb = { (uint8_t)(s_led.accent_color >> 16), (uint8_t)(s_led.accent_color >> 8), (uint8_t)s_led.accent_color };
+            RGB frame[LED_PIXELS];
+            if (s_led.standby) {
+                MetroStripCfg mc = { beat_rgb, accent_rgb, (uint8_t)s_led.bright, (uint8_t)s_led.mode, (uint8_t)s_led.fade };
+                double ph = (double)(esp_timer_get_time() % STANDBY_PERIOD_US) / (double)STANDBY_PERIOD_US;
+                metro_strip_standby(ph, LED_PIXELS, &mc, frame);
+            } else {
+                LedCfg lc = { .enable = 1, .style = LED_STYLE_METRONOME, .bright = s_led.bright,
+                              .beat_color = beat_rgb, .accent_color = accent_rgb,
+                              .mode = s_led.mode, .fade = s_led.fade };
+                LedSnapshot snap = { .beats = s_led.beats, .quantum = (int)KS_TICK_METRO_QUANTUM,
+                                     .transport = 0, .link_locked = 0 };
+                led_output_render(&snap, &lc, LED_PIXELS, frame);
+            }
+            ks_led_show(frame, LED_PIXELS);
+            led_showing = true;
+        } else if (led_showing) {
+            ks_led_clear();
+            led_showing = false;
+        }
+    }
+}
+
 void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -494,4 +518,7 @@ void app_main(void)
     /* P4-033: the console lives HERE, not in clock_out. Low priority (2) so a blocking
      * UART write can never preempt the clock generator. */
     xTaskCreate(status_task, "status", 3072, NULL, 2, NULL);
+    /* ESP-046: LED render + blocking RMT push on CORE 0 (clock owns core 1), low prio (3)
+     * so it can never preempt the clock generator no matter how long the strip push takes. */
+    xTaskCreatePinnedToCore(led_task, "led", 4096, NULL, 3, NULL, 0);
 }
