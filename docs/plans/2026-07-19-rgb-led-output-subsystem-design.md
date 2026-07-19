@@ -35,7 +35,7 @@ can pull in, with runtime control — and to leave room for a third.
 **Non-goals (this pass)**
 - Implementing the **Effect** style (defined + seamed only — see Scope).
 - Sound-reactive audio (mic → features) — a separate future subsystem.
-- Bringing up the WLED controller board (future; blocked on a serial/OTA path).
+- Bringing up the WLED controller board (future; flashed via WLED web OTA).
 
 ## The three styles
 
@@ -78,7 +78,20 @@ led[i]      (runtime, NVS):            { enable, style, bright, ...style-specifi
 | Super Mini (S3) | `{{ 48, 1, ONBOARD_SINGLE, false }}` |
 | KitchenSync (P4) | `{{ 2, 8, STRIP_RMT, true }}` |
 | Waveshare Touch (S3) | `{}` — GPIO48 is the panel; emits **no** `led` capability |
-| WLED controller (ESP32, future) | `{{ 16, ~150, STRIP_RMT, true }}` |
+| WLED controller (ESP32, future) | `{{ 16, 256, STRIP_RMT, true }}` — **2-D 32×8 matrix**, see caveat |
+
+**Confirmed WLED-controller profile** (read from a live WeGoIOT box running WLED
+16.0.0, MAC `e0:8c:fe:34:15:dc`, `192.168.1.252`): **ESP32 classic**, LED data
+**GPIO16** (2nd out GPIO2, button GPIO0), **256 LEDs as a 32×8 matrix** (maxpwr
+capped 1000 mA), **I2S digital mic** (AudioReactive). Flashable via **WLED web OTA**
+(no serial adapter; serial for recovery only).
+
+> **2-D matrix caveat.** This board is a **32×8 matrix, not a linear strip**, and the
+> current model (`metro_strip` / `led_output`) is **1-D** (`npix` linear). Two paths for
+> the Effect device: (a) treat it as a 256-px serpentine linear run — fine for a beat
+> metronome, ignores the 2nd dimension; (b) add a 2-D XY-map layer — required for real
+> WLED-parity 2-D effects. This is a genuine gap between the current model and this
+> hardware; it belongs to the Effect ticket (ESP-050 follow-on), not this pass.
 
 ### Data flow (the RT-safe split)
 
@@ -205,8 +218,9 @@ Per ADR-0003 (pure logic host-tested; glue thin) and the ks-core direction (ADR-
 
 - **Now:** Status + Metronome, unified per-output subsystem, on Super Mini (S3) + KitchenSync (P4).
 - **Defined but unbuilt:** the Effect style (enum + dispatch seam + effect-table shape).
-- **Future project:** the ESP32 WLED controller board (WeGoIOT, GPIO16 data, onboard mic,
-  16 A / 5–24 V for ~150 px) as an Effect device, and the mic → sound-reactive pipeline.
+- **Future project:** the ESP32 WLED controller board (WeGoIOT, ESP32 classic, GPIO16 data,
+  I2S mic, 16 A / 5–24 V, **256 LEDs as a 32×8 matrix**) as an Effect device — flashed via
+  WLED web OTA — plus the mic → sound-reactive pipeline and a 2-D matrix layer.
 
 ## References
 
