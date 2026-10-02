@@ -437,7 +437,7 @@ static void handle_status() {
                     * It obeys every intent it is given -- measured on the bench: stopped
                     * -> armed -> running with link_owns true throughout. So the device was
                     * announcing "I ignore your play button" while obeying it, and the app
-                    * believed it and greyed the button out. Play and stop were dead in the
+                    * believed it and grayed the button out. Play and stop were dead in the
                     * app for exactly as long as a Link peer had ever pressed play.
                     *
                     * A HISTORICAL flag published as a LIVE state. T-018 was a lifetime
