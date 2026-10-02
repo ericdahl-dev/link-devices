@@ -143,7 +143,7 @@ void metronome_audio_start(int volume, int voice)
 bool metronome_audio_ready(void) { return s_ready; }
 
 /* P4-029: re-apply volume + voice at runtime (no reboot) so the web /live path can
- * preview them like the LED colours. No-op until _ready() — the codec/I2S are only
+ * preview them like the LED colors. No-op until _ready() — the codec/I2S are only
  * brought up at boot when the metronome was enabled, so enabling it still needs a
  * reboot; only volume/voice of an already-running metronome are live. Re-renders the
  * two short bursts and re-sets the codec volume; a click landing mid-re-render is at

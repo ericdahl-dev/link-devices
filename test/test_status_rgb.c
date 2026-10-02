@@ -1,4 +1,4 @@
-// ESP-043: the Super Mini's onboard status RGB. The state->colour mapping is a pure
+// ESP-043: the Super Mini's onboard status RGB. The state->color mapping is a pure
 // function so it can be asserted here rather than eyeballed on the glass -- a screenless
 // box's only feedback has to be right without a person watching it.
 #include "unity.h"
@@ -30,14 +30,14 @@ void test_running_flashes_on_the_beat_and_is_dark_between(void) {
 
 // Free-run is green, Link-locked is cyan -- you can tell across the room whether it caught
 // the session. Green has no blue; cyan has blue.
-void test_running_colour_tells_free_from_link(void) {
+void test_running_color_tells_free_from_link(void) {
     StatusRgb freerun = ktouch_status_rgb(TL_RUNNING, false, ON_BEAT2, 4);
     StatusRgb locked  = ktouch_status_rgb(TL_RUNNING, true,  ON_BEAT2, 4);
     TEST_ASSERT_TRUE(freerun.g > 0 && freerun.b == 0);   // green
     TEST_ASSERT_TRUE(locked.b > 0  && locked.g > 0);     // cyan (green+blue)
 }
 
-// The bar-1 downbeat is a brighter accent of the same colour, so the "one" reads without a
+// The bar-1 downbeat is a brighter accent of the same color, so the "one" reads without a
 // hue change that would fight the free/Link signal.
 void test_downbeat_is_brighter_than_the_other_beats(void) {
     StatusRgb down = ktouch_status_rgb(TL_RUNNING, false, ON_BEAT,  4);   // whole 4 => beat 1
@@ -58,7 +58,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_stopped_is_dark_even_on_the_beat);
     RUN_TEST(test_running_flashes_on_the_beat_and_is_dark_between);
-    RUN_TEST(test_running_colour_tells_free_from_link);
+    RUN_TEST(test_running_color_tells_free_from_link);
     RUN_TEST(test_downbeat_is_brighter_than_the_other_beats);
     RUN_TEST(test_armed_blinks_amber_on_the_beat);
     return UNITY_END();

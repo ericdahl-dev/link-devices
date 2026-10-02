@@ -31,7 +31,7 @@ extern "C" {
 // went silent for over TWO MINUTES while /status cheerfully reported sync:1 peers:1.
 //
 // 0.25 beat = 6 pulses at 24 PPQN. Smaller backsteps (an ordinary xform refinement, sub-ms)
-// cost a few pulses of quantisation and are absorbed; anything past this is a re-origin.
+// cost a few pulses of quantization and are absorbed; anything past this is a re-origin.
 #define BEAT_SOURCE_BACKSTEP_BEATS 0.25
 
 typedef struct {

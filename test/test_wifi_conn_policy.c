@@ -4,7 +4,7 @@
 #include "wifi_conn_policy.h"
 
 static WifiConnPolicy p;
-void setUp(void)    { wifi_conn_policy_reset(&p, 0, 1); }   // one slot = pre-ESP-013 behaviour
+void setUp(void)    { wifi_conn_policy_reset(&p, 0, 1); }   // one slot = pre-ESP-013 behavior
 void tearDown(void) {}
 
 /* ---- cold-start budget (was wifi_fallback) ----------------------------- */

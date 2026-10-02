@@ -4,7 +4,7 @@
 
 void ks_tick_reset(KsTickState* st, uint32_t cfg_gen) {
     beat_source_reset(&st->src);
-    /* P4-038: INITIALISE the lifetime counter. Callers do `KsTickState ts;
+    /* P4-038: INITIALIZE the lifetime counter. Callers do `KsTickState ts;
      * ks_tick_reset(&ts, gen);` — leaving this alone means it starts as stack garbage and
      * can never be trusted, the same trap clock_ticker.c calls out for `dropped`. The host
      * test caught precisely that: a phantom +1 on a fresh state. */
@@ -93,7 +93,7 @@ KsTickPlan ks_tick_step(KsTickState* st, const KsTickInputs* in) {
         // Arbitration, PER OUTPUT: exactly one master owns each output's transport.
         // Link owns an output once the session publishes StartStopState AND that
         // output is set to follow it (cfg.clock[o].follow_link, the default); such
-        // an output ignores manual presses and the UI greys its toggle. An output
+        // an output ignores manual presses and the UI grays its toggle. An output
         // with follow_link=0 is manual: its web toggle drives it and the session's
         // transport never touches it, so a drum machine can follow Ableton while a
         // synth is launched by hand two bars later (ESP-011's whole point).

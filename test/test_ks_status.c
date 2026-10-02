@@ -75,7 +75,7 @@ void test_launch_state_array_present(void) {
 }
 
 // Transport state: the session's real playing flag and whether Link owns
-// transport, so the UI can reflect play/stop and grey the manual buttons.
+// transport, so the UI can reflect play/stop and gray the manual buttons.
 void test_transport_state_fields(void) {
     char b[300];
     ks_status_json(b, sizeof(b), 126.0f, 0.0f, 2, false, 0, "2.1.0", false, 0.0f, 0.0f, false, kNoLaunch, 4, true, true, NULL, NULL, NULL, NULL, NULL);

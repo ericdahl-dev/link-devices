@@ -1,7 +1,7 @@
 // Host tests for the ARC-022 debounced config write-through policy.
 //
 // The bug this exists to kill: /live applied a setting to the running config and
-// never wrote NVS, so every live-safe field -- metronome voice, LED colours, and
+// never wrote NVS, so every live-safe field -- metronome voice, LED colors, and
 // the whole clock[] array including follow_link -- silently reverted on reboot.
 // Writing on every /live POST is not the fix: config is ONE nvs blob, and a
 // slider drag emits dozens of POSTs, so that would blob-write flash tens of times
@@ -10,7 +10,7 @@
 // So a live edit marks the config dirty and the blob is written once the edits
 // settle. That debounce is the only part of the fix with real logic in it, which
 // is why it is the part that is pure and tested. Time is an INPUT: the test owns
-// the clock, so the timing behaviour is provable with no device, no flash, and no
+// the clock, so the timing behavior is provable with no device, no flash, and no
 // power cycle.
 #include "unity.h"
 #include "config_persist.h"

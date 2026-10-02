@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-// Initialise the RMT WS2812 device on `gpio` for `npix` pixels. Safe to call once
+// Initialize the RMT WS2812 device on `gpio` for `npix` pixels. Safe to call once
 // at boot even if the LED feature is off; a failure logs and disables show/clear.
 void ks_led_start(int gpio, int npix);
 

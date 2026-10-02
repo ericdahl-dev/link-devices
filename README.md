@@ -31,7 +31,7 @@ preserved; recovery tag `pre-split-2026-07-04` on the old repo).
   (P4-032). Streams the P4's onboard mic into an Ableton Live 12.4 session as a
   **Link Audio** channel, sample-rate-adaptive and calibrated to ~1 ms of Live's
   grid. Deliberately separate from KitchenSync: it links the **GPLv2** Ableton
-  Link SDK, which cannot ship in closed hardware without a commercial licence
+  Link SDK, which cannot ship in closed hardware without a commercial license
   from Ableton — a business gate nobody has cleared yet. See
   [`LinkAudioPoC/README.md`](LinkAudioPoC/README.md).
 

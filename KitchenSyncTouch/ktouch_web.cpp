@@ -424,7 +424,7 @@ static void handle_status() {
                     * defers to Link.
                     *
                     * ks_status.h defines link_owns as a LIVE claim: "when link_owns is
-                    * true the manual PLAY/STOP buttons are ignored, so the UI greys
+                    * true the manual PLAY/STOP buttons are ignored, so the UI grays
                     * them". A client is entitled to take that literally, and the iOS app
                     * does -- it stops SENDING the tap.
                     *
@@ -456,7 +456,7 @@ static void handle_status() {
 /* ESP-030 pt3: POST /live — apply a partial patch IMMEDIATELY, no reboot.
  *
  * This device had no /live at all. It grew bespoke one-off endpoints (/nudge, /bright)
- * while the P4 generalised to /live plus a form grammar. Same drift as /status: the
+ * while the P4 generalized to /live plus a form grammar. Same drift as /status: the
  * clock ENGINE is shared (46 symlinked modules), the WEB layer never was. So every
  * live edit the iOS app made — nudge, swing, rate, cable — POSTed to /live, got a 404,
  * and was swallowed. The controls looked dead because the request landed nowhere.

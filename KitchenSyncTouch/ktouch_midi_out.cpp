@@ -51,7 +51,7 @@ static MasterClock     s_mc;   // ESP-027
  *
  * Worth knowing: this task is pinned to core 1, and Arduino's loopTask runs on core 1
  * too (CONFIG_ARDUINO_RUNNING_CORE=1). So the MIDI writer SHARES a core with the web
- * server, the LovyanGFX SPI blits and the I2C touch reads. It out-prioritises them
+ * server, the LovyanGFX SPI blits and the I2C touch reads. It out-prioritizes them
  * (6 vs 1), so plain preemption should cover it -- which is exactly why a large gap
  * would be interesting: it would mean something preemption cannot fix.
  *
@@ -261,7 +261,7 @@ static void writer_task(void*) {
         if (gap  > s_max_gap_us)  s_max_gap_us  = gap;
         if (work > s_max_work_us) {
             s_max_work_us = work;
-            // Stage split re-labelled to match the new order -- the probe must keep
+            // Stage split re-labeled to match the new order -- the probe must keep
             // measuring the stage it names, or ESP-018's next diagnosis reads a lie.
             w_beats = t_beats  - tk0;       // tempo_source_beats_now()
             w_tport = t_tport  - t_beats;   // clock_output_step + transport byte + publish

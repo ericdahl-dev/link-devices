@@ -12,10 +12,10 @@ distributed .bin traces back to source.
   JSON `"fw"` field (fleet-auditable by script), and the `/update` OTA page
   shows the running version before you flash over it. One shared
   `fw_version.h` across X32Link, KitchenSync, and the X32 emulator.
-- Beat LED colours (LNK-039): on RGB-LED boards (QT Py NeoPixel) the beat LED
-  follows the web UI's BEAT/BAR1 colour pickers — bar-1 downbeat gets the
-  accent colour, live-applied with no reboot. The WiFi-down diagnostic blink
-  stays fixed green so a dark user colour can never hide it.
+- Beat LED colors (LNK-039): on RGB-LED boards (QT Py NeoPixel) the beat LED
+  follows the web UI's BEAT/BAR1 color pickers — bar-1 downbeat gets the
+  accent color, live-applied with no reboot. The WiFi-down diagnostic blink
+  stays fixed green so a dark user color can never hide it.
 - CI now compile-checks the QT Py NeoPixel board profile (`LED_RGB` path)
   alongside the headless and Waveshare touch variants.
 

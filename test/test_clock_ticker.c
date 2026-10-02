@@ -125,7 +125,7 @@ void test_normal_catchup_drops_nothing(void) {
 // trusted (this test caught exactly that -- it read 25 instead of 24). Keeping a
 // lifetime total across resets is the glue's job; a pure struct cannot tell "first
 // init" from "re-prime".
-void test_reset_zeroes_dropped_so_it_is_always_initialised(void) {
+void test_reset_zeroes_dropped_so_it_is_always_initialized(void) {
     ClockTicker t; clock_ticker_reset(&t);
     clock_ticker_ticks_due(&t, 0.0, 24, 4);
     clock_ticker_ticks_due(&t, 1.0, 24, 4);           // 24 discarded
@@ -151,6 +151,6 @@ int main(void) {
     RUN_TEST(test_bar_reset_bad_quantum);
     RUN_TEST(test_realign_counts_the_pulses_it_discards);
     RUN_TEST(test_normal_catchup_drops_nothing);
-    RUN_TEST(test_reset_zeroes_dropped_so_it_is_always_initialised);
+    RUN_TEST(test_reset_zeroes_dropped_so_it_is_always_initialized);
     return UNITY_END();
 }

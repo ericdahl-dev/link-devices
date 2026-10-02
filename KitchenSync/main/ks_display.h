@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-// Initialise the panel + backlight and spawn the render task. Idempotent-safe to call
+// Initialize the panel + backlight and spawn the render task. Idempotent-safe to call
 // once from app_main. No-op unless CONFIG_KS_TOUCH_DISPLAY.
 void ks_display_start(void);
 

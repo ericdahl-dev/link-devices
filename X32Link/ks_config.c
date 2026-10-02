@@ -203,7 +203,7 @@ bool ks_config_set(KsConfig* c, const char* key, const char* value) {
         c->led_fade = v;
         return true;
     }
-    // Colours arrive from an HTML <input type="color"> as "#rrggbb" (the '#' is
+    // Colors arrive from an HTML <input type="color"> as "#rrggbb" (the '#' is
     // url-decoded before we see it); accept with or without the leading '#'.
     if (strcmp(key, "led_beat") == 0 || strcmp(key, "led_accent") == 0) {
         const char* hex = (value[0] == '#') ? value + 1 : value;
@@ -247,7 +247,7 @@ void ks_config_live_safe_copy(KsConfig* dst, const KsConfig* src) {
     for (int o = 0; o < KS_CLOCK_OUTPUTS; o++) dst->clock[o] = src->clock[o];
     dst->tempo_mbpm = src->tempo_mbpm;   /* ESP-037: a set tempo is a LIVE edit */
     /* ESP-042: the fleet fields are all live -- no reboot to change quantize, the
-     * transport gate, the touch behaviour, or the backlight. */
+     * transport gate, the touch behavior, or the backlight. */
     dst->quantum_beats    = src->quantum_beats;
     dst->transport_enable = src->transport_enable;
     dst->play_on_release  = src->play_on_release;
@@ -357,7 +357,7 @@ ks_decode_result ks_config_decode(KsConfig* out, const void* blob, size_t blob_l
         memcpy(&v1, blob, sizeof(v1));
         KsConfig candidate;
         migrate_v1(&candidate, &v1);
-        // A migration is not a licence to skip the guard.
+        // A migration is not a license to skip the guard.
         if (!ks_config_valid(&candidate)) return KS_DECODE_DEFAULTED;
         *out = candidate;
         return KS_DECODE_MIGRATED;

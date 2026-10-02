@@ -317,8 +317,8 @@ static void enter_keyboard(void) {
 
 // LNK-036: paint the phase indicator. Called every loop (not the 10 Hz text throttle)
 // so the beat flash lands on the beat instead of up to a throttle-length behind it.
-// Mode 0 = sweeping marker; mode 1 = beat-flash dot: light on each beat (accent colour
-// on the bar-1 downbeat, beat colour otherwise) then blank to black between beats so
+// Mode 0 = sweeping marker; mode 1 = beat-flash dot: light on each beat (accent color
+// on the bar-1 downbeat, beat color otherwise) then blank to black between beats so
 // each beat reads as a distinct flash.
 #define DOT_FLASH_ON_MS 70
 static void render_phase_indicator(const TempoSnapshot &ts, uint32_t now) {

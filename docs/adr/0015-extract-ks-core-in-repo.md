@@ -91,7 +91,7 @@ justify B's throwaway churn. Either way the destination (`shared/`) and manifest
 same; only the timing differs.
 
 **Decision (2026-07-16): Option A.** The `shared/` extraction is bundled with the Touch's
-ESP-IDF convergence (ADR-0009 / ESP-026): when the Touch's 53 symlinks are deleted in favour
+ESP-IDF convergence (ADR-0009 / ESP-026): when the Touch's 53 symlinks are deleted in favor
 of ESP-IDF path refs, the shared source relocates to `shared/` in the same change, so the
 move is symlink-neutral. This ADR therefore does not schedule a standalone move — it makes
 `shared/` the agreed destination and folds the mechanics into ESP-026's landing. The
@@ -164,5 +164,5 @@ migration plan below is the checklist for that combined step.
   (and re-pointed Touch symlinks) until the Arduino consumers reach ESP-IDF.
 - The separate `ks-core` **repo** still waits for its own trigger; this ADR does not create
   one. Each later extraction gets its own ADR when its trigger fires.
-- No behaviour changes: this is a move + re-point, gated on the full suite and every firmware
+- No behavior changes: this is a move + re-point, gated on the full suite and every firmware
   target still building.

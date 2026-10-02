@@ -75,7 +75,7 @@ typedef struct {
 //
 // `wifi` has caps.wifi_slots entries and `clock` has caps.outputs entries -- the FITTED
 // counts, never padded, because a client renders a row/card per element and would
-// otherwise draw slots and outputs the device cannot honour. Same order as the form's
+// otherwise draw slots and outputs the device cannot honor. Same order as the form's
 // slot/output numbering (slot 0 is the unsuffixed "wifi_ssid"/"clk0_*" keys).
 //
 // Returns snprintf()'s return value (same truncation-detection convention as

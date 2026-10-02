@@ -145,7 +145,7 @@ static void status_task(void *arg)
                  (unsigned long)s_stat.usb_dropped);
         /* P4-038: the counters are LIFETIME now (/status owns them), so this no longer
          * zeroes them. Log on the EDGE -- only when the count has grown since the last
-         * pass -- which keeps the old "shout when something happened" serial behaviour
+         * pass -- which keeps the old "shout when something happened" serial behavior
          * without a log per overrun. (A log per overrun is a blocking ~13 ms UART write
          * that delays the next tick, which overruns, which logs: the feedback loop that
          * manufactured 3945 phantom overruns in 40 s on the Touch.) */

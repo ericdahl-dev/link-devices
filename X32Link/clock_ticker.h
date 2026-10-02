@@ -23,7 +23,7 @@ typedef struct {
     // burst -- the right musical call, but `return 0` throws every pending pulse
     // away, and until now it did so with NO trace: no burst on the analyzer, no
     // counter, no log. A stall long enough to trip it was simply invisible.
-    // reset() ZEROES this, so it is always initialised (callers declare the struct on
+    // reset() ZEROES this, so it is always initialized (callers declare the struct on
     // the stack and call reset on it). Keeping a LIFETIME total across resets is the
     // caller's job -- a pure struct cannot distinguish "first init" from "re-prime".
     uint32_t dropped;

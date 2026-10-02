@@ -144,11 +144,11 @@ Keys: `↑`/`↓` tempo ±1, `←`/`→` tempo ±0.1, `space` start/stop, `q`/`Q
 `p` force beat 0 onto *now* (a known downbeat to trigger the analyzer on), `s` start/stop
 sync, `a` Link on/off, `x` quit. Flags: `--tempo N`, `--quantum N`, `--play`.
 
-Two behaviours that will otherwise read as firmware bugs:
+Two behaviors that will otherwise read as firmware bugs:
 
 - **A peer that joins an already-playing session stays stopped.** This is Link's design,
   not a bug: start/stop is last-writer-wins by timestamp (`Controller.hpp:89`), and a
-  booting peer initialises its start/stop state with `timestamp = hostTime`
+  booting peer initializes its start/stop state with `timestamp = hostTime`
   (`Controller.hpp:67`) — so its fresh "stopped" is *newer* than an earlier "playing" and
   wins. Tempo, by contrast, *is* adopted by late joiners, which makes the asymmetry
   extra confusing. **Form the session first, then press play.** A device that reboots

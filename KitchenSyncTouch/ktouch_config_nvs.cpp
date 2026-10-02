@@ -43,7 +43,7 @@ static bool migrate_legacy_keys(KsConfig* cfg) {
     prefs.getString("wifi_ssid", cfg->wifi[0].ssid, sizeof(cfg->wifi[0].ssid));
     prefs.getString("wifi_pass", cfg->wifi[0].pass, sizeof(cfg->wifi[0].pass));
 
-    // A migration is not a licence to skip the guard: garbage in the old keys is still
+    // A migration is not a license to skip the guard: garbage in the old keys is still
     // garbage. Same gate the blob path runs through.
     return ks_config_valid(cfg);
 }
