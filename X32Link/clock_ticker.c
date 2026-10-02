@@ -5,7 +5,7 @@
 void clock_ticker_reset(ClockTicker* s) {
     s->last_tick = 0;
     s->primed    = false;
-    /* Zeroed here so the counter is always INITIALISED -- callers do
+    /* Zeroed here so the counter is always INITIALIZED -- callers do
      * `ClockTicker t; clock_ticker_reset(&t);`, so leaving it alone means it starts as
      * stack garbage and can never be trusted. reset() only fires at startup and on Link
      * phase-invalid (no clock to drop anyway), so nothing real is lost. Accumulating a

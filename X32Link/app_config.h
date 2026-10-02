@@ -71,7 +71,7 @@ bool app_config_set(AppConfig* cfg, AppConfigField field, int value);
 // quantum_beats), plus the X32-only fields (model, mixer_ip, fx_slot, input_source,
 // phase_flash). Int fields route through app_config_set (so config_validate stays the one
 // range owner); strings are bounded-copied and a BLANK ssid/pass/ip is a no-op "keep
-// current" (a form can't show a password). Returns true iff the key was recognised and
+// current" (a form can't show a password). Returns true iff the key was recognized and
 // the value applied.
 bool app_config_set_kv(AppConfig* cfg, const char* key, const char* val);
 
@@ -88,7 +88,7 @@ typedef struct { const char* key; const char* val; } X32FormField;
 //   full_form == true   → the device's OWN page posted the whole form, so an ABSENT
 //                         checkbox-backed boolean (midi_clock_out_enable, phase_display_mode)
 //                         means "off" and is pre-cleared before the present keys reapply.
-//                         Value fields (input_source, colours, ...) are NEVER zeroed by
+//                         Value fields (input_source, colors, ...) are NEVER zeroed by
 //                         absence — only genuine checkboxes are.
 //
 // `out` is not validated here; the caller runs config_validate() exactly as before.

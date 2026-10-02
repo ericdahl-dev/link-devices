@@ -24,7 +24,7 @@ static int start(uint32_t ip, uint16_t port, int64_t now) {
 static void run_acts(int n) {
     for (int i = 0; i < n; i++) {
         switch (acts[i].type) {
-            case LS_FLUSH_RX:      break;   // sockets: not modelled here
+            case LS_FLUSH_RX:      break;   // sockets: not modeled here
             case LS_SEND_PING:     break;
             case LS_START_ATTEMPT: link_measurement_attempt_begin(); break;
             case LS_END_OK:        link_measurement_attempt_end(true);  break;

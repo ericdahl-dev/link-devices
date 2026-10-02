@@ -99,7 +99,7 @@ bool config_validate(const AppConfig* cfg) {
 }
 
 // ESP-040: an HTML <input type=color> posts "#rrggbb"; accept with or without the '#'.
-// Rejects anything that isn't exactly six hex digits so a garbled colour never reaches
+// Rejects anything that isn't exactly six hex digits so a garbled color never reaches
 // the config as a partial parse.
 static int parse_hex_color(const char* v, int* out) {
     if (v[0] == '#') v++;
@@ -128,7 +128,7 @@ bool app_config_set_kv(AppConfig* cfg, const char* key, const char* val) {
     if (strcmp(key, "wifi_pass") == 0) return keep_or_copy(cfg->wifi_pass, sizeof(cfg->wifi_pass), val);
     if (strcmp(key, "mixer_ip")  == 0) return keep_or_copy(cfg->mixer_ip,  sizeof(cfg->mixer_ip),  val);
 
-    // Colours: the SHARED key (led_beat/led_accent, what /config.json emits) and the
+    // Colors: the SHARED key (led_beat/led_accent, what /config.json emits) and the
     // device's own form key (dot_beat/dot_acc) are aliases for one field.
     if (strcmp(key, "led_beat") == 0 || strcmp(key, "dot_beat") == 0) {
         int c; if (!parse_hex_color(val, &c)) return false;
@@ -163,7 +163,7 @@ void x32_form_merge(AppConfig* out, const AppConfig* base,
     if (full_form) {
         // The device's own page posted the whole form, so an unchecked (absent) checkbox
         // means "off". Pre-clear the two checkbox-backed booleans; a present key below
-        // flips its own back on. Value fields (input_source, colours, model, ...) are
+        // flips its own back on. Value fields (input_source, colors, model, ...) are
         // NEVER cleared by absence — only genuine checkboxes are, which is the whole point.
         out->midi_clock_out_enable = 0;
         out->phase_display_mode    = 0;

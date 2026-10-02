@@ -103,7 +103,7 @@ color:var(--ink);cursor:pointer}
 .tp.armed{border-color:var(--amber);color:var(--amber)}
 .tp.running{border-color:#7fbf1f;color:var(--led)}
 .tp:disabled{opacity:.4;cursor:not-allowed;border-color:var(--line);color:var(--mut)}
-/* ESP-011: per-output transport toggle — one control, state is the label/colour
+/* ESP-011: per-output transport toggle — one control, state is the label/color
    (the KitchenSync Touch device's full-screen toggle, shrunk to a row). */
 .tgl{flex:1;font-family:var(--disp);font-weight:800;font-size:13px;letter-spacing:.14em;
 padding:11px 12px;border-radius:9px;cursor:pointer;border:1px solid var(--line);
@@ -146,7 +146,7 @@ border:1px solid var(--line);border-radius:5px;padding:2px 6px;margin-left:8px;b
 .sect[data-when="clock_out"] .grid2{grid-template-columns:minmax(0,1fr)}
 /* Wide viewports (desktop): widen the card and pack the config form into two
    masonry-flow columns so it isn't a long, skinny strip. Column-flow (not grid)
-   keeps a short group from waiting on a tall neighbour's row height. Status
+   keeps a short group from waiting on a tall neighbor's row height. Status
    readout stays full-width above. */
 @media (min-width:760px){
 .unit{max-width:900px}
@@ -258,7 +258,7 @@ fetch('/transport?out='+b.dataset.out+'&play='+b.dataset.play,{method:'POST'}).c
 // Per-output transport (ESP-011). Each output has ONE master: Link when its
 // "follow Link" switch is on and the session publishes transport, otherwise you.
 // A Link-owned output shows the SESSION's play state (its manual launch state is
-// frozen and would lie) and its toggle greys out.
+// frozen and would lie) and its toggle grays out.
 function outFollows(o){var cb=document.querySelector('input[name="clk'+o+'_follow"]');return !!(cb&&cb.checked)}
 function showLaunch(a,d){
 Array.prototype.forEach.call(document.querySelectorAll('.tgl'),function(b){
@@ -396,7 +396,7 @@ static std::string build_outputs()
              + "><span class=\"track\"><span class=\"knob\"></span></span><span class=\"swlbl\"></span></label>";
         // ESP-011: one Touch-style toggle per output (stopped/arming/playing), plus
         // the per-output transport master. Follow Link on => this output tracks the
-        // session and its toggle greys out; off => the toggle is yours.
+        // session and its toggle grays out; off => the toggle is yours.
         // ESP-019: the key that fires this toggle is printed on it. Clock Out 1..4 are
         // data-out 0..3, so the badge is the 1-based label the user already reads.
         s += std::string("<div class=\"fld\"><span class=\"pre\">RUN</span>")
@@ -456,7 +456,7 @@ static std::string build_voice()
     return s;
 }
 
-// LED-strip customization controls (P4-019): brightness, pattern, fade, colours —
+// LED-strip customization controls (P4-019): brightness, pattern, fade, colors —
 // all on the /live path so they apply instantly with no reboot.
 static std::string build_led()
 {
@@ -748,7 +748,7 @@ void ks_web_config_persist_tick(void)
     if (!s_cfg) return;
 
     /* ESP-037: while a Link session is DRIVING, remember its tempo as ours -- the same
-     * behaviour the Touch has. Link teaches the box the tempo; when Link goes away the
+     * behavior the Touch has. Link teaches the box the tempo; when Link goes away the
      * box keeps playing it (the arbiter's free-run seed, applied by the clock task) AND
      * persists it, so a power-cycle comes back at the last tempo it actually played.
      *
@@ -869,7 +869,7 @@ void ks_web_start(KsConfig* cfg, volatile uint32_t* gen, SemaphoreHandle_t cfg_m
     httpd_handle_t server = NULL;
     httpd_config_t hcfg = HTTPD_DEFAULT_CONFIG();
     // P4-037: purge the least-recently-used connection when httpd's pool is full, rather
-    // than refusing the new one. Defence in depth beside the real fix (LWIP_MAX_SOCKETS=16
+    // than refusing the new one. Defense in depth beside the real fix (LWIP_MAX_SOCKETS=16
     // in sdkconfig.defaults): the pool is 7 with 3 reserved internally, so 4 client slots,
     // and a desktop browser opens up to 6 keep-alive connections to one host.
     hcfg.lru_purge_enable = true;

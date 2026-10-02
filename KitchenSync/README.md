@@ -185,7 +185,7 @@ clock source to verify: **MIDI clock IN → BPM** (P4-011 stage 1).
 **Link Audio** (P4-032) — the P4 can stream its mic into an Ableton Live 12.4
 session as a Link Audio channel, in sync. That lives in `../LinkAudioPoC/`, not
 in this firmware, because it links Ableton's **GPLv2** SDK. Integrating it means
-clearing a commercial-licence conversation with Ableton first. Three tickets
+clearing a commercial-license conversation with Ableton first. Three tickets
 (P4-032 productization, ESP-008 USB interface ingest, ESP-010 transport
 proposal) are blocked on that one email.
 

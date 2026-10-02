@@ -1,5 +1,5 @@
 // Host tests for the pure customizable visual-metronome renderer (P4-018/019):
-// three patterns (chase / flash / fill), configurable colours, brightness, fade.
+// three patterns (chase / flash / fill), configurable colors, brightness, fade.
 #include "unity.h"
 #include "metro_strip.h"
 #include <stdbool.h>
@@ -30,7 +30,7 @@ void test_chase_downbeat_first_block_accent(void) {
 void test_chase_beat_two_block_beat_color(void) {
     metro_strip_render(1.0, 4, METRO_STRIP_PIXELS, &cfg, px);
     TEST_ASSERT_TRUE(px[2].g > 0 && px[3].g > 0);
-    TEST_ASSERT_EQUAL_UINT8(0, px[2].r);                // beat colour is green (no red)
+    TEST_ASSERT_EQUAL_UINT8(0, px[2].r);                // beat color is green (no red)
     TEST_ASSERT_EQUAL_INT(2, count());
 }
 
@@ -61,7 +61,7 @@ void test_flash_lights_all_pixels(void) {
     cfg.mode = METRO_STRIP_FLASH;
     metro_strip_render(1.0, 4, METRO_STRIP_PIXELS, &cfg, px);
     TEST_ASSERT_EQUAL_INT(METRO_STRIP_PIXELS, count());
-    TEST_ASSERT_EQUAL_UINT8(0, px[5].r);               // beat colour (green)
+    TEST_ASSERT_EQUAL_UINT8(0, px[5].r);               // beat color (green)
 }
 
 void test_flash_downbeat_is_accent(void) {
@@ -91,7 +91,7 @@ void test_fill_grows(void) {
     TEST_ASSERT_TRUE(count() > a);
 }
 
-// --- BRIGHTNESS + COLOURS ------------------------------------------------
+// --- BRIGHTNESS + COLORS ------------------------------------------------
 
 void test_brightness_scales_down(void) {
     metro_strip_render(2.0, 4, METRO_STRIP_PIXELS, &cfg, px);   // bright 100
@@ -111,7 +111,7 @@ void test_custom_colors_used(void) {
 /* ---- ESP-009: standby heartbeat ---------------------------------------- */
 // Separate entry point from metro_strip_render: standby is not a beat pattern,
 // it has no beat. Slow sinusoidal breath over the whole strip in the beat
-// colour, dim, so "waiting for play" reads as alive-and-idle.
+// color, dim, so "waiting for play" reads as alive-and-idle.
 
 // Trough and peak of the breath differ, and neither is fully dark -- a strip
 // that reaches zero looks like a board that crashed between blinks.

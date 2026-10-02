@@ -31,7 +31,7 @@ extern "C" {
 // so the UI can render "starting on next bar..." rather than a dead button.
 // `playing` is the session's real transport state and `link_owns` is true once a
 // Link peer has published StartStopState (ks_tick arbitration): when link_owns is
-// true the manual PLAY/STOP buttons are ignored, so the UI greys them and shows
+// true the manual PLAY/STOP buttons are ignored, so the UI grays them and shows
 // the session's `playing` state instead of the (frozen) manual launch state.
 // `tick` is the 1 ms clock task's health (P4-038), emitted as the same
 // "drop"/"burst"/"gap"/"work"/"over"/"core"/"w_beats"/"w_clock" block X32Link

@@ -94,7 +94,7 @@ never on USB-host presence — the RC-505 runs headless.
 3. **Trimmed web + captive portal + OTA.** `ktouch_web` (wifi + clock + transport +
    quantum; reuses `ui_chrome_css/js` + `ui_result_page/ui_update_page`). AP
    `KSTouch-Config`. `/status`, `/update`. Delete Inc1 compile-time creds.
-4. Polish: touch quantum ±, phase-dot colour, mDNS (ESP-014), OTA rollback.
+4. Polish: touch quantum ±, phase-dot color, mDNS (ESP-014), OTA rollback.
 
 ## Prereq refactor in X32Link (Inc2)
 

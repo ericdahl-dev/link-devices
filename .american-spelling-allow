@@ -1,0 +1,4 @@
+# American spelling checker allowlist (see ericdahl-dev/.github scripts/american_spelling.py)
+
+# Vendored ThrowTheSwitch Unity test framework: third-party code, kept as upstream ships it.
+path: lib/unity/

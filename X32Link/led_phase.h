@@ -24,11 +24,11 @@ extern "C" {
 // decision is fully described by its inputs).
 bool led_phase_should_flash(float prev_phase, float phase, bool valid);
 
-// LNK-039: which colour should this flash be, at what level? Picks the
+// LNK-039: which color should this flash be, at what level? Picks the
 // accent for the bar downbeat (int part of `bar_phase` == 0, same rule as
-// the touch dot) when `bar_valid`, else the beat colour; then scales each
+// the touch dot) when `bar_valid`, else the beat color; then scales each
 // channel by bright/255 (40 reproduces the old hardcoded NeoPixel level).
-// Colours are 0xRRGGBB, matching dot_beat_color/dot_accent_color.
+// Colors are 0xRRGGBB, matching dot_beat_color/dot_accent_color.
 uint32_t led_flash_rgb(uint32_t beat_rgb, uint32_t accent_rgb, float bar_phase,
                        bool bar_valid, uint8_t bright);
 

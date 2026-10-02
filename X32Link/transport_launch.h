@@ -5,7 +5,7 @@
 // grid, so gear started from the web UI lands in time with the Link session.
 //
 // Start is quantized, Stop is immediate. That asymmetry is deliberate: it is
-// Ableton's own launch behaviour and what muscle memory expects.
+// Ableton's own launch behavior and what muscle memory expects.
 //
 // One instance per clock output (P4-010 gives each output its own division,
 // phase and swing; ESP-011 gives each its own transport, so the drum machine

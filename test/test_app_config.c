@@ -201,7 +201,7 @@ void test_set_model_ignores_invalid_model(void) {
     TEST_ASSERT_EQUAL_INT(7, cfg.fx_slot);
 }
 
-// LNK-036: phase display mode + dot colours.
+// LNK-036: phase display mode + dot colors.
 void test_defaults_phase_display_is_sweep(void) {
     AppConfig cfg; config_defaults(&cfg);
     TEST_ASSERT_EQUAL_INT(0, cfg.phase_display_mode);          // 0 = sweep wheel

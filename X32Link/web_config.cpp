@@ -22,7 +22,7 @@ extern AppConfig g_config;
 extern void config_save(const AppConfig*);
 
 // ARC-022: /live marks this dirty; web_config_handle() writes the blob once the edits
-// settle. Marked rather than written because config is ONE nvs blob -- a colour picker
+// settle. Marked rather than written because config is ONE nvs blob -- a color picker
 // dragged across the wheel emits a POST per frame.
 static ConfigPersist s_persist;
 // Live tempo comes from the tempo_snapshot seam (ARC-001): one atomic read
@@ -128,7 +128,7 @@ form .row:nth-child(2){animation-delay:.10s}form .row:nth-child(3){animation-del
 <label class="sw"><input type="checkbox" name="midi_clock_out" value="1" %MCKCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
 </div>
 <div class="row">
-<div class="cap"><label>Phase Display</label><span class="hint">beat-flash dot vs sweep wheel &middot; colours also set the beat LED</span></div>
+<div class="cap"><label>Phase Display</label><span class="hint">beat-flash dot vs sweep wheel &middot; colors also set the beat LED</span></div>
 <label class="sw"><input type="checkbox" class="live" name="phase_flash" value="1" %PHFLASHCHK%><span class="track"><span class="knob"></span></span><span class="swlbl"></span></label>
 <div class="fld" style="margin-top:6px"><span class="pre">BEAT</span><input type="color" class="live" name="dot_beat" value="%DOTBEAT%"></div>
 <div class="fld" style="margin-top:6px"><span class="pre">BAR1</span><input type="color" class="live" name="dot_acc" value="%DOTACC%"></div>
@@ -378,19 +378,19 @@ static void handle_status() {
  *   led             It really does have one (a NeoPixel beat LED). */
 static void handle_config_json() {
     /* KsCaps.led means an ADDRESSABLE strip -- brightness, mode, fade, beat/accent
-     * colour. That is only true on the LED_RGB builds (the QT Py's NeoPixel). The
+     * color. That is only true on the LED_RGB builds (the QT Py's NeoPixel). The
      * headless board's LED is a plain on/off pin, and the Waveshare touch board has no
      * MCU-controlled LED at all (LED_NONE).
      *
      * So this is #if'd, not hardcoded true. Claiming `led` on a board with a bare
-     * indicator would make a client draw colour pickers and a brightness slider for
-     * hardware that cannot honour any of them -- which is the ENTIRE point of caps, and
+     * indicator would make a client draw color pickers and a brightness slider for
+     * hardware that cannot honor any of them -- which is the ENTIRE point of caps, and
      * the same lie as reporting a metronome on a board with no speaker.
      *
      * Capabilities are a property of the BUILD. Solder a WS2812 on and rebuild with
      * LED_RGB, and the LED section appears with no client change at all. */
     /* ESP-037: the QT Py NeoPixel was the only addressable-strip X32Link and it's gone,
-     * so no X32Link build has a controllable colour strip: the Super Mini's LED is a
+     * so no X32Link build has a controllable color strip: the Super Mini's LED is a
      * bare on/off pin, the Waveshare has none. led = false. */
     static const KsCaps caps = {
         .metronome   = false,   // no speaker
@@ -484,11 +484,11 @@ static void handle_save() {
 }
 
 // LNK-037: apply live-safe fields to the running config with no reboot, mirroring the
-// P4's /live. touch_display reads g_config each render, so the phase dot mode/colours
+// P4's /live. touch_display reads g_config each render, so the phase dot mode/colors
 // update instantly.
 //
 // ARC-022: these edits are now KEPT. This handler had the same bug as the P4's and the
-// Touch's -- it applied the value and returned, so a colour or quantum set here looked
+// Touch's -- it applied the value and returned, so a color or quantum set here looked
 // right until the next power cycle and then quietly wasn't. It marks the config dirty
 // now; web_config_handle() writes the blob once the edits settle.
 static void handle_live() {

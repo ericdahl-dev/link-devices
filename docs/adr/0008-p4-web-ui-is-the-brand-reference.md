@@ -6,7 +6,7 @@ Status: accepted
 ## Context
 
 Three firmwares serve a rack-panel web config page and share one design system:
-`ui_chrome.{h,c}` (ARC-017) owns the *look* (colour tokens, panel, screws, tempo
+`ui_chrome.{h,c}` (ARC-017) owns the *look* (color tokens, panel, screws, tempo
 glass, switches, Save button) and the client plumbing (`poll()`, `showBpm`,
 `postLive`). Each firmware keeps its **own form** — the fields and the
 page-specific CSS/markup that extend the chrome — because the feature sets differ
@@ -39,7 +39,7 @@ scaled to its own feature set:
   master toggle and reveal when it flips on (`syncSect`).
 - **Structured `.fld` fields** with `.pre` prefix labels — never inline `style=`.
 - Help text is a **token-driven class** (`.hint` / equivalent), never a
-  repurposed `.cap` with inline colour/spacing.
+  repurposed `.cap` with inline color/spacing.
 - A **responsive desktop treatment** (two-column form, 4-across status "meter
   bridge") when the form is long enough to benefit.
 

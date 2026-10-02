@@ -155,7 +155,7 @@ uint32_t usb_midi_host_tx(void) { return s_tx; }
  * with one in-flight transfer (~1 ms) and the fan-out calling it once per output
  * back-to-back inside a 1 ms tick, ~3 of every 4 packets were discarded and only the
  * first output ever reached USB gear. Callers must now batch a tick's events into ONE
- * transfer (usb_midi_batch) and honour this return value. */
+ * transfer (usb_midi_batch) and honor this return value. */
 bool usb_midi_host_send(const uint8_t* data, int len)
 {
     if (!s_ready || len <= 0 || len > 64) return false;

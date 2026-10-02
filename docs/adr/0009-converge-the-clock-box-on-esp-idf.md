@@ -46,7 +46,7 @@ a *related* product as if it were the repo.
 
 **4. ESP-024 is a forcing function.** Its thesis is hardware-timed RMT edges and `IRAM_ATTR`
 placement. The Arduino core ships a **fixed sdkconfig** — no `menuconfig` — so the knobs that
-decide jitter (IRAM, cache behaviour, interrupt allocation) are not reachable. Doing that work
+decide jitter (IRAM, cache behavior, interrupt allocation) are not reachable. Doing that work
 on the framework that hides the controls, and then doing it a second time on the P4, is the
 worst of both. The timing work should happen once, on the framework that exposes the controls,
 in the writer that ships.

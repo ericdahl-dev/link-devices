@@ -89,7 +89,7 @@ bool ktouch_migrate_legacy_config(KsConfig* out, const void* blob, size_t blob_l
             return false;   // not a legacy Touch version
     }
 
-    // A migration is not a licence to skip the guard — bit-rot is bit-rot at any version.
+    // A migration is not a license to skip the guard — bit-rot is bit-rot at any version.
     // Same gate a verbatim KsConfig load runs through. On failure, restore clean defaults
     // so the caller never sees a half-migrated struct.
     if (!ks_config_valid(out)) {

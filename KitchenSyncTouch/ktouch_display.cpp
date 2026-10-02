@@ -99,7 +99,7 @@ static bool read_touch(axs_touch_t *t) {
     return axs5106l_parse(buf, sizeof(buf), t) == 0;
 }
 
-// The whole lower area is one transport toggle; colour + label follow the state.
+// The whole lower area is one transport toggle; color + label follow the state.
 static void draw_toggle(int state) {
     uint32_t bg; const char* big; const char* hint;
     if (state == TL_RUNNING)      { bg = 0x1f7a0eu; big = "PLAYING";  hint = "tap to STOP"; }

@@ -47,7 +47,7 @@ static bool migrate_legacy(AppConfig* cfg) {
     prefs.getString("wifi_ssid", legacy.wifi_ssid, sizeof(legacy.wifi_ssid));
     prefs.getString("wifi_pass", legacy.wifi_pass, sizeof(legacy.wifi_pass));
 
-    // A migration is not a licence to skip the guard: garbage in the old keys is
+    // A migration is not a license to skip the guard: garbage in the old keys is
     // still garbage. Same gate the blob path runs through.
     if (!config_validate(&legacy)) return false;
 

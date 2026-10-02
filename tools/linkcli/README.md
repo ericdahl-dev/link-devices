@@ -41,7 +41,7 @@ with asio bundled under `modules/asio-standalone`. Override the SDK path with
 
 **A peer that joins a session that is already playing stays stopped.** This is Link's
 design, not a bug: start/stop is last-writer-wins by timestamp (`Controller.hpp:89`), and
-a booting peer initialises its start/stop state with `timestamp = hostTime`
+a booting peer initializes its start/stop state with `timestamp = hostTime`
 (`Controller.hpp:67`) — so its fresh "stopped" is *newer* than your earlier "playing" and
 wins. Tempo, by contrast, *is* adopted by late joiners, which makes the asymmetry extra
 confusing.

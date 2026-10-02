@@ -141,7 +141,7 @@ void midi_clock_out_io_begin(void) {
      *
      * Core 1 is unchanged, and deliberately: Arduino's loopTask is on core 1 too
      * (CONFIG_ARDUINO_RUNNING_CORE=1), so the writer shares a core with the web server.
-     * It now out-prioritises everything there. What priority CANNOT fix is a flash-cache
+     * It now out-prioritizes everything there. What priority CANNOT fix is a flash-cache
      * stall, which freezes both cores regardless — which is exactly why the config write
      * in ARC-022 is debounced and kept on a low-priority task. */
     xTaskCreatePinnedToCore(midi_clock_out_task, "midi_clk_out", 2048, NULL, 19, NULL, 1);

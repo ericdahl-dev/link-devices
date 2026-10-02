@@ -189,7 +189,7 @@ void test_led_toggle(void) {
     TEST_ASSERT_FALSE(ks_config_set(&c, "led", "2"));         // only 0/1
 }
 
-// Strip customization (P4-019): brightness, mode, fade, and #rrggbb colours.
+// Strip customization (P4-019): brightness, mode, fade, and #rrggbb colors.
 void test_led_customization(void) {
     TEST_ASSERT_TRUE(ks_config_set(&c, "led_bright", "40"));
     TEST_ASSERT_EQUAL_INT(40, c.led_brightness);
@@ -272,7 +272,7 @@ void test_live_safe_copy_carries_live_fields_not_wifi(void) {
 // ks_config_decode owns the "is this persisted blob safe to load?" decision, so
 // a struct-layout change falls back to clean defaults instead of loading bytes
 // shifted into the wrong fields. Pure: the caller (ks_config_nvs.c) hands over
-// whatever NVS held; every judgement happens here.
+// whatever NVS held; every judgment happens here.
 
 // A blob that a CURRENT-version firmware would have written: right version,
 // right size, valid contents.
@@ -465,7 +465,7 @@ void test_decode_unversioned_v1_sized_blob_still_defaults(void) {
 }
 
 // ESP-011 per-output transport master. Default 1 = Link owns transport once the
-// session publishes it -- the behaviour before this flag existed, so an upgraded
+// session publishes it -- the behavior before this flag existed, so an upgraded
 // unit acts exactly as it used to until the user opts an output into manual.
 void test_follow_link_defaults_to_link(void) {
     KsConfig c; ks_config_defaults(&c);

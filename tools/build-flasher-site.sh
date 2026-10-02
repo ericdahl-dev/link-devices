@@ -22,7 +22,7 @@ CACHE_ARG=()
 rm -rf "$SITE"
 mkdir -p "$SITE/firmware"
 
-# boot_app0.bin initialises otadata to boot app0. The core writes it on a normal upload,
+# boot_app0.bin initializes otadata to boot app0. The core writes it on a normal upload,
 # so we write it too. A blank otadata would ALSO boot app0 (the bootloader falls back),
 # but relying on fallback is not the same as stating intent -- and this is the file that
 # decides which slot a freshly-flashed device runs from.

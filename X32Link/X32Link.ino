@@ -95,12 +95,12 @@ static WifiConnPolicy g_wifi_pol;
 #define LED_STATUS_GREEN 0x00FF00  // WiFi-down blink stays this, never user-configurable
 
 #if defined(LED_RGB)
-static uint32_t s_led_rgb = 0;   // current flash colour, set per flash (LNK-039)
+static uint32_t s_led_rgb = 0;   // current flash color, set per flash (LNK-039)
 #endif
 
-// LNK-039: pick this flash's colour from the configured dot colours —
-// bar-1 accent when bar phase is available, plain beat colour otherwise.
-// Reads g_config at each flash, so /live colour edits apply immediately.
+// LNK-039: pick this flash's color from the configured dot colors —
+// bar-1 accent when bar phase is available, plain beat color otherwise.
+// Reads g_config at each flash, so /live color edits apply immediately.
 static void led_pick_color(bool bar_valid) {
 #if defined(LED_RGB)
     float bar_phase = bar_valid ? tempo_source_phase((float)g_config.quantum_beats) : 0.0f;
@@ -157,7 +157,7 @@ static void led_task(void*) {
             if (valid) {
                 float phase = tempo_source_phase(1.0f);
                 if (led_phase_should_flash(prev_phase, phase, valid)) {
-                    led_pick_color(true);   // LNK-039: bar-1 accent vs beat colour
+                    led_pick_color(true);   // LNK-039: bar-1 accent vs beat color
                     led_set(true);
                     vTaskDelay(pdMS_TO_TICKS(LED_FLASH_MS));
                     led_set(false);
@@ -171,7 +171,7 @@ static void led_task(void*) {
                 // against a stale value (no double-flash/stutter).
                 prev_phase = -1.0f;
                 if (tempo_source_beat()) {
-                    led_pick_color(false);  // no bar info in the sync gap: beat colour
+                    led_pick_color(false);  // no bar info in the sync gap: beat color
                     led_set(true);
                     vTaskDelay(pdMS_TO_TICKS(LED_FLASH_MS));
                     led_set(false);
@@ -191,7 +191,7 @@ static void led_task(void*) {
         if (wifi_down_blink_due(now_ms, last_wifi_blink_ms,
                                  WIFI_DOWN_BLINK_INTERVAL_MS, wifi_connected)) {
             last_wifi_blink_ms = now_ms;
-            // Diagnostic blink keeps a fixed colour: a dark user beat colour
+            // Diagnostic blink keeps a fixed color: a dark user beat color
             // (down to #000000) must never hide the "WiFi is down" signal.
 #if defined(LED_RGB)
             s_led_rgb = led_flash_rgb(LED_STATUS_GREEN, LED_STATUS_GREEN, 0.0f, false, LED_BRIGHTNESS);
