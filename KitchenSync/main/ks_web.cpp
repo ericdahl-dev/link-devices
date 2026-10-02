@@ -116,7 +116,7 @@ background:linear-gradient(180deg,#2a1512,#1c0f0d);color:#ff7a6b;transition:back
    a key nobody can see is not a feature. */
 .kbd{flex:none;font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--mut);
 border:1px solid var(--line);border-radius:5px;padding:2px 6px;margin-left:8px;background:#12161b}
-/* A key aimed at a Link-owned output must not silently do nothing: flash the greyed
+/* A key aimed at a Link-owned output must not silently do nothing: flash the grayed
    toggle and pulse the note that names the owner, so the user learns why. */
 @keyframes nak{0%,100%{border-color:var(--line);color:var(--mut)}30%,65%{border-color:var(--amber);color:var(--amber)}}
 @keyframes nakrow{0%,100%{background:transparent}30%{background:rgba(224,168,58,.14)}}
@@ -288,7 +288,7 @@ function outEnabled(o){var m=document.querySelector('input[name="clock_out"]');
 if(m&&!m.checked)return false;
 var cb=document.querySelector('input[name="clk'+o+'_en"]');return !!(cb&&cb.checked)}
 // A key on a Link-owned output must not act — but it must not fail *silently* either,
-// or the user concludes the feature is broken. Flash the greyed toggle and pulse the
+// or the user concludes the feature is broken. Flash the grayed toggle and pulse the
 // note that already says who owns the transport.
 function nak(b){
 if(b){b.classList.remove('nak');void b.offsetWidth;b.classList.add('nak');
